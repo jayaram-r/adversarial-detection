@@ -43,9 +43,18 @@ def id_two_nearest_neighbors(knn_distances):
                           number of points and `k` is the number of neighbors.
     :return: float value estimate of the intrinsic dimension.
     """
-    n, k = knn_distances.shape
     # Ratio of 2nd to 1st nearest neighbor distances
-    nn_ratio = knn_distances[:, 1] / np.clip(knn_distances[:, 0], sys.float_info.min, None)
+    mask = knn_distances[:, 1] > 0.
+    d2 = knn_distances[mask, 1]
+    d1 = knn_distances[mask, 0]
+    n = d1.shape[0]
+    nn_ratio = np.ones(n)
+    mask = d1 > 0.
+    nn_ratio[mask] = d2[mask] / d1[mask]
+    if mask[mask].shape[0] < n:
+        # Set the ratio to a very large value when the distance to the nearest neighbor is 0
+        v = 1e6 * np.max(nn_ratio)
+        nn_ratio[np.logical_not(mask)] = v
 
     # Empirical CDF of `nn_ratio`
     nn_ratio_sorted = np.sort(nn_ratio)

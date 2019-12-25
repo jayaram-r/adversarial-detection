@@ -37,3 +37,4 @@ ehthumbs.db
 Thumbs.db
 
 .ipynb_checkpoints/*
+notebooks/.ipynb_checkpoints/*
