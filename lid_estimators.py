@@ -25,7 +25,7 @@ def lid_mle_amsaleg(knn_distances):
     n, k = knn_distances.shape
     # Replace 0 distances with a very small float value
     knn_distances = np.clip(knn_distances, sys.float_info.min, None)
-    log_dist_ratio = np.log(knn_distances / knn_distances[:, -1].reshape((n, 1)))
+    log_dist_ratio = np.log(knn_distances) - np.log(knn_distances[:, -1].reshape((n, 1)))
     # lid_est = -k / np.sum(log_dist_ratio, axis=1)
     lid_est = -(k - 1) / np.sum(log_dist_ratio, axis=1)
 
@@ -43,27 +43,21 @@ def id_two_nearest_neighbors(knn_distances):
                           number of points and `k` is the number of neighbors.
     :return: float value estimate of the intrinsic dimension.
     """
-    # Ratio of 2nd to 1st nearest neighbor distances
+    # Ratio of 2nd to 1st nearest neighbor distances. Defined only if the 2nd nearest neighbor distance is > 0.
     mask = knn_distances[:, 1] > 0.
     d2 = knn_distances[mask, 1]
     d1 = knn_distances[mask, 0]
     n = d1.shape[0]
-    nn_ratio = np.ones(n)
-    mask = d1 > 0.
-    nn_ratio[mask] = d2[mask] / d1[mask]
-    if mask[mask].shape[0] < n:
-        # Set the ratio to a very large value when the distance to the nearest neighbor is 0
-        v = 1e6 * np.max(nn_ratio)
-        nn_ratio[np.logical_not(mask)] = v
+    log_nn_ratio = np.log(d2) - np.log(np.clip(d1, sys.float_info.min, None))
 
-    # Empirical CDF of `nn_ratio`
-    nn_ratio_sorted = np.sort(nn_ratio)
-    # Insert value 1 as the minimum value, which will have an empirical CDF of 0.
+    # Empirical CDF of `log_nn_ratio`
+    log_nn_ratio_sorted = np.sort(log_nn_ratio)
+    # Insert value `log(1) = 0` as the minimum, which will have an empirical CDF of 0.
     # This will ensure that the line passes through the origin
-    nn_ratio_sorted = np.insert(nn_ratio_sorted, 0, 1.0)
+    log_nn_ratio_sorted = np.insert(log_nn_ratio_sorted, 0, 0.)
     ecdf = np.arange(n + 1) / float(n + 1)
 
-    xs = np.log(nn_ratio_sorted)
+    xs = log_nn_ratio_sorted
     ys = -1 * np.log(1 - ecdf)
     # Fit a straight line. The slope of this line gives an estimate of the intrinsic dimension
     slope, intercept, _, _, _ = stats.linregress(xs, ys)
