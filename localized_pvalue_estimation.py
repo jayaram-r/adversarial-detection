@@ -15,6 +15,7 @@ import sys
 import multiprocessing
 from functools import partial
 from knn_index import KNNIndex
+from utils import get_num_jobs
 from sklearn.metrics import pairwise_distances
 
 
@@ -75,7 +76,7 @@ class averaged_KLPE_anomaly_detection:
         self.metric_kwargs = metric_kwargs
         self.shared_nearest_neighbors = shared_nearest_neighbors
         self.approx_nearest_neighbors = approx_nearest_neighbors
-        self.n_jobs = n_jobs
+        self.n_jobs = get_num_jobs(n_jobs)
         self.seed_rng = seed_rng
 
         self.data_train = None

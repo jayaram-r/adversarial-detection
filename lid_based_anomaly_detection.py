@@ -17,6 +17,7 @@ import numpy as np
 import sys
 from lid_estimators import lid_mle_amsaleg
 from knn_index import KNNIndex
+from utils import get_num_jobs
 
 
 class LID_based_anomaly_detection:
@@ -49,7 +50,7 @@ class LID_based_anomaly_detection:
         self.metric = metric
         self.metric_kwargs = metric_kwargs
         self.approx_nearest_neighbors = approx_nearest_neighbors
-        self.n_jobs = n_jobs
+        self.n_jobs = get_num_jobs(n_jobs)
         self.seed_rng = seed_rng
 
         self.num_samples = None

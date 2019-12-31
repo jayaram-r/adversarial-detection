@@ -1,5 +1,6 @@
 
 import numpy as np
+from multiprocessing import cpu_count
 from generate_data import MFA_model
 from sklearn.metrics import (
     roc_curve,
@@ -99,3 +100,23 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=0.01, verbose=True):
             print("{:.6f}, {:.6f}".format(tpr[i], fpr[i]))
 
     return au_roc, au_roc_partial, avg_prec, tpr, fpr
+
+
+def get_num_jobs(n_jobs):
+    """
+    Number of processes or jobs to use for multiprocessing.
+
+    :param n_jobs: None or int value that specifies the number of parallel jobs. If set to None, -1, or 0, this will
+                   use all the available CPU cores. If set to negative values, this value will be subtracted from
+                   the available number of CPU cores. For example, `n_jobs = -2` will use `cpu_count - 2`.
+    :return: (int) number of jobs to use.
+    """
+    cc = cpu_count()
+    if n_jobs is None or n_jobs == -1 or n_jobs == 0:
+        n_jobs = cc
+    elif n_jobs < -1:
+        n_jobs = max(1, cc + n_jobs)
+    else:
+        n_jobs = min(n_jobs, cc)
+
+    return n_jobs

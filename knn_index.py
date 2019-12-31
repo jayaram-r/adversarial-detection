@@ -18,6 +18,7 @@ from metrics_custom import (
     distance_SNN,
     remove_self_neighbors
 )
+from utils import get_num_jobs
 import warnings
 from numba import NumbaPendingDeprecationWarning
 
@@ -66,7 +67,7 @@ class KNNIndex:
         self.metric_kwargs = metric_kwargs
         self.shared_nearest_neighbors = shared_nearest_neighbors
         self.approx_nearest_neighbors = approx_nearest_neighbors
-        self.n_jobs = n_jobs
+        self.n_jobs = get_num_jobs(n_jobs)
         self.seed_rng = seed_rng
 
         N, d = data.shape

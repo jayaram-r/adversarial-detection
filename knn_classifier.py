@@ -17,6 +17,7 @@ from dimension_reduction_methods import (
     wrapper_data_projection,
     METHODS_LIST
 )
+from utils import get_num_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -55,9 +56,9 @@ def knn_parameter_search(data, labels, k_range,
     :param skip_preprocessing: Set to True to skip the pre-processing step using PCA to remove noisy features
                                with low variance.
     :param pca_cutoff: cumulative variance cutoff value in (0, 1]. This value is used for PCA.
-    :param n_jobs: int value that specifies the number of parallel jobs. If set to -1 or 0, this will use all the
-                   available CPU cores. If set to negative values, this value will be subtracted from the available
-                   number of CPU cores. For example, `n_jobs = -2` will use `cpu_count - 2`.
+    :param n_jobs: None or int value that specifies the number of parallel jobs. If set to None, -1, or 0, this will
+                   use all the available CPU cores. If set to negative values, this value will be subtracted from
+                   the available number of CPU cores. For example, `n_jobs = -2` will use `cpu_count - 2`.
     :param seed_rng: same as the function `wrapper_knn`.
 
     :return:
@@ -69,13 +70,7 @@ def knn_parameter_search(data, labels, k_range,
                      is performed over the data dimension.
     """
     # Number of parallel jobs
-    cc = multiprocessing.cpu_count()
-    if n_jobs == -1 or n_jobs == 0:
-        n_jobs = cc
-    elif n_jobs < -1:
-        n_jobs = max(1, cc + n_jobs)
-    else:
-        n_jobs = min(n_jobs, cc)
+    n_jobs = get_num_jobs(n_jobs)
 
     # Unique labels
     labels_unique = np.unique(labels)
@@ -291,7 +286,7 @@ class KNNClassifier:
         self.metric_kwargs = metric_kwargs
         self.shared_nearest_neighbors = shared_nearest_neighbors
         self.approx_nearest_neighbors = approx_nearest_neighbors
-        self.n_jobs = n_jobs
+        self.n_jobs = get_num_jobs(n_jobs)
         self.seed_rng = seed_rng
 
         self.index_knn = None

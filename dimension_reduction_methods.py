@@ -33,6 +33,7 @@ import multiprocessing
 from functools import partial
 from lid_estimators import estimate_intrinsic_dimension
 from knn_index import KNNIndex
+from utils import get_num_jobs
 import logging
 
 
@@ -230,7 +231,7 @@ class LocalityPreservingProjection:
         self.metric = metric
         self.metric_kwargs = metric_kwargs
         self.approx_nearest_neighbors = approx_nearest_neighbors
-        self.n_jobs = n_jobs
+        self.n_jobs = get_num_jobs(n_jobs)
         self.seed_rng = seed_rng
 
         if self.edge_weights not in {'simple', 'snn', 'heat_kernel'}:
@@ -458,7 +459,7 @@ class NeighborhoodPreservingProjection:
         self.metric = metric
         self.metric_kwargs = metric_kwargs
         self.approx_nearest_neighbors = approx_nearest_neighbors
-        self.n_jobs = n_jobs
+        self.n_jobs = get_num_jobs(n_jobs)
         self.reg_eps = reg_eps
         self.seed_rng = seed_rng
 
