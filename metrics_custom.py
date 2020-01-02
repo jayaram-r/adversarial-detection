@@ -106,6 +106,7 @@ def distance_angular_3tensors(x, y, shape=(1, 1, 1)):
     return np.arccos(s)
 
 
+# TODO: SNN similarity should be zero if either `x` or `y` is not in the k-neighborhood set of the other point
 @njit()
 def distance_SNN(x, y):
     """
