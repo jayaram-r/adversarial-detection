@@ -11,12 +11,12 @@ from torch.optim.lr_scheduler import StepLR
 class SVHN(nn.Module):
     def __init__(self):
         super(SVHN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 32, 3, 1)
-        self.conv2 = nn.Conv2d(32, 64, 3, 1)
+        self.conv1 = nn.Conv2d(3, 64, 3, 1)
+        self.conv2 = nn.Conv2d(64, 64, 3, 1)
         self.dropout1 = nn.Dropout2d(0.5)
         self.dropout2 = nn.Dropout2d(0.5)
         self.dropout3 = nn.Dropout2d(0.5)
-        self.fc1 = nn.Linear(9216, 512)
+        self.fc1 = nn.Linear(12544, 512)
         self.fc2 = nn.Linear(512, 128)
         self.fc3 = nn.Linear(128, 10)
 

@@ -9,6 +9,10 @@ from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR
 from nets.mnist import *
 from nets.cifar10 import *
+from nets.svhn import *
+import os
+
+os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
     model.train()
@@ -60,7 +64,7 @@ def main():
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N', help='how many batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    parser.add_argument('--model-type', default='cifar10', help='model type')
+    parser.add_argument('--model-type', default='svhn', help='model type')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -70,28 +74,33 @@ def main():
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     if args.model_type == 'mnist':
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])), batch_size=args.batch_size, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, transform=transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])), batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
+        train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform, batch_size=args.batch_size, shuffle=True, **kwargs))
+        test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, transform=transform, batch_size=args.test_batch_size, shuffle=True, **kwargs))
         model = MNIST().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+    
     elif args.model_type == 'cifar10':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_Size, shuffle=True, num_workers=2)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
         testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, num_workers=2)
         model = CIFAR10().to(device)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+    
     elif args.model_type == 'svhn':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.SVHN(root='./data', train=True, download=True, transform=transform)
-        train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_Size, shuffle=True, num_workers=2)
-        testset = torchvision.datasets.SVHN(root='./data', train=False, download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_Size, shuffle=True, num_workers=2)
+        trainset = torchvision.datasets.SVHN(root='./data', split='train', download=True, transform=transform)
+        train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=2)
+        testset = torchvision.datasets.SVHN(root='./data', split='test', download=True, transform=transform)
+        test_loader = torch.utils.data.DataLoader(trainset, batch_size=args.test_batch_size, shuffle=True, num_workers=2)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+    
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
+    
     for epoch in range(1, args.epochs + 1):
         if args.model_type == 'mnist':
             train(args, model, device, train_loader, optimizer, epoch)
@@ -105,7 +114,12 @@ def main():
         scheduler.step()
 
     if args.save_model:
-        torch.save(model.state_dict(), "mnist_cnn.pt")
+        if args.model_type == 'mnist':
+            torch.save(model.state_dict(), "./models/mnist_cnn.pt")
+        elif args.model_type == 'cifar10':
+            torch.save(model.state_dict(), "./models/cifar10_cnn.pt")
+        elif args.model_type == 'svhn':
+            torch.save(model.state_dict(), "./models/svhn_cnn.pt")
 
 if __name__ == '__main__':
     main()
