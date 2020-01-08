@@ -78,6 +78,7 @@ def main():
     parser.add_argument('--model-type', default='mnist', help='model type')
     parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
     parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
+    parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
     parser.add_argument('--train', type=bool, default=False, help='commence training')
     parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
@@ -129,27 +130,46 @@ def main():
             elif args.model_type == 'cifar10':
                 model = train(args, model, device, train_loader, optimizer, epoch, criterion)
                 model = test(args, model, device, test_loader, criterion)
+                bounds = (-255, 255)
+                num_classes = 10
             elif args.model_type == 'svhn':
                 model = train(args, model, device, train_loader, optimizer, epoch)
                 model = test(args, model, device, test_loader)
+                bounds = (-255, 255)
+                num_classes = 10
             scheduler.step()
     elif args.ckpt:
-        if args.model_type == 'mnist':
-            model.load_state_dict(torch.load('./models/mnist_cnn.pt'))
-        if args.model_type == 'cifar10':
-            model.load_state_dict(torch.load('./models/cifar10_cnn.pt'))
-        if args.model_type == 'svhn':
-            model.load_state_dict(torch.load('./models/svhn_cnn.pt'))
+        model_path = './models/'+args.model_type+'_cnn.pt'
+        if os.path.isdir(model_path) == True:
+            if args.model_type == 'mnist':
+                model.load_state_dict(torch.load(model_path))
+            if args.model_type == 'cifar10':
+                model.load_state_dict(torch.load(model_path))
+            if args.model_type == 'svhn':
+                model.load_state_dict(torch.load(model_path))
+        else:
+            print(model_path+' not found')
 
     if args.attack:
-        if args.adv_attack == 'FGSM':
-            model.to(device)
-            model.eval()
-            fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
-            attack_model = foolbox.attacks.FGSM(fmodel, distance=foolbox.distances.Linf)
-            attack(attack_model, device, test_loader)
-            #adversarials = attack_model(images, labels)
+        distance = None
+        if args.distance = '2':
+            distance = foolbox.distances.Linf
+        elif args.distance = 'inf':
+            distance = foolbox.distances.Linf
 
+        model.to(device)
+        model.eval()
+        fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
+        
+        if args.adv_attack == 'FGSM':
+            attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) #distance=foolbox.distances.Linf)
+        if args.adv_attack = 'PGD':
+            attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
+        if args.adv_attack = 'CW':
+            attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
+        attack(attack_model, device, test_loader)
+        #adversarials = attack_model(images, labels)
+    
     if args.save_model:
         if args.model_type == 'mnist':
             torch.save(model.state_dict(), "./models/mnist_cnn.pt")
