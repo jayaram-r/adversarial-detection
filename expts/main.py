@@ -13,7 +13,6 @@ from nets.svhn import *
 import os
 import foolbox
 
-os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
     model.train()
@@ -78,7 +77,10 @@ def main():
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
     parser.add_argument('--model-type', default='mnist', help='model type')
     parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
-    parser.add_argument('--attack', default=False, help='type of adversarial attack')
+    parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
+    parser.add_argument('--train', type=bool, default=False, help='commence training')
+    parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
+    parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -86,6 +88,8 @@ def main():
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
+    
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
@@ -114,20 +118,28 @@ def main():
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
     scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-    
-    for epoch in range(1, args.epochs + 1):
+   
+    if args.train:
+        for epoch in range(1, args.epochs + 1):
+            if args.model_type == 'mnist':
+                model = train(args, model, device, train_loader, optimizer, epoch)
+                model = test(args, model, device, test_loader)
+                bounds = (-255,255)
+                num_classes = 10
+            elif args.model_type == 'cifar10':
+                model = train(args, model, device, train_loader, optimizer, epoch, criterion)
+                model = test(args, model, device, test_loader, criterion)
+            elif args.model_type == 'svhn':
+                model = train(args, model, device, train_loader, optimizer, epoch)
+                model = test(args, model, device, test_loader)
+            scheduler.step()
+    elif args.ckpt:
         if args.model_type == 'mnist':
-            model = train(args, model, device, train_loader, optimizer, epoch)
-            model = test(args, model, device, test_loader)
-            bounds = (-255,255)
-            num_classes = 10
-        elif args.model_type == 'cifar10':
-            model = train(args, model, device, train_loader, optimizer, epoch, criterion)
-            model = test(args, model, device, test_loader, criterion)
-        elif args.model_type == 'svhn':
-            model = train(args, model, device, train_loader, optimizer, epoch)
-            model = test(args, model, device, test_loader)
-        scheduler.step()
+            model.load_state_dict(torch.load('./models/mnist_cnn.pt'))
+        if args.model_type == 'cifar10':
+            model.load_state_dict(torch.load('./models/cifar10_cnn.pt'))
+        if args.model_type == 'svhn':
+            model.load_state_dict(torch.load('./models/svhn_cnn.pt'))
 
     if args.attack:
         if args.adv_attack == 'FGSM':
