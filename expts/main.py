@@ -11,6 +11,7 @@ from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
 import os
+import foolbox
 
 os.environ["CUDA_VISIBLE_DEVICES"]="2"
 
@@ -27,6 +28,7 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
         optimizer.step()
         if batch_idx % args.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format( epoch, batch_idx * len(data), len(train_loader.dataset), 100. * batch_idx / len(train_loader), loss.item()))
+    return model
 
 def test(args, model, device, test_loader, criterion=None):
     model.eval()
@@ -35,6 +37,7 @@ def test(args, model, device, test_loader, criterion=None):
     total = 0
     with torch.no_grad():
         for data, target in test_loader:
+            #print(data.shape, target.shape, type(data), type(target))
             data, target = data.to(device), target.to(device)
             output = model(data)
             if criterion == None:
@@ -51,20 +54,30 @@ def test(args, model, device, test_loader, criterion=None):
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format( test_loss, correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
     else:
         print('Accuracy of the network on the %d test images: %d %%' % (total, 100 * correct / total))
+    return model
+    
+def attack(attack_model, device, test_loader):
+    #model.eval()
+    for data, target in test_loader:
+        data, target = data.to(device), target.to(device)
+        data_numpy = (data.data.cpu()).numpy()
+        target_numpy = (target.data.cpu()).numpy()
+        adversarials = attack_model(data_numpy, target_numpy) #, target_numpy, unpack=False)
 
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='Arguments')
     parser.add_argument('--batch-size', type=int, default=64, metavar='N', help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 14)')
+    parser.add_argument('--epochs', type=int, default=1, metavar='N', help='number of epochs to train (default: 14)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR', help='learning rate (default: 1.0)')
     parser.add_argument('--gamma', type=float, default=0.7, metavar='M', help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=10, metavar='N', help='how many batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    parser.add_argument('--model-type', default='svhn', help='model type')
+    parser.add_argument('--model-type', default='mnist', help='model type')
+    parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -75,8 +88,8 @@ def main():
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform, batch_size=args.batch_size, shuffle=True, **kwargs))
-        test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, transform=transform, batch_size=args.test_batch_size, shuffle=True, **kwargs))
+        train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, transform=transform), batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = MNIST().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
@@ -103,15 +116,26 @@ def main():
     
     for epoch in range(1, args.epochs + 1):
         if args.model_type == 'mnist':
-            train(args, model, device, train_loader, optimizer, epoch)
-            test(args, model, device, test_loader)
+            model = train(args, model, device, train_loader, optimizer, epoch)
+            model = test(args, model, device, test_loader)
+            bounds = (-255,255)
+            num_classes = 10
         elif args.model_type == 'cifar10':
-            train(args, model, device, train_loader, optimizer, epoch, criterion)
-            test(args, model, device, test_loader, criterion)
+            model = train(args, model, device, train_loader, optimizer, epoch, criterion)
+            model = test(args, model, device, test_loader, criterion)
         elif args.model_type == 'svhn':
-            train(args, model, device, train_loader, optimizer, epoch)
-            test(args, model, device, test_loader)
+            model = train(args, model, device, train_loader, optimizer, epoch)
+            model = test(args, model, device, test_loader)
         scheduler.step()
+
+    if args.adv_attack:
+        if args.adv_attack == 'FGSM':
+            model.to(device)
+            model.eval()
+            fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
+            attack_model = foolbox.attacks.FGSM(fmodel, distance=foolbox.distances.Linf)
+            attack(attack_model, device, test_loader)
+            #adversarials = attack_model(images, labels)
 
     if args.save_model:
         if args.model_type == 'mnist':
