@@ -15,10 +15,13 @@ import foolbox
 import sys
 from pympler.asizeof import asizeof
 
-def train(args, model, device, train_loader, optimizer):
+def extract(args, model, device, train_loader, layers):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         output = model.layer_wise(data)
+        for i in range(len(layers)):
+            layers[i].append(output[i].detach().cpu().numpy())
+    return layers
 
 def main():
     # Training settings
@@ -30,13 +33,13 @@ def main():
     parser.add_argument('--gamma', type=float, default=0.7, metavar='M', help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=100, metavar='N', help='how many batches to wait before logging training status')
-    parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
+    #parser.add_argument('--log-interval', type=int, default=100, metavar='N', help='how many batches to wait before logging training status')
+    #parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
     parser.add_argument('--model-type', default='mnist', help='model type')
-    parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
-    parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
-    parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
-    parser.add_argument('--train', type=bool, default=False, help='commence training')
+    #parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
+    #parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
+    #parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
+    #parser.add_argument('--train', type=bool, default=False, help='commence training')
     parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
@@ -55,16 +58,12 @@ def main():
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
         train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, transform=transform), batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = MNIST().to(device)
-        optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
     elif args.model_type == 'cifar10':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = CIFAR10().to(device)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
@@ -73,13 +72,11 @@ def main():
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.SVHN(root='./data', split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.SVHN(root='./data', split='test', download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(trainset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
     else:
-        print(args.model_type+" not in candidate models to be trained; halt!")
+        print(args.model_type+" not in candidate models; halt!")
         exit()
 
     if args.ckpt:
@@ -87,6 +84,7 @@ def main():
         if os.path.exists(model_path) == True:
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
+                layers = [[] for i in range(11)]
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
             if args.model_type == 'svhn':
@@ -94,8 +92,13 @@ def main():
         else:
             print(model_path+' not found')
             exit()
+    
+    layers = extract(args, model, device, train_loader, layers)
+    for i in range(len(layers)):
+        for j in range(len(layers[i])):
+            if j == 0:
+                print(layers[i][j].shape)
 
-    train(args, model, device, train_loader, optimizer)
-        
+
 if __name__ == '__main__':
     main()
