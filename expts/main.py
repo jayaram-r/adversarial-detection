@@ -93,18 +93,21 @@ def main():
     
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
+    ROOT = '/nobackup/varun/adversarial-detection/expts' 
+    data_path = ROOT+'/data'
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, transform=transform), batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=False, transform=transform), batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = MNIST().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
+  
     elif args.model_type == 'cifar10':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+        trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.CIFAR10(root='./data', train=False, download=True, transform=transform)
+        testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = CIFAR10().to(device)
         criterion = nn.CrossEntropyLoss()
@@ -112,9 +115,9 @@ def main():
     
     elif args.model_type == 'svhn':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.SVHN(root='./data', split='train', download=True, transform=transform)
+        trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.SVHN(root='./data', split='test', download=True, transform=transform)
+        testset = torchvision.datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(trainset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
@@ -148,7 +151,7 @@ def main():
             scheduler.step()
    
    elif args.ckpt:
-        model_path = './models/'+args.model_type+'_cnn.pt'
+        model_path = ROOT+'/models/'+args.model_type+'_cnn.pt'
         if os.path.isdir(model_path) == True:
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
@@ -187,7 +190,7 @@ def main():
         #adversarials = attack_model(images, labels)
     
     if args.save_model:
-        model_path = './models/'+args.model_type+'_cnn.pt'
+        model_path = ROOT+'/models/'+args.model_type+'_cnn.pt'
         if args.model_type == 'mnist':
             torch.save(model.state_dict(), model_path)
         elif args.model_type == 'cifar10':

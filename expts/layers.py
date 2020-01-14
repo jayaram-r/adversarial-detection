@@ -14,14 +14,15 @@ import os
 import foolbox
 import sys
 from pympler.asizeof import asizeof
+import numpy as np
 
-def extract(args, model, device, train_loader, layers):
+def extract(args, model, device, train_loader, embeddings):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         output = model.layer_wise(data)
-        for i in range(len(layers)):
-            layers[i].append(output[i].detach().cpu().numpy())
-    return layers
+        for i in range(len(embeddings)):
+            embeddings[i].append(output[i].detach().cpu().numpy())
+    return embeddings
 
 def main():
     # Training settings
@@ -54,15 +55,15 @@ def main():
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     ROOT = '/nobackup/varun/adversarial-detection/expts' 
-    
+    data_path = ROOT+'/data' 
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
+        train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
         model = MNIST().to(device)
     
     elif args.model_type == 'cifar10':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True, download=True, transform=transform)
+        trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         model = CIFAR10().to(device)
         criterion = nn.CrossEntropyLoss()
@@ -70,7 +71,7 @@ def main():
     
     elif args.model_type == 'svhn':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.SVHN(root='./data', split='train', download=True, transform=transform)
+        trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
@@ -84,7 +85,7 @@ def main():
         if os.path.exists(model_path) == True:
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
-                layers = [[] for i in range(11)]
+                embeddings = [[] for i in range(11)] # 11 layers in the MNIST CNN
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
             if args.model_type == 'svhn':
@@ -93,12 +94,24 @@ def main():
             print(model_path+' not found')
             exit()
     
-    layers = extract(args, model, device, train_loader, layers)
-    for i in range(len(layers)):
-        for j in range(len(layers[i])):
+    embeddings = extract(args, model, device, train_loader, embeddings)
+    for i in range(len(embeddings)): #will be equal to number of layers in the CNN
+        for j in range(len(embeddings[i])): #will be equal to len(train_loader)
+            embedding_shape = embeddings[i][j].shape
+            num_samples = embedding_shape[0]
+            
+            if len(embedding_shape) > 2:
+                output = embeddings[i][j].reshape((num_samples, -1))
+            else:
+                output = embeddings[i][j]
+            
             if j == 0:
-                print(layers[i][j].shape)
+                temp = output
+            else:
+                temp = np.vstack((temp, output))
 
+        print("layer:",i+1," complete!")
+        #jayaram's function
 
 if __name__ == '__main__':
     main()
