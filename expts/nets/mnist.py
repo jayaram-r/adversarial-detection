@@ -32,3 +32,29 @@ class MNIST(nn.Module):
         output = F.log_softmax(x, dim=1)
         return output
 
+    def layer_wise(self, x):
+        output = []
+        x = self.conv1(x)
+        output.append(x)
+        x = F.relu(x)
+        output.append(x)
+        x = self.conv2(x)
+        output.append(x)
+        x = F.max_pool2d(x, 2)
+        output.append(x)
+        x = self.dropout1(x)
+        output.append(x)
+        x = torch.flatten(x, 1)
+        output.append(x)
+        x = self.fc1(x)
+        output.append(x)
+        x = F.relu(x)
+        output.append(x)
+        x = self.dropout2(x)
+        output.append(x)
+        x = self.fc2(x)
+        output.append(x)
+        final = F.log_softmax(x, dim=1)
+        output.append(final)
+        return output
+

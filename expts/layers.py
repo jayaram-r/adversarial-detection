@@ -12,56 +12,13 @@ from nets.cifar10 import *
 from nets.svhn import *
 import os
 import foolbox
+import sys
+from pympler.asizeof import asizeof
 
-
-def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
-    model.train()
+def train(args, model, device, train_loader, optimizer):
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = F.nll_loss(output, target)
-        if criterion != None:
-            loss = criterion(output, target)
-        loss.backward()
-        optimizer.step()
-        if batch_idx % args.log_interval == 0:
-            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format( epoch, batch_idx * len(data), len(train_loader.dataset), 100. * batch_idx / len(train_loader), loss.item()))
-    return model
-
-def test(args, model, device, test_loader, criterion=None):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            #print(data.shape, target.shape, type(data), type(target))
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            if criterion == None:
-                test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
-                pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-                correct += pred.eq(target.view_as(pred)).sum().item()
-                test_loss /= len(test_loader.dataset)
-            else:
-                _, predicted = torch.max(output.data, 1)
-                total += target.size(0)
-                correct += (predicted == target).sum().item()
-                #test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
-    if criterion == None:
-        print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format( test_loss, correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
-    else:
-        print('Accuracy of the network on the %d test images: %d %%' % (total, 100 * correct / total))
-    return model
-    
-def attack(attack_model, device, test_loader):
-    #model.eval()
-    for data, target in test_loader:
-        data, target = data.to(device), target.to(device)
-        data_numpy = (data.data.cpu()).numpy()
-        target_numpy = (target.data.cpu()).numpy()
-        adversarials = attack_model(data_numpy, target_numpy) #, target_numpy, unpack=False)
+        output = model.layer_wise(data)
 
 def main():
     # Training settings
@@ -93,6 +50,8 @@ def main():
     
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
+    ROOT = '/nobackup/varun/adversarial-detection/expts' 
+    
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
         train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -123,33 +82,9 @@ def main():
         print(args.model_type+" not in candidate models to be trained; halt!")
         exit()
 
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
-   
-    if args.train:
-        for epoch in range(1, args.epochs + 1):
-            if args.model_type == 'mnist':
-                model = train(args, model, device, train_loader, optimizer, epoch)
-                model = test(args, model, device, test_loader)
-                bounds = (-255,255)
-                num_classes = 10
-            elif args.model_type == 'cifar10':
-                model = train(args, model, device, train_loader, optimizer, epoch, criterion)
-                model = test(args, model, device, test_loader, criterion)
-                bounds = (-255, 255)
-                num_classes = 10
-            elif args.model_type == 'svhn':
-                model = train(args, model, device, train_loader, optimizer, epoch)
-                model = test(args, model, device, test_loader)
-                bounds = (-255, 255)
-                num_classes = 10
-            else:
-                print(args.model_type+" not in candidate models; halt!")
-                exit()
-            scheduler.step()
-   
-   elif args.ckpt:
-        model_path = './models/'+args.model_type+'_cnn.pt'
-        if os.path.isdir(model_path) == True:
+    if args.ckpt:
+        model_path = ROOT + '/models/'+args.model_type+'_cnn.pt'
+        if os.path.exists(model_path) == True:
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
             if args.model_type == 'cifar10':
@@ -159,41 +94,8 @@ def main():
         else:
             print(model_path+' not found')
             exit()
-    
-    if args.attack:
-        distance = None
-        if args.distance = '2':
-            distance = foolbox.distances.Linf
-        elif args.distance = 'inf':
-            distance = foolbox.distances.Linf
-        else:
-            print(args.distance+" not in candidate distances; halt!")
-            exit()
-    
-        model.to(device)
-        model.eval()
-        fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
-        
-        if args.adv_attack == 'FGSM':
-            attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) #distance=foolbox.distances.Linf)
-        if args.adv_attack = 'PGD':
-            attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
-        if args.adv_attack = 'CW':
-            attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
-        else:
-            print(args.adv_attack+" not in candidate attacks; halt!")
-            exit()
-        attack(attack_model, device, test_loader)
-        #adversarials = attack_model(images, labels)
-    
-    if args.save_model:
-        model_path = './models/'+args.model_type+'_cnn.pt'
-        if args.model_type == 'mnist':
-            torch.save(model.state_dict(), model_path)
-        elif args.model_type == 'cifar10':
-            torch.save(model.state_dict(), model_path)
-        elif args.model_type == 'svhn':
-            torch.save(model.state_dict(), model_path)
 
+    train(args, model, device, train_loader, optimizer)
+        
 if __name__ == '__main__':
     main()
