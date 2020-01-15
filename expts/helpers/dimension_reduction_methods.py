@@ -34,6 +34,11 @@ from functools import partial
 from helpers.lid_estimators import estimate_intrinsic_dimension
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
+from helpers.constants import (
+    NEIGHBORHOOD_CONST,
+    SEED_DEFAULT,
+    METRIC_DEF
+)
 import logging
 
 
@@ -102,7 +107,7 @@ def calculate_heat_kernel(data, nn_indices, heat_kernel_param, metric, metric_kw
     return np.exp((-1.0 / heat_kernel_param) * dist_mat)
 
 
-def pca_wrapper(data, n_comp=None, cutoff=1.0, seed_rng=123):
+def pca_wrapper(data, n_comp=None, cutoff=1.0, seed_rng=SEED_DEFAULT):
     """
     Find the PCA transformation for the provided data, which is assumed to be centered.
 
@@ -169,15 +174,15 @@ class LocalityPreservingProjection:
                  dim_projection='auto',                         # 'auto' or positive integer
                  orthogonal=False,                              # True to enable Orthogonal LPP (OLPP)
                  pca_cutoff=1.0,
-                 neighborhood_constant=0.4, n_neighbors=None,   # Specify one of them. If `n_neighbors` is specified,
-                                                                # `neighborhood_constant` will be ignored.
+                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,   # Specify one of them. If `n_neighbors`
+                 # is specified, `neighborhood_constant` will be ignored.
                  shared_nearest_neighbors=False,
                  edge_weights='SNN',                            # Choices are {'simple', 'SNN', 'heat_kernel'}
                  heat_kernel_param=None,                        # Used only if `edge_weights = 'heat_kernel'`
-                 metric='euclidean', metric_kwargs=None,        # distance metric and its parameter dict (if any)
+                 metric=METRIC_DEF, metric_kwargs=None,        # distance metric and its parameter dict (if any)
                  approx_nearest_neighbors=True,
                  n_jobs=1,
-                 seed_rng=123):
+                 seed_rng=SEED_DEFAULT):
         """
         :param dim_projection: Dimension of data in the projected feature space. If set to 'auto', a suitable reduced
                                dimension will be chosen by estimating the intrinsic dimension of the data. If an
@@ -409,14 +414,14 @@ class NeighborhoodPreservingProjection:
                  dim_projection='auto',                         # 'auto' or positive integer
                  orthogonal=False,                              # True to enable Orthogonal NPP (ONPP) method
                  pca_cutoff=1.0,
-                 neighborhood_constant=0.4, n_neighbors=None,   # Specify one of them. If `n_neighbors` is specified,
-                                                                # `neighborhood_constant` will be ignored.
+                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,   # Specify one of them. If `n_neighbors`
+                 # is specified, `neighborhood_constant` will be ignored.
                  shared_nearest_neighbors=False,
-                 metric='euclidean', metric_kwargs=None,        # distance metric and its parameter dict (if any)
+                 metric=METRIC_DEF, metric_kwargs=None,        # distance metric and its parameter dict (if any)
                  approx_nearest_neighbors=True,
                  n_jobs=1,
                  reg_eps=0.001,
-                 seed_rng=123):
+                 seed_rng=SEED_DEFAULT):
         """
         :param dim_projection: Dimension of data in the projected feature space. If set to 'auto', a suitable reduced
                                dimension will be chosen by estimating the intrinsic dimension of the data. If an
@@ -652,12 +657,12 @@ def helper_solve_lle(data, nn_indices, reg_eps, n):
 def wrapper_data_projection(data, method,
                             data_test=None,
                             dim_proj=3,
-                            metric='euclidean', metric_kwargs=None,
+                            metric=METRIC_DEF, metric_kwargs=None,
                             snn=False,
                             ann=True,
                             pca_cutoff=1.0,
                             n_jobs=1,
-                            seed_rng=123):
+                            seed_rng=SEED_DEFAULT):
     """
     Wrapper function to apply different dimension reduction methods. The reduced dimension can be set either to a
     single value or a list (or iterable) of values via the argument `dim_proj`. If the reduced dimension is to be
@@ -692,9 +697,8 @@ def wrapper_data_projection(data, method,
     # Choices are {'simple', 'SNN', 'heat_kernel'}
     edge_weights = 'heat_kernel'
 
-    # Neighborhood size is chosen as a function of the number of data points.
-    # In [1], it is recommended to chose `k = n^{2 / 5} = n^0.4`
-    neighborhood_constant = 0.4
+    # Neighborhood size is chosen as a function of the number of data points
+    neighborhood_constant = NEIGHBORHOOD_CONST
 
     if hasattr(dim_proj, '__iter__'):
         dim_proj_max = max(dim_proj)

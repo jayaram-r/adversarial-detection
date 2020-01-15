@@ -18,6 +18,12 @@ from helpers.dimension_reduction_methods import (
     METHODS_LIST
 )
 from helpers.utils import get_num_jobs
+from helpers.constants import (
+    NEIGHBORHOOD_CONST,
+    SEED_DEFAULT,
+    CROSS_VAL_SIZE,
+    METRIC_DEF
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,15 +31,15 @@ logger = logging.getLogger(__name__)
 
 def knn_parameter_search(data, labels, k_range,
                          dim_proj_range=None, method_proj=None,
-                         num_cv_folds=5,
-                         metric='euclidean', metric_kwargs=None,
+                         num_cv_folds=CROSS_VAL_SIZE,
+                         metric=METRIC_DEF, metric_kwargs=None,
                          shared_nearest_neighbors=False,
                          approx_nearest_neighbors=True,
                          skip_preprocessing=False,
                          pca_cutoff=1.0,
                          n_jobs=-1,
                          low_memory=False,
-                         seed_rng=123):
+                         seed_rng=SEED_DEFAULT):
     """
     Search for the best value of `k` (number of neighbors) of a KNN classifier using cross-validation. Error rate
     is the metric. Optionally, you can also search over a range of reduced data dimensions via the parameters
@@ -162,12 +168,12 @@ def knn_parameter_search(data, labels, k_range,
 
 def wrapper_knn(data, labels, k,
                 data_test=None, labels_test=None,
-                metric='euclidean', metric_kwargs=None,
+                metric=METRIC_DEF, metric_kwargs=None,
                 shared_nearest_neighbors=False,
                 approx_nearest_neighbors=True,
                 n_jobs=1,
                 low_memory=False,
-                seed_rng=123):
+                seed_rng=SEED_DEFAULT):
     """
 
     :param data: numpy array with the training data of shape `(N, d)`, where `N` is the number of samples
@@ -270,12 +276,12 @@ class KNNClassifier:
     """
     def __init__(self,
                  n_neighbors=1,
-                 metric='euclidean', metric_kwargs=None,
+                 metric=METRIC_DEF, metric_kwargs=None,
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
                  low_memory=False,
-                 seed_rng=123):
+                 seed_rng=SEED_DEFAULT):
         """
         :param n_neighbors: int value specifying the number of nearest neighbors. Should be >= 1.
         :param metric: string or a callable that specifies the distance metric.

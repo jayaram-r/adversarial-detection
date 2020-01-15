@@ -19,6 +19,13 @@ from helpers.metrics_custom import (
     remove_self_neighbors
 )
 from helpers.utils import get_num_jobs
+from helpers.constants import (
+    NEIGHBORHOOD_CONST,
+    MIN_N_NEIGHBORS,
+    RHO,
+    SEED_DEFAULT,
+    METRIC_DEF
+)
 import warnings
 from numba import NumbaPendingDeprecationWarning
 
@@ -32,13 +39,13 @@ class KNNIndex:
     shared nearest neighbors (SNN) distance.
     """
     def __init__(self, data,
-                 neighborhood_constant=0.4, n_neighbors=None,
-                 metric='euclidean', metric_kwargs=None,
+                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
+                 metric=METRIC_DEF, metric_kwargs=None,
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
                  low_memory=False,
-                 seed_rng=123):
+                 seed_rng=SEED_DEFAULT):
         """
         :param data: numpy array with the data samples. Has shape `(N, d)`, where `N` is the number of samples and
                      `d` is the number of features.
@@ -85,7 +92,7 @@ class KNNIndex:
 
         self.index_knn = self.build_knn_index(data)
 
-    def build_knn_index(self, data, min_n_neighbors=20, rho=0.5):
+    def build_knn_index(self, data, min_n_neighbors=MIN_N_NEIGHBORS, rho=RHO):
         """
         Build a KNN index for the given data set. There will two KNN indices of the SNN distance is used.
 

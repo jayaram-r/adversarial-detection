@@ -6,6 +6,10 @@ import numpy as np
 from scipy import stats
 import sys
 from helpers.knn_index import KNNIndex
+from helpers.constants import (
+    NEIGHBORHOOD_CONST,
+    SEED_DEFAULT
+)
 
 
 def lid_mle_amsaleg(knn_distances):
@@ -67,11 +71,11 @@ def id_two_nearest_neighbors(knn_distances):
 
 def estimate_intrinsic_dimension(data,
                                  method='two_nn',       # method choices are {'two_nn', 'lid_mle'}
-                                 neighborhood_constant=0.4, n_neighbors=None,
+                                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                                  approx_nearest_neighbors=True,
                                  n_jobs=1,
                                  low_memory=False,
-                                 seed_rng=123):
+                                 seed_rng=SEED_DEFAULT):
     """
     Wrapper function for estimating the intrinsic dimension of the data.
 

@@ -14,9 +14,14 @@ import numpy as np
 import sys
 import multiprocessing
 from functools import partial
-from knn_index import KNNIndex
-from utils import get_num_jobs
+from helpers.knn_index import KNNIndex
+from helpers.utils import get_num_jobs
 from sklearn.metrics import pairwise_distances
+from helpers.constants import (
+    NEIGHBORHOOD_CONST,
+    SEED_DEFAULT,
+    METRIC_DEF
+)
 
 
 def helper_distance(data1, data2, nn_indices, metric, metric_kwargs, k, i):
@@ -43,13 +48,13 @@ def helper_distance(data1, data2, nn_indices, metric, metric_kwargs, k, i):
 
 class averaged_KLPE_anomaly_detection:
     def __init__(self,
-                 neighborhood_constant=0.4, n_neighbors=None,
-                 metric='euclidean', metric_kwargs=None,
+                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
+                 metric=METRIC_DEF, metric_kwargs=None,
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
                  low_memory=False,
-                 seed_rng=123):
+                 seed_rng=SEED_DEFAULT):
         """
 
         :param neighborhood_constant: float value in (0, 1), that specifies the number of nearest neighbors as a
