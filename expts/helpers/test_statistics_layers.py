@@ -24,6 +24,7 @@ class TestStatistic(ABC):
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
+                 low_memory=False,
                  seed_rng=123):
 
         super(TestStatistic, self).__init__()
@@ -34,6 +35,7 @@ class TestStatistic(ABC):
         self.shared_nearest_neighbors = shared_nearest_neighbors
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.n_jobs = get_num_jobs(n_jobs)
+        self.low_memory = low_memory
         self.seed_rng = seed_rng
 
         self.dim = None
@@ -61,6 +63,7 @@ class TestStatistic(ABC):
             shared_nearest_neighbors=self.shared_nearest_neighbors,
             approx_nearest_neighbors=self.approx_nearest_neighbors,
             n_jobs=self.n_jobs,
+            low_memory=self.low_memory,
             seed_rng=self.seed_rng
         )
 

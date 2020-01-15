@@ -48,6 +48,7 @@ class averaged_KLPE_anomaly_detection:
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
+                 low_memory=False,
                  seed_rng=123):
         """
 
@@ -68,6 +69,8 @@ class averaged_KLPE_anomaly_detection:
                                          find the nearest neighbors. This is recommended when the number of points is
                                          large and/or when the dimension of the data is high.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
+        :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
+                           is likely to increase the running time.
         :param seed_rng: int value specifying the seed for the random number generator.
         """
         self.neighborhood_constant = neighborhood_constant
@@ -77,6 +80,7 @@ class averaged_KLPE_anomaly_detection:
         self.shared_nearest_neighbors = shared_nearest_neighbors
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.n_jobs = get_num_jobs(n_jobs)
+        self.low_memory = low_memory
         self.seed_rng = seed_rng
 
         self.data_train = None
@@ -109,6 +113,7 @@ class averaged_KLPE_anomaly_detection:
             shared_nearest_neighbors=self.shared_nearest_neighbors,
             approx_nearest_neighbors=self.approx_nearest_neighbors,
             n_jobs=self.n_jobs,
+            low_memory=self.low_memory,
             seed_rng=self.seed_rng
         )
         # Compute the distance statistic for every data point

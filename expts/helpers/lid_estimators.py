@@ -70,6 +70,7 @@ def estimate_intrinsic_dimension(data,
                                  neighborhood_constant=0.4, n_neighbors=None,
                                  approx_nearest_neighbors=True,
                                  n_jobs=1,
+                                 low_memory=False,
                                  seed_rng=123):
     """
     Wrapper function for estimating the intrinsic dimension of the data.
@@ -86,6 +87,8 @@ def estimate_intrinsic_dimension(data,
     :param approx_nearest_neighbors: Set to True to use an approximate nearest neighbor method. Usually the right
                                      choice unless both the number of samples are features are small.
     :param n_jobs: number of CPU cores to use.
+    :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
+                       is likely to increase the running time.
     :param seed_rng: seed for the random number generator.
 
     :return: positive float value specifying the estimated intrinsic dimension.
@@ -98,6 +101,7 @@ def estimate_intrinsic_dimension(data,
                          shared_nearest_neighbors=False,
                          approx_nearest_neighbors=approx_nearest_neighbors,
                          n_jobs=n_jobs,
+                         low_memory=low_memory,
                          seed_rng=seed_rng)
     # Query the nearest neighbors of each point
     nn_indices, nn_distances = index_knn.query(data, exclude_self=True)
