@@ -37,6 +37,7 @@ class KNNIndex:
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
+                 low_memory=False,
                  seed_rng=123):
         """
         :param data: numpy array with the data samples. Has shape `(N, d)`, where `N` is the number of samples and
@@ -58,6 +59,8 @@ class KNNIndex:
                                          find the nearest neighbors. This is recommended when the number of points is
                                          large and/or when the dimension of the data is high.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
+        :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
+                           is likely to increase the running time.
         :param seed_rng: int value specifying the seed for the random number generator.
         """
         self.data = data
@@ -68,6 +71,7 @@ class KNNIndex:
         self.shared_nearest_neighbors = shared_nearest_neighbors
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.n_jobs = get_num_jobs(n_jobs)
+        self.low_memory = low_memory
         self.seed_rng = seed_rng
 
         N, d = data.shape
@@ -107,7 +111,8 @@ class KNNIndex:
                 'n_neighbors': k,
                 'rho': rho,
                 'random_state': self.seed_rng,
-                'n_jobs': self.n_jobs
+                'n_jobs': self.n_jobs,
+                'low_memory': self.low_memory
             }
             index_knn_primary = NNDescent(data, **params)
         else:
@@ -132,7 +137,8 @@ class KNNIndex:
                     'n_neighbors': max(1 + self.n_neighbors, min_n_neighbors),
                     'rho': rho,
                     'random_state': self.seed_rng,
-                    'n_jobs': self.n_jobs
+                    'n_jobs': self.n_jobs,
+                    'low_memory': self.low_memory
                 }
                 index_knn_secondary = NNDescent(data_neighbors, **params)
             else:
