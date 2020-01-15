@@ -15,6 +15,7 @@ import foolbox
 import sys
 from pympler.asizeof import asizeof
 import numpy as np
+from helpers.knn_classifier import *
 
 def extract(args, model, device, train_loader, embeddings):
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -58,9 +59,10 @@ def main():
     data_path = ROOT+'/data' 
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
+        if os.path.exists(data_path):
+            train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
         model = MNIST().to(device)
-    
+
     elif args.model_type == 'cifar10':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
@@ -86,6 +88,7 @@ def main():
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
                 embeddings = [[] for i in range(11)] # 11 layers in the MNIST CNN
+                print("empty embeddings list loaded!")
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
             if args.model_type == 'svhn':
@@ -95,7 +98,8 @@ def main():
             exit()
     
     embeddings = extract(args, model, device, train_loader, embeddings)
-    for i in range(len(embeddings)): #will be equal to number of layers in the CNN
+    print("embeddings calculated!")
+    for i in range(1): #len(embeddings)): #will be equal to number of layers in the CNN
         for j in range(len(embeddings[i])): #will be equal to len(train_loader)
             embedding_shape = embeddings[i][j].shape
             num_samples = embedding_shape[0]
@@ -114,4 +118,6 @@ def main():
         #jayaram's function
 
 if __name__ == '__main__':
+    print("hello")
+    exit()
     main()

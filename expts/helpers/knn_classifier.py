@@ -7,17 +7,17 @@ import multiprocessing
 import operator
 from functools import partial
 import logging
-from knn_index import KNNIndex
+from helpers.knn_index import KNNIndex
 from sklearn.model_selection import StratifiedKFold
 from itertools import product
 from numba import njit, int64, float64
 from numba.types import Tuple
-from dimension_reduction_methods import (
+from helpers.dimension_reduction_methods import (
     pca_wrapper,
     wrapper_data_projection,
     METHODS_LIST
 )
-from utils import get_num_jobs
+from helpers.utils import get_num_jobs
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
