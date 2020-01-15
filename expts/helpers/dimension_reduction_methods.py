@@ -31,9 +31,9 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
 import multiprocessing
 from functools import partial
-from lid_estimators import estimate_intrinsic_dimension
-from knn_index import KNNIndex
-from utils import get_num_jobs
+from helpers.lid_estimators import estimate_intrinsic_dimension
+from helpers.knn_index import KNNIndex
+from helpers.utils import get_num_jobs
 import logging
 
 

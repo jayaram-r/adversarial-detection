@@ -5,7 +5,7 @@ Methods for (local) intrinsic dimension estimation based on nearest neighbor dis
 import numpy as np
 from scipy import stats
 import sys
-from knn_index import KNNIndex
+from helpers.knn_index import KNNIndex
 
 
 def lid_mle_amsaleg(knn_distances):

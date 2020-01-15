@@ -1,7 +1,7 @@
 
 import numpy as np
 from multiprocessing import cpu_count
-from generate_data import MFA_model
+from helpers.generate_data import MFA_model
 from sklearn.metrics import (
     roc_curve,
     roc_auc_score,

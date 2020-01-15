@@ -18,12 +18,23 @@ import numpy as np
 from helpers.knn_classifier import *
 
 def extract(args, model, device, train_loader, embeddings):
+    tot_target = []
+    counter = 180
     for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        output = model.layer_wise(data)
-        for i in range(len(embeddings)):
-            embeddings[i].append(output[i].detach().cpu().numpy())
-    return embeddings
+        if batch_idx < counter:
+            data, target = data.to(device), target.to(device)
+            target_numpy = target.detach().cpu().numpy().tolist()
+            tot_target = tot_target + target_numpy
+            #print(batch_idx)
+            output = model.layer_wise(data)
+            for i in range(len(embeddings)):
+                embeddings[i].append(output[i].detach().cpu().numpy())
+                #continue
+    counts = [0 for i in range(10)]
+    for i in range(10):
+        counts[i] = tot_target.count(i)
+        print("label:",i,"occurence =", counts[i])
+    return (embeddings, counts)
 
 def main():
     # Training settings
@@ -97,9 +108,11 @@ def main():
             print(model_path+' not found')
             exit()
     
-    embeddings = extract(args, model, device, train_loader, embeddings)
+    embeddings, counts = extract(args, model, device, train_loader, embeddings)
+    #perform some processing on the counts if it is not class balanced
     print("embeddings calculated!")
-    for i in range(1): #len(embeddings)): #will be equal to number of layers in the CNN
+    #exit()
+    for i in range(len(embeddings)): #will be equal to number of layers in the CNN
         for j in range(len(embeddings[i])): #will be equal to len(train_loader)
             embedding_shape = embeddings[i][j].shape
             num_samples = embedding_shape[0]
@@ -118,6 +131,4 @@ def main():
         #jayaram's function
 
 if __name__ == '__main__':
-    print("hello")
-    exit()
     main()

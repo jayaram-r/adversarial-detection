@@ -14,11 +14,11 @@ nn_indices, nn_distances = index.query(data, k=5, exclude_self=True)
 import numpy as np
 from pynndescent import NNDescent
 from sklearn.neighbors import NearestNeighbors
-from metrics_custom import (
+from helpers.metrics_custom import (
     distance_SNN,
     remove_self_neighbors
 )
-from utils import get_num_jobs
+from helpers.utils import get_num_jobs
 import warnings
 from numba import NumbaPendingDeprecationWarning
 
