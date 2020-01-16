@@ -16,6 +16,7 @@ import sys
 from pympler.asizeof import asizeof
 import numpy as np
 from helpers.knn_classifier import *
+from helpers.lid_estimators import *
 
 def extract(args, model, device, train_loader, embeddings):
     tot_target = []
@@ -34,7 +35,7 @@ def extract(args, model, device, train_loader, embeddings):
     for i in range(10):
         counts[i] = tot_target.count(i)
         print("label:",i,"occurence =", counts[i])
-    return (embeddings, counts)
+    return (embeddings, tot_target, counts)
 
 def main():
     # Training settings
@@ -55,14 +56,15 @@ def main():
     #parser.add_argument('--train', type=bool, default=False, help='commence training')
     parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
+    parser.add_argument('--output', type=str, default='mnist.txt', help='output')
     args = parser.parse_args()
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
@@ -79,15 +81,12 @@ def main():
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         model = CIFAR10().to(device)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     
     elif args.model_type == 'svhn':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
-        optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
     else:
         print(args.model_type+" not in candidate models; halt!")
@@ -98,7 +97,7 @@ def main():
         if os.path.exists(model_path) == True:
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
-                embeddings = [[] for i in range(11)] # 11 layers in the MNIST CNN
+                embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
                 print("empty embeddings list loaded!")
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
@@ -108,7 +107,7 @@ def main():
             print(model_path+' not found')
             exit()
     
-    embeddings, counts = extract(args, model, device, train_loader, embeddings)
+    embeddings, labels, counts = extract(args, model, device, train_loader, embeddings)
     #perform some processing on the counts if it is not class balanced
     print("embeddings calculated!")
     #exit()
@@ -127,8 +126,39 @@ def main():
             else:
                 temp = np.vstack((temp, output))
 
-        print("layer:",i+1," complete!")
-        #jayaram's function
-
+        str0 = "layer:"+str(i+1)+" complete!"
+        print(str0)
+        #jayaram's functions
+        #_ = estimate_intrinsic_dimension(temp, method='two_nn', n_jobs=16)
+        output = open(ROOT+'/output/'+args.output,"a")
+        data = temp
+        N_labels = len(labels)
+        labels = np.asarray(labels)
+        N_samples = data.shape[0]
+        if N_labels != N_samples:
+            print("label - sample mismatch; break!")
+            exit()
+        d = estimate_intrinsic_dimension(data, method='lid_mle', n_jobs=16)
+        str1 = "intrinsic dimensionality:" + str(d)
+        
+        metric = 'cosine'
+        pca_cutoff = 0.995
+        method_proj = 'NPP'
+        n_jobs = -20
+        dim_proj_range = np.linspace(int(d), 10*int(d), num=20, dtype=np.int)
+        N = temp.shape[0]
+        k_max = int(N ** 0.4)
+        k_range = np.linspace(1, k_max, num=10, dtype=np.int)
+        
+        k_best, dim_best, error_rate_cv, data_proj = knn_parameter_search(data, labels, k_range, dim_proj_range = dim_proj_range, metric = metric, 
+                pca_cutoff = pca_cutoff, n_jobs = n_jobs)
+        str2 = "k_best: " + str(k_best) + " dim_best: " + str(dim_best)
+        #print("error_rate_cv:", error_rate_cv)
+        #print("data_proj:", data_proj)
+        print(str1)
+        print(str2)
+        output.write(str0 + "\n")
+        output.write(str1 + "\n")
+        output.write(str2 + "\n")
 if __name__ == '__main__':
     main()
