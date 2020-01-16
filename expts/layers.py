@@ -98,21 +98,24 @@ def main():
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
                 embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
-                print("empty embeddings list loaded!")
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
+                embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
             if args.model_type == 'svhn':
                 model.load_state_dict(torch.load(model_path))
+                embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
         else:
             print(model_path+' not found')
             exit()
     
+        print("empty embeddings list loaded!")
     embeddings, labels, counts = extract(args, model, device, train_loader, embeddings)
     #perform some processing on the counts if it is not class balanced
     print("embeddings calculated!")
     #exit()
     for i in range(len(embeddings)): #will be equal to number of layers in the CNN
-        for j in range(len(embeddings[i])): #will be equal to len(train_loader)
+        print("begin processing for layer:", i)
+        for j in range(len(embeddings[i])): #will be equal to len(train_loader) 
             embedding_shape = embeddings[i][j].shape
             num_samples = embedding_shape[0]
             
@@ -138,9 +141,11 @@ def main():
         if N_labels != N_samples:
             print("label - sample mismatch; break!")
             exit()
+        else:
+            print("num labels == num samples; proceeding with intrisic dimensionality calcululation!")
         d = estimate_intrinsic_dimension(data, method='lid_mle', n_jobs=16)
         str1 = "intrinsic dimensionality:" + str(d)
-        
+        print(str1)
         metric = 'cosine'
         pca_cutoff = 0.995
         method_proj = 'NPP'
@@ -155,10 +160,12 @@ def main():
         str2 = "k_best: " + str(k_best) + " dim_best: " + str(dim_best)
         #print("error_rate_cv:", error_rate_cv)
         #print("data_proj:", data_proj)
-        print(str1)
+        #print(str1)
         print(str2)
         output.write(str0 + "\n")
         output.write(str1 + "\n")
         output.write(str2 + "\n")
+    output.close()
+
 if __name__ == '__main__':
     main()
