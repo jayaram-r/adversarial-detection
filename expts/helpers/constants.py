@@ -14,3 +14,12 @@ CROSS_VAL_SIZE = 5
 
 # Distance metric to use if not specified
 METRIC_DEF = 'cosine'
+
+# Method to estimate intrinsic dimension
+METHOD_INTRINSIC_DIM = 'lid_mle'
+
+# Method for dimension reduction
+METHOD_DIM_REDUCTION = 'NPP'
+
+# Cumulative variance cutoff for PCA
+PCA_CUTOFF = 0.995
