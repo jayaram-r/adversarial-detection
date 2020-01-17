@@ -18,8 +18,9 @@ import numpy as np
 from helpers.knn_classifier import *
 from helpers.lid_estimators import *
 
-def extract(args, model, device, train_loader, embeddings):
+def extract(args, model, device, train_loader):
     tot_target = []
+    embeddings = []
     counter = 180
     for batch_idx, (data, target) in enumerate(train_loader):
         if batch_idx < counter:
@@ -27,15 +28,23 @@ def extract(args, model, device, train_loader, embeddings):
             target_numpy = target.detach().cpu().numpy().tolist()
             tot_target = tot_target + target_numpy
             #print(batch_idx)
+
             output = model.layer_wise(data)
-            for i in range(len(embeddings)):
-                embeddings[i].append(output[i].detach().cpu().numpy())
-                #continue
-    counts = [0 for i in range(10)]
+            if batch_idx > 0:
+                for i in range(len(output)):    # each layer
+                    embeddings[i].append(output[i].detach().cpu().numpy())
+            else:
+                embeddings = [[v.detach().cpu().numpy()] for v in output]
+
+    counts = [0] * 10
     for i in range(10):
         counts[i] = tot_target.count(i)
-        print("label:",i,"occurence =", counts[i])
-    return (embeddings, tot_target, counts)
+        print("label: ",i,"occurence = ", counts[i])
+
+    if (max(counts) - min(counts)) > 200:
+        print("WARNING: classes are not balanced")
+
+    return embeddings, tot_target, counts
 
 def main():
     # Training settings
@@ -65,15 +74,13 @@ def main():
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     ROOT = '/nobackup/varun/adversarial-detection/expts' 
     data_path = ROOT+'/data' 
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
-        if os.path.exists(data_path):
-            train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
+        train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
         model = MNIST().to(device)
 
     elif args.model_type == 'cifar10':
@@ -93,79 +100,90 @@ def main():
         exit()
 
     if args.ckpt:
-        model_path = ROOT + '/models/'+args.model_type+'_cnn.pt'
-        if os.path.exists(model_path) == True:
+        model_path = ROOT + '/models/' + args.model_type + '_cnn.pt'
+        if os.path.exists(model_path):
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
-                embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
+                # embeddings = [[] for _ in range(4)] # 11 layers in the MNIST CNN
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
-                embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
+                # embeddings = [[] for _ in range(4)] # 11 layers in the MNIST CNN
             if args.model_type == 'svhn':
                 model.load_state_dict(torch.load(model_path))
-                embeddings = [[] for i in range(4)] # 11 layers in the MNIST CNN
+                # embeddings = [[] for _ in range(4)] # 11 layers in the MNIST CNN
         else:
             print(model_path+' not found')
             exit()
     
         print("empty embeddings list loaded!")
-    embeddings, labels, counts = extract(args, model, device, train_loader, embeddings)
+
+    embeddings, labels, counts = extract(args, model, device, train_loader)
     #perform some processing on the counts if it is not class balanced
     print("embeddings calculated!")
+    n_layers = len(embeddings)
+    print("number of layers = {}".format(n_layers))
     #exit()
-    for i in range(len(embeddings)): #will be equal to number of layers in the CNN
+
+    output_fp = open(ROOT + '/output/' + args.output, "a")
+    for i in range(n_layers): #will be equal to number of layers in the CNN
         print("begin processing for layer:", i)
+        data = None
         for j in range(len(embeddings[i])): #will be equal to len(train_loader) 
             embedding_shape = embeddings[i][j].shape
             num_samples = embedding_shape[0]
             
             if len(embedding_shape) > 2:
-                output = embeddings[i][j].reshape((num_samples, -1))
+                temp = embeddings[i][j].reshape((num_samples, -1))
             else:
-                output = embeddings[i][j]
-            
-            if j == 0:
-                temp = output
-            else:
-                temp = np.vstack((temp, output))
+                temp = embeddings[i][j]
 
-        str0 = "layer:"+str(i+1)+" complete!"
+            if data is None:
+                data = temp
+            else:
+                data = np.vstack((data, temp))
+
+        str0 = "\nLayer: " + str(i+1)
         print(str0)
         #jayaram's functions
         #_ = estimate_intrinsic_dimension(temp, method='two_nn', n_jobs=16)
-        output = open(ROOT+'/output/'+args.output,"a")
-        data = temp
-        N_labels = len(labels)
         labels = np.asarray(labels)
         N_samples = data.shape[0]
-        if N_labels != N_samples:
+        if labels.shape[0] != N_samples:
             print("label - sample mismatch; break!")
             exit()
         else:
-            print("num labels == num samples; proceeding with intrisic dimensionality calcululation!")
+            print("num labels == num samples; proceeding with intrisic dimensionality calculation!")
+
         d = estimate_intrinsic_dimension(data, method='lid_mle', n_jobs=16)
-        str1 = "intrinsic dimensionality:" + str(d)
+        d = int(np.ceil(d))
+        str1 = "intrinsic dimensionality: " + str(d)
         print(str1)
         metric = 'cosine'
         pca_cutoff = 0.995
         method_proj = 'NPP'
-        n_jobs = -20
-        dim_proj_range = np.linspace(int(d), 10*int(d), num=20, dtype=np.int)
-        N = temp.shape[0]
-        k_max = int(N ** 0.4)
+        n_jobs = 16
+        dim_proj_range = np.linspace(d, 10 * d, num=20, dtype=np.int)
+        k_max = int(N_samples ** 0.4)
         k_range = np.linspace(1, k_max, num=10, dtype=np.int)
         
-        k_best, dim_best, error_rate_cv, data_proj = knn_parameter_search(data, labels, k_range, dim_proj_range = dim_proj_range, metric = metric, 
-                pca_cutoff = pca_cutoff, n_jobs = n_jobs)
-        str2 = "k_best: " + str(k_best) + " dim_best: " + str(dim_best)
+        k_best, dim_best, error_rate_cv, data_proj = knn_parameter_search(
+            data, labels, k_range,
+            dim_proj_range = dim_proj_range,
+            method_proj=method_proj,
+            metric = metric,
+            pca_cutoff = pca_cutoff,
+            n_jobs = n_jobs
+        )
+        str2 = "k_best: " + str(k_best) + " dim_best: " + str(dim_best) + " error_rate_cv: " + str(error_rate_cv)
         #print("error_rate_cv:", error_rate_cv)
         #print("data_proj:", data_proj)
         #print(str1)
         print(str2)
-        output.write(str0 + "\n")
-        output.write(str1 + "\n")
-        output.write(str2 + "\n")
-    output.close()
+        output_fp.write(str0 + "\n")
+        output_fp.write(str1 + "\n")
+        output_fp.write(str2 + "\n")
+
+    output_fp.close()
 
 if __name__ == '__main__':
     main()
