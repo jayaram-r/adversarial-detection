@@ -15,19 +15,23 @@ arXiv preprint arXiv:1801.02613 (2018).
 """
 import numpy as np
 import sys
-from lid_estimators import lid_mle_amsaleg
-from knn_index import KNNIndex
-from utils import get_num_jobs
+from helpers.lid_estimators import lid_mle_amsaleg
+from helpers.knn_index import KNNIndex
+from helpers.utils import get_num_jobs
+from helpers.constants import (
+    NEIGHBORHOOD_CONST,
+    SEED_DEFAULT
+)
 
 
 class LID_based_anomaly_detection:
     def __init__(self,
-                 neighborhood_constant=0.4, n_neighbors=None,
+                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric='euclidean', metric_kwargs=None,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
                  low_memory=False,
-                 seed_rng=123):
+                 seed_rng=SEED_DEFAULT):
         """
 
         :param neighborhood_constant: float value in (0, 1), that specifies the number of nearest neighbors as a
