@@ -118,7 +118,7 @@ def main():
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(trainset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
     
