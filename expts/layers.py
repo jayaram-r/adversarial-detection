@@ -179,7 +179,6 @@ def main():
         os.makedirs(output_dir)
 
     output_file = os.path.join(output_dir, args.output)
-    output_fp = open(output_file, "w")
     lines = []
     # Projection model from the different layers
     model_projection_layers = []
@@ -187,6 +186,7 @@ def main():
     data_train_layers = []
     data_test_layers = []
     for i in range(n_layers):   # number of layers in the CNN
+        output_fp = open(output_file, "w")
         str0 = "\nLayer: {}".format(i + 1)
         print(str0)
         lines.append(str0 + '\n')
@@ -249,9 +249,9 @@ def main():
         # data_train_layers.append(transform_data_from_model(data, model_projection))
         # data_test_layers.append(transform_data_from_model(data_test, model_projection))
 
-    output_fp.writelines(lines)
+        output_fp.writelines(lines)
+        output_fp.close()
     print("\nOutputs saved to the file: {}".format(output_file))
-    output_fp.close()
 
     fname = os.path.join(output_dir, 'models_dimension_reduction.pkl')
     with open(fname, 'wb') as fp:
