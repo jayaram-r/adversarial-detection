@@ -135,7 +135,7 @@ def main():
         exit()
 
     if args.ckpt:
-        model_path = os.path.join(ROOT, 'models', args.model_type, '_cnn.pt')
+        model_path = os.path.join(os.path.join(ROOT, 'models'), args.model_type + '_cnn.pt')
         if os.path.exists(model_path):
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
@@ -185,7 +185,7 @@ def main():
     # Projected (dimension reduced) training and test data from the different layers
     data_train_layers = []
     data_test_layers = []
-    for i in range(n_layers):   # number of layers in the CNN
+    for i in range(4,5):#range(n_layers):   # number of layers in the CNN
         output_fp = open(output_file, "w")
         str0 = "\nLayer: {}".format(i + 1)
         print(str0)
