@@ -19,7 +19,7 @@ from multiprocessing import cpu_count
 from sklearn.model_selection import StratifiedShuffleSplit
 from helpers.knn_classifier import knn_parameter_search
 from helpers.lid_estimators import estimate_intrinsic_dimension
-from helpers.dimension_reduction_methods import wrapper_data_projection
+from helpers.dimension_reduction_methods import wrapper_data_projection, transform_data_from_model
 from constants import (
     ROOT,
     NEIGHBORHOOD_CONST,
@@ -28,6 +28,25 @@ from constants import (
     METHOD_INTRINSIC_DIM,
     METHOD_DIM_REDUCTION
 )
+try:
+    import cPickle as pickle
+except:
+    import pickle
+
+
+def load_dimension_reduction_models(model_file):
+    """
+    :param model_file: model file name.
+
+    :return: list of model dicts, one per DNN layer. Each model dict is of the form:
+        'method': <name of the method used>
+        'mean_data': <1D numpy array with the mean of the data features>
+        'transform': <2D numpy array with the transformation matrix>
+    """
+    with open(model_file, 'rb') as fp:
+        models = pickle.load(fp)
+
+    return models
 
 
 def extract_layer_embeddings(model, device, train_loader, num_samples=None):
@@ -87,7 +106,7 @@ def main():
     #parser.add_argument('--train', type=bool, default=False, help='commence training')
     parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
-    parser.add_argument('--output', type=str, default='mnist.txt', help='output')
+    parser.add_argument('--output', type=str, default='output_layer_extraction.txt', help='output file basename')
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -166,14 +185,15 @@ def main():
     cc = cpu_count()
     n_jobs = max(1, int(0.5 * cc))
 
-    output_dir = os.path.join(ROOT, 'output')
+    output_dir = os.path.join(ROOT, 'outputs', args.model_type)
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
     output_file = os.path.join(output_dir, args.output)
     output_fp = open(output_file, "w")
     lines = []
-
+    # Projection model from the different layers
+    model_projection_layers = []
     # Projected (dimension reduced) training and test data from the different layers
     data_train_layers = []
     data_test_layers = []
@@ -229,6 +249,7 @@ def main():
             pca_cutoff=PCA_CUTOFF,
             n_jobs=n_jobs
         )
+        model_projection_layers.append(model_projection)
         str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
                     "error_rate_cv = {:.6f}".format(error_rate_cv)]
         str0 = '\n'.join(str_list)
@@ -236,11 +257,18 @@ def main():
         lines.append(str0 + '\n')
 
         print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
-
+        data_train_layers.append(transform_data_from_model(data, model_projection))
+        data_test_layers.append(transform_data_from_model(data_test, model_projection))
 
     output_fp.writelines(lines)
-    print("Outputs saved to the file: {}".format(output_file))
+    print("\nOutputs saved to the file: {}".format(output_file))
     output_fp.close()
+
+    fname = os.path.join(output_dir, 'models_dimension_reduction.pkl')
+    with open(fname, 'wb') as fp:
+        pickle.dump(model_projection_layers, fp)
+
+    print("Dimension reduction models saved to the file: {}".format(fname))
 
 
 if __name__ == '__main__':

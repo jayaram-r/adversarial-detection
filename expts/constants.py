@@ -1,5 +1,9 @@
+import os
 
 ROOT = '/nobackup/varun/adversarial-detection/expts'
+DATA_PATH = os.path.join(ROOT, 'data')
+MODEL_PATH = os.path.join(ROOT, 'models')
+OUTPUT_PATH = os.path.join(ROOT, 'outputs')
 
 # Number of neighbors is calculated as a function of the data size (number of samples) `N`.
 # Number of neighbors, `k = N ** NEIGHBORHOOD_CONST`.

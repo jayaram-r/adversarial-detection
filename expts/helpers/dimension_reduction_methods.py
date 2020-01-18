@@ -658,6 +658,18 @@ def helper_solve_lle(data, nn_indices, reg_eps, n):
     return solve_lle_weights(data[n, :], data[nn_indices[n, :], :], reg_eps=reg_eps)
 
 
+def transform_data_from_model(data, model_dict):
+    """
+    Given the mean vector and the projection matrix, transform (project) the input data.
+
+    :param data: numpy array of shape `(N, D)`, where `N` is the number of samples and `D` the original dimension.
+    :param model_dict: dict with the transform parameters.
+
+    :return: transformed data as a numpy array of shape `(N, d)`, where `d` is the reduced dimension.
+    """
+    return np.dot(data - model_dict['mean_data'], model_dict['transform'])
+
+
 def wrapper_data_projection(data, method,
                             data_test=None,
                             dim_proj=3,
