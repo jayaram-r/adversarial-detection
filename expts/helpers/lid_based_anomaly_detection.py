@@ -18,7 +18,7 @@ import sys
 from helpers.lid_estimators import lid_mle_amsaleg
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
-from helpers.constants import (
+from constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT
 )

@@ -14,7 +14,7 @@ from helpers.multinomial import (
     special_dirichlet_prior
 )
 from helpers.utils import get_num_jobs
-from helpers.constants import (
+from constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF

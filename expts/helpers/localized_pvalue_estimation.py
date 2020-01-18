@@ -17,7 +17,7 @@ from functools import partial
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
 from sklearn.metrics import pairwise_distances
-from helpers.constants import (
+from constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF

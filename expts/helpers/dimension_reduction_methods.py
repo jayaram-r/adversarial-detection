@@ -34,12 +34,16 @@ from functools import partial
 from helpers.lid_estimators import estimate_intrinsic_dimension
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
-from helpers.constants import (
+from constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF
 )
 import logging
+try:
+    import cPickle as pickle
+except:
+    import pickle
 
 
 logging.basicConfig(level=logging.INFO)
@@ -654,6 +658,33 @@ def helper_solve_lle(data, nn_indices, reg_eps, n):
     return solve_lle_weights(data[n, :], data[nn_indices[n, :], :], reg_eps=reg_eps)
 
 
+def transform_data_from_model(data, model_dict):
+    """
+    Given the mean vector and the projection matrix, transform (project) the input data.
+
+    :param data: numpy array of shape `(N, D)`, where `N` is the number of samples and `D` the original dimension.
+    :param model_dict: dict with the transform parameters.
+
+    :return: transformed data as a numpy array of shape `(N, d)`, where `d` is the reduced dimension.
+    """
+    return np.dot(data - model_dict['mean_data'], model_dict['transform'])
+
+
+def load_dimension_reduction_models(model_file):
+    """
+    :param model_file: model file name.
+
+    :return: list of model dicts, one per DNN layer. Each model dict is of the form:
+        'method': <name of the method used>
+        'mean_data': <1D numpy array with the mean of the data features>
+        'transform': <2D numpy array with the transformation matrix>
+    """
+    with open(model_file, 'rb') as fp:
+        models = pickle.load(fp)
+
+    return models
+
+
 def wrapper_data_projection(data, method,
                             data_test=None,
                             dim_proj=3,
@@ -662,7 +693,8 @@ def wrapper_data_projection(data, method,
                             ann=True,
                             pca_cutoff=1.0,
                             n_jobs=1,
-                            seed_rng=SEED_DEFAULT):
+                            seed_rng=SEED_DEFAULT,
+                            model_filename=None):
     """
     Wrapper function to apply different dimension reduction methods. The reduced dimension can be set either to a
     single value or a list (or iterable) of values via the argument `dim_proj`. If the reduced dimension is to be
@@ -685,8 +717,11 @@ def wrapper_data_projection(data, method,
                        only if `n_comp` is not specified.
     :param n_jobs: number of cpu cores to use for parallel processing.
     :param seed_rng: seed for the random number generator.
+    :param model_filename: (str) filename to save the model for reuse. The file is saved in pickle format. By default,
+                           this is set to None and the model is not saved.
 
     :return:
+        - model_dict: dict with the model transform parameters.
         - data_proj: dimension reduced version of `data`. If `dim_proj` is an integer value, this will be a numpy
                      array of shape `(N, dim_proj)`. If `dim_proj` is an iterable of integer values, then this will
                      be a list of numpy arrays, where each numpy array is the transformed data corresponding to a
@@ -710,7 +745,7 @@ def wrapper_data_projection(data, method,
     rtest = (data_test is not None)
     data_proj = None
     data_proj_test = None
-
+    model_dict = None
     if method == 'LPP' or method == 'OLPP':
         model = LocalityPreservingProjection(
             dim_projection=dim_proj_max,
@@ -735,6 +770,7 @@ def wrapper_data_projection(data, method,
             if rtest:
                 data_proj_test = [data_proj_test[:, :d] for d in dim_proj]
 
+        model_dict = {'method': method, 'mean_data': model.mean_data, 'transform': model.transform_comb}
     elif method == 'NPP' or method == 'ONPP':
         model = NeighborhoodPreservingProjection(
             dim_projection=dim_proj_max,
@@ -758,6 +794,7 @@ def wrapper_data_projection(data, method,
             if rtest:
                 data_proj_test = [data_proj_test[:, :d] for d in dim_proj]
 
+        model_dict = {'method': method, 'mean_data': model.mean_data, 'transform': model.transform_comb}
     elif method == 'PCA':
         data_proj, mean_data, transform_pca = pca_wrapper(data, n_comp=dim_proj_max, cutoff=pca_cutoff,
                                                           seed_rng=seed_rng)
@@ -769,10 +806,15 @@ def wrapper_data_projection(data, method,
             if rtest:
                 data_proj_test = [data_proj_test[:, :d] for d in dim_proj]
 
+        model_dict = {'method': method, 'mean_data': mean_data, 'transform': transform_pca}
     else:
         raise ValueError("Invalid value '{}' received by parameter 'method'".format(method))
 
+    if model_filename:
+        with open(model_filename, 'wb') as fp:
+            pickle.dump(model_dict, fp)
+
     if rtest:
-        return data_proj, data_proj_test
+        return model_dict, data_proj, data_proj_test
     else:
-        return data_proj
+        return model_dict, data_proj

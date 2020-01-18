@@ -19,7 +19,7 @@ from helpers.metrics_custom import (
     remove_self_neighbors
 )
 from helpers.utils import get_num_jobs
-from helpers.constants import (
+from constants import (
     NEIGHBORHOOD_CONST,
     MIN_N_NEIGHBORS,
     RHO,
