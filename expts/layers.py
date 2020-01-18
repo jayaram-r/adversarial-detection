@@ -16,6 +16,7 @@ import sys
 from pympler.asizeof import asizeof
 import numpy as np
 from multiprocessing import cpu_count
+'''
 from helpers.knn_classifier import knn_parameter_search
 from helpers.lid_estimators import estimate_intrinsic_dimension
 from helpers.constants import (
@@ -25,7 +26,7 @@ from helpers.constants import (
     METHOD_INTRINSIC_DIM,
     METHOD_DIM_REDUCTION
 )
-
+'''
 
 def extract_layer_embeddings(model, device, train_loader, num_samples=None):
     tot_target = []
@@ -142,7 +143,7 @@ def main():
     print("embeddings calculated!")
     n_layers = len(embeddings)
     print("number of layers = {}".format(n_layers))
-    #exit()
+    exit()
 
     # Use half the number of available cores
     cc = cpu_count()
