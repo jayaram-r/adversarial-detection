@@ -19,7 +19,11 @@ from multiprocessing import cpu_count
 from sklearn.model_selection import StratifiedShuffleSplit
 from helpers.knn_classifier import knn_parameter_search
 from helpers.lid_estimators import estimate_intrinsic_dimension
-from helpers.dimension_reduction_methods import wrapper_data_projection, transform_data_from_model
+from helpers.dimension_reduction_methods import (
+    wrapper_data_projection,
+    transform_data_from_model,
+    load_dimension_reduction_models
+)
 from constants import (
     ROOT,
     NEIGHBORHOOD_CONST,
@@ -32,21 +36,6 @@ try:
     import cPickle as pickle
 except:
     import pickle
-
-
-def load_dimension_reduction_models(model_file):
-    """
-    :param model_file: model file name.
-
-    :return: list of model dicts, one per DNN layer. Each model dict is of the form:
-        'method': <name of the method used>
-        'mean_data': <1D numpy array with the mean of the data features>
-        'transform': <2D numpy array with the transformation matrix>
-    """
-    with open(model_file, 'rb') as fp:
-        models = pickle.load(fp)
-
-    return models
 
 
 def extract_layer_embeddings(model, device, train_loader, num_samples=None):

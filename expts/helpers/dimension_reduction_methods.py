@@ -670,6 +670,21 @@ def transform_data_from_model(data, model_dict):
     return np.dot(data - model_dict['mean_data'], model_dict['transform'])
 
 
+def load_dimension_reduction_models(model_file):
+    """
+    :param model_file: model file name.
+
+    :return: list of model dicts, one per DNN layer. Each model dict is of the form:
+        'method': <name of the method used>
+        'mean_data': <1D numpy array with the mean of the data features>
+        'transform': <2D numpy array with the transformation matrix>
+    """
+    with open(model_file, 'rb') as fp:
+        models = pickle.load(fp)
+
+    return models
+
+
 def wrapper_data_projection(data, method,
                             data_test=None,
                             dim_proj=3,
