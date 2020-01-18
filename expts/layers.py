@@ -221,7 +221,7 @@ def main():
         k_max = int(N_samples ** NEIGHBORHOOD_CONST)
         k_range = np.linspace(1, k_max, num=10, dtype=np.int)
 
-        k_best, dim_best, error_rate_cv, _ = knn_parameter_search(
+        k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
             data_sample, labels_sample, k_range,
             dim_proj_range=dim_proj_range,
             method_proj=METHOD_DIM_REDUCTION,

@@ -31,7 +31,6 @@ from sklearn.decomposition import PCA
 from sklearn.metrics import pairwise_distances
 import multiprocessing
 from functools import partial
-import pickle
 from helpers.lid_estimators import estimate_intrinsic_dimension
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
@@ -41,6 +40,10 @@ from helpers.constants import (
     METRIC_DEF
 )
 import logging
+try:
+    import cPickle as pickle
+except:
+    import pickle
 
 
 logging.basicConfig(level=logging.INFO)
@@ -691,6 +694,7 @@ def wrapper_data_projection(data, method,
                            this is set to None and the model is not saved.
 
     :return:
+        - model_dict: dict with the model transform parameters.
         - data_proj: dimension reduced version of `data`. If `dim_proj` is an integer value, this will be a numpy
                      array of shape `(N, dim_proj)`. If `dim_proj` is an iterable of integer values, then this will
                      be a list of numpy arrays, where each numpy array is the transformed data corresponding to a
@@ -784,6 +788,6 @@ def wrapper_data_projection(data, method,
             pickle.dump(model_dict, fp)
 
     if rtest:
-        return data_proj, data_proj_test
+        return model_dict, data_proj, data_proj_test
     else:
-        return data_proj
+        return model_dict, data_proj

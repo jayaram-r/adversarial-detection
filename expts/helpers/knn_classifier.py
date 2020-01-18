@@ -71,19 +71,22 @@ def knn_parameter_search(data, labels, k_range,
     :param seed_rng: same as the function `wrapper_knn`.
 
     :return:
-    (k_best, dim_best, error_rate_min, data_proj), where
+    (k_best, dim_best, error_rate_min, data_proj, model_proj), where
         - k_best: selected best value for `k` from the list `k_range`.
         - dim_best: select best value of dimension. Can be ignored if no search is performed over the data dimension.
         - error_rate_min: minimum cross-validation error rate.
         - data_proj: projected (dimension reduced) data corresponding to the `dim_best`. Can be ignored if no search
                      is performed over the data dimension.
+        - model_proj: None or a dict with the model parameters corresponding to the best projection dimension found.
+                      This has a dict only if `skip_preprocessing = False` and `method_proj` is not `None`.
+                      The dict has keys {'method', 'mean_data', 'transform'}.
     """
     # Number of parallel jobs
     n_jobs = get_num_jobs(n_jobs)
 
     # Unique labels
     labels_unique = np.unique(labels)
-
+    model_proj = None
     if skip_preprocessing:
         data_proj_list = [data]
         dim_proj_range = [data.shape[1]]
@@ -101,14 +104,14 @@ def knn_parameter_search(data, labels, k_range,
             dim_proj_range = [dim_proj_range]
 
         # Project the data to different reduced dimensions using the method `method_proj`
-        data_proj_list = wrapper_data_projection(data, method_proj,
-                                                 dim_proj=dim_proj_range,
-                                                 metric=metric, metric_kwargs=metric_kwargs,
-                                                 snn=shared_nearest_neighbors,
-                                                 ann=approx_nearest_neighbors,
-                                                 pca_cutoff=pca_cutoff,
-                                                 n_jobs=n_jobs,
-                                                 seed_rng=seed_rng)
+        model_proj, data_proj_list = wrapper_data_projection(data, method_proj,
+                                                             dim_proj=dim_proj_range,
+                                                             metric=metric, metric_kwargs=metric_kwargs,
+                                                             snn=shared_nearest_neighbors,
+                                                             ann=approx_nearest_neighbors,
+                                                             pca_cutoff=pca_cutoff,
+                                                             n_jobs=n_jobs,
+                                                             seed_rng=seed_rng)
 
     # Split the data into stratified folds for cross-validation
     skf = StratifiedKFold(n_splits=num_cv_folds, shuffle=True, random_state=seed_rng)
@@ -163,7 +166,13 @@ def knn_parameter_search(data, labels, k_range,
     logger.info("Best value of k (number of neighbors) = {:d}. Data dimension = {:d}. "
                 "Cross-validation error rate = {:.6f}".format(k_best, dim_best, error_rate_min))
 
-    return k_best, dim_best, error_rate_min, data_proj_list[ir]
+    if model_proj:
+        # Projection model corresponding to the best dimension found
+        mat = model_proj['transform']
+        if mat.shape[1] != dim_best:
+            model_proj['transform'] = mat[:, :dim_best]
+
+    return k_best, dim_best, error_rate_min, data_proj_list[ir], model_proj
 
 
 def wrapper_knn(data, labels, k,
