@@ -245,9 +245,9 @@ def main():
         print(str0)
         lines.append(str0 + '\n')
 
-        print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
-        data_train_layers.append(transform_data_from_model(data, model_projection))
-        data_test_layers.append(transform_data_from_model(data_test, model_projection))
+        # print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
+        # data_train_layers.append(transform_data_from_model(data, model_projection))
+        # data_test_layers.append(transform_data_from_model(data_test, model_projection))
 
     output_fp.writelines(lines)
     print("\nOutputs saved to the file: {}".format(output_file))
