@@ -1,4 +1,6 @@
 
+ROOT = '/nobackup/varun/adversarial-detection/expts'
+
 # Number of neighbors is calculated as a function of the data size (number of samples) `N`.
 # Number of neighbors, `k = N ** NEIGHBORHOOD_CONST`.
 NEIGHBORHOOD_CONST = 0.4

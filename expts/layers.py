@@ -20,7 +20,8 @@ from sklearn.model_selection import StratifiedShuffleSplit
 from helpers.knn_classifier import knn_parameter_search
 from helpers.lid_estimators import estimate_intrinsic_dimension
 from helpers.dimension_reduction_methods import wrapper_data_projection
-from helpers.constants import (
+from constants import (
+    ROOT,
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
     PCA_CUTOFF,
@@ -97,7 +98,6 @@ def main():
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
-    ROOT = '/nobackup/varun/adversarial-detection/expts'
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
@@ -123,7 +123,7 @@ def main():
         model = SVHN().to(device)
     
     else:
-        print(args.model_type+" not in candidate models; halt!")
+        print(args.model_type + " not in candidate models; halt!")
         exit()
 
     if args.ckpt:

@@ -18,7 +18,7 @@ from helpers.dimension_reduction_methods import (
     METHODS_LIST
 )
 from helpers.utils import get_num_jobs
-from helpers.constants import (
+from constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
