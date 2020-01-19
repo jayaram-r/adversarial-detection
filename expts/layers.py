@@ -135,7 +135,7 @@ def main():
         exit()
 
     if args.ckpt:
-        model_path = os.path.join(os.path.join(ROOT, 'models'), args.model_type + '_cnn.pt')
+        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
         if os.path.exists(model_path):
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
@@ -179,15 +179,16 @@ def main():
         os.makedirs(output_dir)
 
     output_file = os.path.join(output_dir, args.output)
-    lines = []
     # Projection model from the different layers
     model_projection_layers = []
     # Projected (dimension reduced) training and test data from the different layers
     data_train_layers = []
     data_test_layers = []
-    for i in range(4,5):#range(n_layers):   # number of layers in the CNN
-        output_fp = open(output_file, "w")
-        str0 = "\nLayer: {}".format(i + 1)
+    for i in range(n_layers):    # number of layers in the CNN
+        lines = []
+        mode = 'w' if i == 0 else 'a'
+        output_fp = open(output_file, mode)
+        str0 = "\nLayer: {:d}".format(i + 1)
         print(str0)
         lines.append(str0 + '\n')
 
@@ -212,38 +213,44 @@ def main():
         data_sample = data[indices_sample, :]
         labels_sample = labels[indices_sample]
 
+        dim_orig = data_sample.shape[1]
         N_samples = data_sample.shape[0]
-        str0 = ("Train data size = {:d}. Test data size = {:d}. Sub-sample size used for dimension reduction = {:d}".
-                format(labels.shape[0], labels_test.shape[0], N_samples))
+        str0 = ("Original dimension = {:d}. Train data size = {:d}. Test data size = {:d}. Sub-sample size used "
+                "for dimension reduction = {:d}".format(dim_orig, labels.shape[0], labels_test.shape[0], N_samples))
         print(str0)
         lines.append(str0 + '\n')
 
         d = estimate_intrinsic_dimension(data_sample, method=METHOD_INTRINSIC_DIM, n_jobs=n_jobs)
-        d = int(np.ceil(d))
+        d = min(int(np.ceil(d)), dim_orig)
         str0 = "Intrinsic dimensionality: {:d}".format(d)
         print(str0)
         lines.append(str0 + '\n')
 
-        print("\nSearching for the best number of neighbors (k) and projected dimension.")
-        d_max = min(10 * d, data_sample.shape[1] - 1)
-        dim_proj_range = np.linspace(d, d_max, num=20, dtype=np.int)
-        k_max = int(N_samples ** NEIGHBORHOOD_CONST)
-        k_range = np.linspace(1, k_max, num=10, dtype=np.int)
+        if d > 20:
+            print("\nSearching for the best number of neighbors (k) and projected dimension.")
+            d_max = min(10 * d, dim_orig - 1)
+            dim_proj_range = np.unique(np.linspace(d, d_max, num=20, dtype=np.int))
+            k_max = int(N_samples ** NEIGHBORHOOD_CONST)
+            k_range = np.unique(np.linspace(1, k_max, num=10, dtype=np.int))
 
-        k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
-            data_sample, labels_sample, k_range,
-            dim_proj_range=dim_proj_range,
-            method_proj=METHOD_DIM_REDUCTION,
-            metric=METRIC_DEF,
-            pca_cutoff=PCA_CUTOFF,
-            n_jobs=n_jobs
-        )
+            k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
+                data_sample, labels_sample, k_range,
+                dim_proj_range=dim_proj_range,
+                method_proj=METHOD_DIM_REDUCTION,
+                metric=METRIC_DEF,
+                pca_cutoff=PCA_CUTOFF,
+                n_jobs=n_jobs
+            )
+            str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
+                        "error_rate_cv = {:.6f}".format(error_rate_cv)]
+            str0 = '\n'.join(str_list)
+            print(str0)
+            lines.append(str0 + '\n')
+        else:
+            print("\nSkipping dimensionality reduction for this layer.")
+            model_projection = {'method': METHOD_DIM_REDUCTION, 'mean_data': None, 'transform': None}
+
         model_projection_layers.append(model_projection)
-        str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
-                    "error_rate_cv = {:.6f}".format(error_rate_cv)]
-        str0 = '\n'.join(str_list)
-        print(str0)
-        lines.append(str0 + '\n')
 
         # print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
         # data_train_layers.append(transform_data_from_model(data, model_projection))
@@ -251,8 +258,8 @@ def main():
 
         output_fp.writelines(lines)
         output_fp.close()
-    print("\nOutputs saved to the file: {}".format(output_file))
 
+    print("\nOutputs saved to the file: {}".format(output_file))
     fname = os.path.join(output_dir, 'models_dimension_reduction.pkl')
     with open(fname, 'wb') as fp:
         pickle.dump(model_projection_layers, fp)
