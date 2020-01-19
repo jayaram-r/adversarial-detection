@@ -226,7 +226,7 @@ def main():
         print(str0)
         lines.append(str0 + '\n')
 
-        if d > 20:
+        if dim_orig > 20:
             print("\nSearching for the best number of neighbors (k) and projected dimension.")
             d_max = min(10 * d, dim_orig - 1)
             dim_proj_range = np.unique(np.linspace(d, d_max, num=20, dtype=np.int))
