@@ -667,7 +667,10 @@ def transform_data_from_model(data, model_dict):
 
     :return: transformed data as a numpy array of shape `(N, d)`, where `d` is the reduced dimension.
     """
-    return np.dot(data - model_dict['mean_data'], model_dict['transform'])
+    if model_dict['transform'] is None:
+        return data
+    else:
+        return np.dot(data - model_dict['mean_data'], model_dict['transform'])
 
 
 def load_dimension_reduction_models(model_file):
