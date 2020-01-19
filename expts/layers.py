@@ -216,7 +216,8 @@ def main():
         dim_orig = data_sample.shape[1]
         N_samples = data_sample.shape[0]
         str0 = ("Original dimension = {:d}. Train data size = {:d}. Test data size = {:d}. Sub-sample size used "
-                "for dimension reduction = {:d}".format(dim_orig, labels.shape[0], labels_test.shape[0], N_samples))
+                "for dimension reduction = {:d}".format(dim_orig, labels.shape[0], labels_test.shape[0],
+                                                        labels_sample.shape[0]))
         print(str0)
         lines.append(str0 + '\n')
 
