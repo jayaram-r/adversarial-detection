@@ -179,13 +179,13 @@ def main():
         os.makedirs(output_dir)
 
     output_file = os.path.join(output_dir, args.output)
-    lines = []
     # Projection model from the different layers
     model_projection_layers = []
     # Projected (dimension reduced) training and test data from the different layers
     data_train_layers = []
     data_test_layers = []
     for i in range(n_layers):    # number of layers in the CNN
+        lines = []
         mode = 'w' if i == 0 else 'a'
         output_fp = open(output_file, mode)
         str0 = "\nLayer: {:d}".format(i + 1)
