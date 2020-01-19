@@ -227,12 +227,12 @@ def main():
         print(str0)
         lines.append(str0 + '\n')
 
+        k_max = int(N_samples ** NEIGHBORHOOD_CONST)
+        k_range = np.unique(np.linspace(1, k_max, num=10, dtype=np.int))
         if dim_orig > 20:
             print("\nSearching for the best number of neighbors (k) and projected dimension.")
-            d_max = min(10 * d, dim_orig - 1)
+            d_max = min(10 * d, dim_orig)
             dim_proj_range = np.unique(np.linspace(d, d_max, num=20, dtype=np.int))
-            k_max = int(N_samples ** NEIGHBORHOOD_CONST)
-            k_range = np.unique(np.linspace(1, k_max, num=10, dtype=np.int))
 
             k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
                 data_sample, labels_sample, k_range,
@@ -242,16 +242,22 @@ def main():
                 pca_cutoff=PCA_CUTOFF,
                 n_jobs=n_jobs
             )
-            str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
-                        "error_rate_cv = {:.6f}".format(error_rate_cv)]
-            str0 = '\n'.join(str_list)
-            print(str0)
-            lines.append(str0 + '\n')
         else:
-            print("\nSkipping dimensionality reduction for this layer.")
-            model_projection = {'method': METHOD_DIM_REDUCTION, 'mean_data': None, 'transform': None}
+            print("\nSkipping dimensionality reduction for this layer. Searching for the best number of "
+                  "neighbors (k).")
+            k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
+                data_sample, labels_sample, k_range,
+                metric=METRIC_DEF,
+                skip_preprocessing=True,
+                n_jobs=n_jobs
+            )
 
         model_projection_layers.append(model_projection)
+        str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
+                    "error_rate_cv = {:.6f}".format(error_rate_cv)]
+        str0 = '\n'.join(str_list)
+        print(str0)
+        lines.append(str0 + '\n')
 
         # print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
         # data_train_layers.append(transform_data_from_model(data, model_projection))

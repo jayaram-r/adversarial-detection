@@ -112,6 +112,8 @@ def knn_parameter_search(data, labels, k_range,
                                                              pca_cutoff=pca_cutoff,
                                                              n_jobs=n_jobs,
                                                              seed_rng=seed_rng)
+        # This is needed because the input `dim_proj_range` may have values that exceed the original data dimension
+        dim_proj_range = [arr.shape[1] for arr in data_proj_list]
 
     # Split the data into stratified folds for cross-validation
     skf = StratifiedKFold(n_splits=num_cv_folds, shuffle=True, random_state=seed_rng)

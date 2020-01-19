@@ -286,7 +286,7 @@ class LocalityPreservingProjection:
             logger.info("Estimated intrinsic dimension of the (PCA-projected) data = {:.2f}.".format(id))
 
         if self.dim_projection >= data.shape[1]:
-            self.dim_projection = data.shape[1] - 1
+            self.dim_projection = data.shape[1]
 
         logger.info("Dimension of the projected subspace = {:d}".format(self.dim_projection))
 
@@ -520,7 +520,7 @@ class NeighborhoodPreservingProjection:
             logger.info("Estimated intrinsic dimension of the (PCA-projected) data = {:.2f}.".format(id))
 
         if self.dim_projection >= data.shape[1]:
-            self.dim_projection = data.shape[1] - 1
+            self.dim_projection = data.shape[1]
 
         logger.info("Dimension of the projected subspace = {:d}".format(self.dim_projection))
 
@@ -667,7 +667,7 @@ def transform_data_from_model(data, model_dict):
 
     :return: transformed data as a numpy array of shape `(N, d)`, where `d` is the reduced dimension.
     """
-    if model_dict['transform'] is None:
+    if model_dict is None:
         return data
     else:
         return np.dot(data - model_dict['mean_data'], model_dict['transform'])
@@ -768,10 +768,11 @@ def wrapper_data_projection(data, method,
         if rtest:
             data_proj_test = model.transform(data_test)
 
+        d_max = data_proj.shape[1]
         if rtype == 'list':
-            data_proj = [data_proj[:, :d] for d in dim_proj]
+            data_proj = [data_proj[:, :d] for d in dim_proj if d <= d_max]
             if rtest:
-                data_proj_test = [data_proj_test[:, :d] for d in dim_proj]
+                data_proj_test = [data_proj_test[:, :d] for d in dim_proj if d <= d_max]
 
         model_dict = {'method': method, 'mean_data': model.mean_data, 'transform': model.transform_comb}
     elif method == 'NPP' or method == 'ONPP':
@@ -792,10 +793,11 @@ def wrapper_data_projection(data, method,
         if rtest:
             data_proj_test = model.transform(data_test)
 
+        d_max = data_proj.shape[1]
         if rtype == 'list':
-            data_proj = [data_proj[:, :d] for d in dim_proj]
+            data_proj = [data_proj[:, :d] for d in dim_proj if d <= d_max]
             if rtest:
-                data_proj_test = [data_proj_test[:, :d] for d in dim_proj]
+                data_proj_test = [data_proj_test[:, :d] for d in dim_proj if d <= d_max]
 
         model_dict = {'method': method, 'mean_data': model.mean_data, 'transform': model.transform_comb}
     elif method == 'PCA':
@@ -804,10 +806,11 @@ def wrapper_data_projection(data, method,
         if rtest:
             data_proj_test = np.dot(data_test - mean_data, transform_pca)
 
+        d_max = data_proj.shape[1]
         if rtype == 'list':
-            data_proj = [data_proj[:, :d] for d in dim_proj]
+            data_proj = [data_proj[:, :d] for d in dim_proj if d <= d_max]
             if rtest:
-                data_proj_test = [data_proj_test[:, :d] for d in dim_proj]
+                data_proj_test = [data_proj_test[:, :d] for d in dim_proj if d <= d_max]
 
         model_dict = {'method': method, 'mean_data': mean_data, 'transform': transform_pca}
     else:
