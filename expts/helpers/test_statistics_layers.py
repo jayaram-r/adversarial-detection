@@ -142,10 +142,14 @@ class MultinomialScore(TestStatistic):
             low_memory=kwargs.get('low_memory', False),
             seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
         )
+        # Encoded labels of train data
         self.labels_train_enc = None
+        # Count of nearest neighbors from each class
         self.data_counts_train = None
+        # Multinomial probabilities conditioned on each predicted class
         self.proba_params = None
-        self.log_expected_counts = None
+        # Likelihood ratio statistic score for the training data
+        self.scores_train = None
 
     def fit(self, features, labels, labels_pred, labels_unique=None):
         super(MultinomialScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
@@ -161,12 +165,12 @@ class MultinomialScore(TestStatistic):
             seed_rng=self.seed_rng
         )
 
-        self.data_counts_train = np.zeros((self.n_train, self.n_classes))
         self.labels_train_enc = self.label_encoder(labels)
-
+        self.data_counts_train = np.zeros((self.n_train, self.n_classes))
         self.proba_params = (1. / self.n_classes) * np.ones((self.n_classes, self.n_classes))
-        self.log_expected_counts = (np.log(self.n_neighbors / float(self.n_classes)) *
-                                    np.ones((self.n_classes, self.n_classes)))
+        self.scores_train = np.zeros(self.n_train)
+
+        # Dirichlet prior counts
         alpha_diric = special_dirichlet_prior(self.n_classes)
         for c_hat in self.labels_unique:
             # Get the indices of the samples that are predicted into class `c_hat`
@@ -183,8 +187,10 @@ class MultinomialScore(TestStatistic):
                                                                      alpha_prior=alpha_diric[c_hat, :])
                 self.data_counts_train[ind, :] = data_counts
 
-                # log(k * \pi_{c | c_hat})
-                self.log_expected_counts[c_hat, :] = np.log(self.n_neighbors * self.proba_params[c_hat, :])
+                # Likelihood ratio statistic for multinomial distribution
+                mat = data_counts * (np.log(np.clip(data_counts, 1e-16, None)) -
+                                     np.log(self.n_neighbors * self.proba_params[c_hat, :]))
+                self.scores_train[ind] = np.sum(mat, axis=1)
             else:
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
                                "estimation and assigning uniform probabilities.".format(c_hat))
@@ -196,6 +202,7 @@ class MultinomialScore(TestStatistic):
         else:
             labels_unique = self.labels_unique
 
+        cnt_par = 0
         scores = np.zeros(n_test)
         for c_hat in labels_unique:
             # Get the indices of the samples that are predicted into class `c_hat`
@@ -204,6 +211,16 @@ class MultinomialScore(TestStatistic):
                 # Query the index of `n_neighbors` nearest neighbors of each test sample
                 nn_indices, _ = self.index_knn.query(features_test[ind, :], k=self.n_neighbors,
                                                      exclude_self=is_train)
-
                 # Get the class label counts from the k nearest neighbors of each sample
                 _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
+
+                # Likelihood ratio statistic for multinomial distribution
+                mat = data_counts * (np.log(np.clip(data_counts, 1e-16, None)) -
+                                     np.log(self.n_neighbors * self.proba_params[c_hat, :]))
+                scores[ind] = np.sum(mat, axis=1)
+
+                cnt_par += ind.shape[0]
+                if cnt_par >= n_test:
+                    break
+
+        return scores
