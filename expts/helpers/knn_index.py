@@ -7,7 +7,7 @@ USAGE:
 from knn_index import KNNIndex
 
 index = KNNIndex(data, **kwargs)
-nn_indices, nn_distances = index.query(data, k=5, exclude_self=True)
+nn_indices, nn_distances = index.query(data_test, k=5)
 
 ```
 """
@@ -70,7 +70,6 @@ class KNNIndex:
                            is likely to increase the running time.
         :param seed_rng: int value specifying the seed for the random number generator.
         """
-        self.data = data
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
         self.metric = metric
@@ -90,6 +89,8 @@ class KNNIndex:
         self.n_neighbors_snn = min(int(1.2 * self.n_neighbors), N - 1)
         # self.n_neighbors_snn = self.n_neighbors
 
+        self.nn_indices = None
+        self.nn_distances = None
         self.index_knn = self.build_knn_index(data)
 
     def build_knn_index(self, data, min_n_neighbors=MIN_N_NEIGHBORS, rho=RHO):
@@ -122,6 +123,9 @@ class KNNIndex:
                 'low_memory': self.low_memory
             }
             index_knn_primary = NNDescent(data, **params)
+
+            self.nn_indices, self.nn_distances = remove_self_neighbors(index_knn_primary._neighbor_graph[0],
+                                                                       index_knn_primary._neighbor_graph[1])
         else:
             # Exact KNN graph
             index_knn_primary = NearestNeighbors(
@@ -133,11 +137,13 @@ class KNNIndex:
             )
             index_knn_primary.fit(data)
 
+            self.nn_indices, self.nn_distances = remove_self_neighbors(
+                *self._query(data, index_knn_primary, k)
+            )
+
         if self.shared_nearest_neighbors:
             # Construct a second KNN index that uses the shared nearest neighbor distance
-            data_neighbors, _ = remove_self_neighbors(
-                *self.query_wrapper_(data, index_knn_primary, self.n_neighbors_snn + 1)
-            )
+            data_neighbors = self.nn_indices[:, 0:self.n_neighbors_snn]
             if self.approx_nearest_neighbors:
                 params = {
                     'metric': distance_SNN,
@@ -148,6 +154,10 @@ class KNNIndex:
                     'low_memory': self.low_memory
                 }
                 index_knn_secondary = NNDescent(data_neighbors, **params)
+
+                # Save the nearest neighbor information of the data used to build the KNN index
+                self.nn_indices, self.nn_distances = remove_self_neighbors(index_knn_secondary._neighbor_graph[0],
+                                                                           index_knn_secondary._neighbor_graph[1])
             else:
                 index_knn_secondary = NearestNeighbors(
                     n_neighbors=(1 + self.n_neighbors),
@@ -157,13 +167,37 @@ class KNNIndex:
                 )
                 index_knn_secondary.fit(data_neighbors)
 
+                # Save the nearest neighbor information of the data used to build the KNN index
+                self.nn_indices, self.nn_distances = remove_self_neighbors(
+                    *self._query(data_neighbors, index_knn_secondary, 1 + self.n_neighbors)
+                )
+
             index_knn = [index_knn_primary, index_knn_secondary]
         else:
             index_knn = [index_knn_primary]
 
         return index_knn
 
-    def query(self, data, k=None, exclude_self=False):
+    def query_self(self, rows=None, k=None):
+        """
+        Query the nearest neighbors of the points used to construct the KNN index. The index of the points whose
+        neighbors are required can be specified via the input `rows`. If this is `None`, then the neighbors of all
+        the points are returned.
+
+        :param rows: None or an iterable with the row indices of the points whose neighbors are required.
+        :param k: None or an int value specifying the number of neighbors. If `None`, the number of neighbors
+                  specified while constructing the graph is used.
+        :return: Same as the method `query`.
+        """
+        if k is None:
+            k = self.n_neighbors
+
+        if rows is None:
+            return self.nn_indices[:, :k], self.nn_distances[:, :k]
+        else:
+            return self.nn_indices[rows, :k], self.nn_distances[rows, :k]
+
+    def query(self, data, k=None):
         """
         Query for the `k` nearest neighbors of each point in `data`.
 
@@ -171,8 +205,6 @@ class KNNIndex:
                      of dimensions (features).
         :param k: number of nearest neighbors to query. If not specified or set to `None`, `k` will be
                   set to `self.n_neighbors`.
-        :param exclude_self: Set to True if `data` was used to construct the KNN index. This will ensure that points
-                             are not included in their own neighborhood set.
 
         :return: (nn_indices, nn_distances), where
             - nn_indices: numpy array of indices of the nearest neighbors. Has shape `(data.shape[0], k)`.
@@ -182,30 +214,15 @@ class KNNIndex:
             k = self.n_neighbors
 
         if self.shared_nearest_neighbors:
-            if exclude_self:
-                data_neighbors, _ = remove_self_neighbors(
-                    *self.query_wrapper_(data, self.index_knn[0], self.n_neighbors_snn + 1)
-                )
-                nn_indices, nn_distances = remove_self_neighbors(
-                    *self.query_wrapper_(data_neighbors, self.index_knn[1], k + 1)
-                )
-            else:
-                data_neighbors, _ = self.query_wrapper_(data, self.index_knn[0], self.n_neighbors_snn)
-                nn_indices, nn_distances = self.query_wrapper_(data_neighbors, self.index_knn[1], k)
-
+            data_neighbors, _ = self._query(data, self.index_knn[0], self.n_neighbors_snn)
+            return self._query(data_neighbors, self.index_knn[1], k)
         else:
-            if exclude_self:
-                nn_indices, nn_distances = remove_self_neighbors(
-                    *self.query_wrapper_(data, self.index_knn[0], k + 1)
-                )
-            else:
-                nn_indices, nn_distances = self.query_wrapper_(data, self.index_knn[0], k)
+            return self._query(data, self.index_knn[0], k)
 
-        return nn_indices, nn_distances
-
-    def query_wrapper_(self, data, index, k):
+    def _query(self, data, index, k):
         """
-        Unified wrapper for querying both the approximate and the exact KNN index.
+        Unified wrapper for querying both the approximate and the exact KNN index. Do not directly call this
+        method unless you have a specific reason.
 
         :param data: numpy data array of shape `(N, d)`, where `N` is the number of samples and `d` is the number
                      of dimensions (features).

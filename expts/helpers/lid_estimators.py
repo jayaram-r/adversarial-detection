@@ -108,7 +108,7 @@ def estimate_intrinsic_dimension(data,
                          low_memory=low_memory,
                          seed_rng=seed_rng)
     # Query the nearest neighbors of each point
-    nn_indices, nn_distances = index_knn.query(data, exclude_self=True)
+    nn_indices, nn_distances = index_knn.query_self()
 
     method = method.lower()
     if method == 'two_nn':
