@@ -369,7 +369,7 @@ class LocalityPreservingProjection:
         :return:
         """
         # Find the `self.n_neighbors` nearest neighbors of each point
-        nn_indices, nn_distances = self.index_knn.query(data, k=self.n_neighbors, exclude_self=True)
+        nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
 
         N, K = nn_indices.shape
         row_ind = np.array([[i] * K for i in range(N)], dtype=np.int).ravel()
@@ -604,7 +604,7 @@ class NeighborhoodPreservingProjection:
         :return: None
         """
         # Find the `self.n_neighbors` nearest neighbors of each point
-        nn_indices, nn_distances = self.index_knn.query(data, k=self.n_neighbors, exclude_self=True)
+        nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
         N, K = nn_indices.shape
 
         if self.n_jobs == 1:
