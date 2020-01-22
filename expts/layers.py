@@ -38,6 +38,24 @@ except:
     import pickle
 
 
+def combine_and_vectorize(data_batches):
+    """
+    Combine a list of data batches and vectorize them if they are tensors. If there is only a single data batch,
+    it can be passed in as list with a single array.
+
+    :param data_batches: list of numpy arrays containing the data batches. Each array has shape `(n, d1, ...)`,
+                         where `n` can be different across the batches, but the remaining dimensions should be
+                         the same.
+    :return: single numpy array with the combined, vectorized data.
+    """
+    data = np.concatenate(data_batches, axis=0)
+    s = data.shape
+    if len(s) > 2:
+        data = data.reshape((s[0], -1))
+
+    return data
+
+
 def extract_layer_embeddings(model, device, train_loader, num_samples=None):
     tot_target = []
     embeddings = []
@@ -75,6 +93,45 @@ def extract_layer_embeddings(model, device, train_loader, num_samples=None):
         print("WARNING: classes are not balanced")
 
     return embeddings, tot_target, counts
+
+
+def transform_layer_embeddings(embeddings_in, transform_models=None, transform_models_file=None):
+    """
+    Perform dimension reduction on the data embeddings from each layer. The transformation or projection matrix
+    for each layer is provided via one of the inputs `transform_models` or `transform_models_file`. Only one of
+    them should be specified. In the case of `transform_models_file`, the models are loaded from a pickle file.
+
+    NOTE: In order to not perform dimension reduction at a particular layer, the corresponding element of
+    `transform_models` can be set to `None`. Thus, a list of `None` values can be passed to completely skip
+    dimension reduction.
+
+    :param embeddings_in: list of data embeddings per layer. `embeddings_in[i]` is a list of numpy arrays
+                          corresponding to the data batches from layer `i`.
+    :param transform_models: None or a list of dictionaries with the transformation models per layer. The length of
+                             `transform_models` should be equal to the length of `embeddings_in`.
+    :param transform_models_file: None or a string with the file path. This should be a pickle file with the saved
+                                  transformation models per layer.
+
+    :return: list of transformed data arrays, one per layer.
+    """
+    if transform_models_file is None:
+        if transform_models is None:
+            raise ValueError("Both inputs 'transform_models' and 'transform_models_file' are not specified.")
+
+    else:
+        transform_models = load_dimension_reduction_models(transform_models_file)
+
+    n_layers = len(embeddings_in)
+    assert len(transform_models) == n_layers, "Length of 'transform_models' is not equal to the length of 'embeddings_in'"
+    embeddings_out = []
+    for i in range(n_layers):
+        print("Transforming embeddings from layer {:d}".format(i + 1))
+        data_in = combine_and_vectorize(embeddings_in[i])
+
+        embeddings_out.append(transform_data_from_model(data_in, transform_models[i]))
+
+    return embeddings_out
+
 
 def main():
     # Training settings
@@ -139,13 +196,11 @@ def main():
         if os.path.exists(model_path):
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
-                # embeddings = [[] for _ in range(4)] # 11 layers in the MNIST CNN
             if args.model_type == 'cifar10':
                 model.load_state_dict(torch.load(model_path))
-                # embeddings = [[] for _ in range(4)] # 11 layers in the MNIST CNN
             if args.model_type == 'svhn':
                 model.load_state_dict(torch.load(model_path))
-                # embeddings = [[] for _ in range(4)] # 11 layers in the MNIST CNN
+
         else:
             print(model_path + ' not found')
             exit()
@@ -193,15 +248,8 @@ def main():
         lines.append(str0 + '\n')
 
         # Embeddings from layer i
-        data = np.concatenate(embeddings[i], axis=0)
-        s = data.shape
-        if len(s) > 2:
-            data = data.reshape((s[0], -1))
-
-        data_test = np.concatenate(embeddings_test[i], axis=0)
-        s = data_test.shape
-        if len(s) > 2:
-            data_test = data_test.reshape((s[0], -1))
+        data = combine_and_vectorize(embeddings[i])
+        data_test = combine_and_vectorize(embeddings_test[i])
 
         if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
             print("label - sample mismatch; break!")

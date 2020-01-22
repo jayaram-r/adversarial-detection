@@ -70,7 +70,6 @@ class KNNIndex:
                            is likely to increase the running time.
         :param seed_rng: int value specifying the seed for the random number generator.
         """
-        self.data = data
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
         self.metric = metric
@@ -199,17 +198,17 @@ class KNNIndex:
                     *self.query_wrapper_(data, self.index_knn[0], k + 1, exclude_self=True)
                 )
             else:
-                nn_indices, nn_distances = self.query_wrapper_(data, self.index_knn[0], k)
+                nn_indices, nn_distances = self.query_wrapper_(data, self.index_knn[0], k, exclude_self=True)
 
         return nn_indices, nn_distances
 
-    def query_wrapper_(self, data, index, k, exclude_self=False):
+    def query_wrapper_(self, data, index_knn, k, exclude_self=False):
         """
         Unified wrapper for querying both the approximate and the exact KNN index.
 
         :param data: numpy data array of shape `(N, d)`, where `N` is the number of samples and `d` is the number
                      of dimensions (features).
-        :param index: KNN index.
+        :param index_knn: KNN index.
         :param k: number of nearest neighbors to query.
         :param exclude_self: see method `query`.
 
@@ -220,11 +219,11 @@ class KNNIndex:
         if self.approx_nearest_neighbors:
             if exclude_self:
                 # No need to query as the neighbors are stored in the index
-                nn_indices = index._neighbor_graph[0][:, :k]
-                nn_distances = index._neighbor_graph[1][:, :k]
+                nn_indices = index_knn._neighbor_graph[0][:, :k]
+                nn_distances = index_knn._neighbor_graph[1][:, :k]
             else:
-                nn_indices, nn_distances = index.query(data, k=k)
+                nn_indices, nn_distances = index_knn.query(data, k=k)
         else:
-            nn_distances, nn_indices = index.kneighbors(data, n_neighbors=k)
+            nn_distances, nn_indices = index_knn.kneighbors(data, n_neighbors=k)
 
         return nn_indices, nn_distances
