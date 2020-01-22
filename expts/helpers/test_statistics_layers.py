@@ -196,6 +196,7 @@ class MultinomialScore(TestStatistic):
                                "estimation and assigning uniform probabilities.".format(c_hat))
 
     def score(self, features_test, labels_pred_test, is_train=False):
+        # Set `is_train = True` only if `features_test` is used as input to the `fit` method
         n_test = labels_pred_test.shape[0]
         if n_test == 1:
             labels_unique = [labels_pred_test[0]]
