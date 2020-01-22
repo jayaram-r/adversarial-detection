@@ -113,7 +113,10 @@ class LID_based_anomaly_detection:
         :param exclude_self: Set to True if the points in `data` were already used to build the KNN index.
         :return:
         """
-        # Find the distances from each point to its `self.n_neighbors` nearest neighbors.
-        nn_indices, nn_distances = self.index_knn.query(data, exclude_self=exclude_self)
+        # Find the distances from each point to its `self.n_neighbors` nearest neighbors
+        if exclude_self:
+            nn_indices, nn_distances = self.index_knn.query_self()
+        else:
+            nn_indices, nn_distances = self.index_knn.query(data)
 
         return lid_mle_amsaleg(nn_distances)

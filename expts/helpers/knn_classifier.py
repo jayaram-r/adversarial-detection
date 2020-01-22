@@ -374,7 +374,10 @@ class KNNClassifier:
         :return: numpy array with the class predictions, of shape `(N, )`.
         """
         # Get the indices of the nearest neighbors from the training set
-        nn_indices, nn_distances = self.index_knn.query(X, k=self.n_neighbors, exclude_self=is_train)
+        if is_train:
+            nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+        else:
+            nn_indices, nn_distances = self.index_knn.query(X, k=self.n_neighbors)
 
         labels_pred, _ = helper_knn_predict(nn_indices, self.y_train, self.n_classes, self.label_dec,
                                             self.n_neighbors)
@@ -404,7 +407,10 @@ class KNNClassifier:
                              format(self.n_neighbors))
 
         # Query the maximum number of nearest neighbors from `k_list`
-        nn_indices, nn_distances = self.index_knn.query(X, k=k_list[-1], exclude_self=is_train)
+        if is_train:
+            nn_indices, nn_distances = self.index_knn.query_self(k=k_list[-1])
+        else:
+            nn_indices, nn_distances = self.index_knn.query(X, k=k_list[-1])
 
         if self.n_jobs == 1 or len(k_list) == 1:
             labels_pred = np.array(
@@ -437,7 +443,10 @@ class KNNClassifier:
               Each row should sum to 1.
         """
         # Get the indices of the nearest neighbors from the training set
-        nn_indices, nn_distances = self.index_knn.query(X, k=self.n_neighbors, exclude_self=is_train)
+        if is_train:
+            nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+        else:
+            nn_indices, nn_distances = self.index_knn.query(X, k=self.n_neighbors)
 
         labels_pred, counts = helper_knn_predict(nn_indices, self.y_train, self.n_classes, self.label_dec,
                                                  self.n_neighbors)

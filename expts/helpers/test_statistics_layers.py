@@ -164,6 +164,8 @@ class MultinomialScore(TestStatistic):
             low_memory=self.low_memory,
             seed_rng=self.seed_rng
         )
+        # Indices of the nearest neighbors of the points (rows) from `features`
+        nn_indices, _ = self.index_knn.query_self(k=self.n_neighbors)
 
         self.labels_train_enc = self.label_encoder(labels)
         self.data_counts_train = np.zeros((self.n_train, self.n_classes))
@@ -176,11 +178,8 @@ class MultinomialScore(TestStatistic):
             # Get the indices of the samples that are predicted into class `c_hat`
             ind = np.where(labels_pred == c_hat)[0]
             if ind.shape[0] > 0:
-                # Query the index of `n_neighbors` nearest neighbors of each sample predicted into class `c_hat`
-                nn_indices, _ = self.index_knn.query(features[ind, :], k=self.n_neighbors, exclude_self=True)
-
-                # Get the class label counts from the k nearest neighbors of each sample
-                _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
+                # Get the class label counts from the nearest neighbors of each sample predicted into class `c_hat`
+                _, data_counts = neighbors_label_counts(nn_indices[ind, :], self.labels_train_enc, self.n_classes)
 
                 # Estimate the probability parameters of the multinomial distribution for each predicted class
                 self.proba_params[c_hat, :] = multinomial_estimation(data_counts,
@@ -210,8 +209,11 @@ class MultinomialScore(TestStatistic):
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0] > 0:
                 # Query the index of `n_neighbors` nearest neighbors of each test sample
-                nn_indices, _ = self.index_knn.query(features_test[ind, :], k=self.n_neighbors,
-                                                     exclude_self=is_train)
+                if is_train:
+                    nn_indices, _ = self.index_knn.query_self(rows=ind, k=self.n_neighbors)
+                else:
+                    nn_indices, _ = self.index_knn.query(features_test[ind, :], k=self.n_neighbors)
+
                 # Get the class label counts from the k nearest neighbors of each sample
                 _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 

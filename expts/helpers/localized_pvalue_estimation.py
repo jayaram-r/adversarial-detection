@@ -150,8 +150,11 @@ class averaged_KLPE_anomaly_detection:
         :param exclude_self: Set to True if the points in `data` were already used to build the KNN index.
         :return dist_stat: numpy array of distance statistic for each point.
         """
-        nn_indices, nn_distances = self.index_knn.query(data, k=self.neighborhood_range[1],
-                                                        exclude_self=exclude_self)
+        if exclude_self:
+            nn_indices, nn_distances = self.index_knn.query_self(k=self.neighborhood_range[1])
+        else:
+            nn_indices, nn_distances = self.index_knn.query(data, k=self.neighborhood_range[1])
+
         if self.shared_nearest_neighbors:
             # The distance statistic is calculated based on the primary distance metric, but within the
             # neighborhood set found using the SNN distance. The idea is that for high-dimensional data,
