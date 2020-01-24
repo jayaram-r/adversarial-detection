@@ -4,7 +4,6 @@ Test statistics to be calculated at the different layers of the trained deep neu
 """
 import numpy as np
 from abc import ABC, abstractmethod
-from scipy.stats import bernoulli
 import logging
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
@@ -304,17 +303,13 @@ class LIDScore(TestStatistic):
             low_memory=kwargs.get('low_memory', False),
             seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
         )
-        # LID estimates for samples from each predicted class
-        self.lid_estimates_pred = []
-        # LID estimates for samples from each true class
-        self.lid_estimates_true = []
+
+        # Median LID estimate of the samples predicted into each class
+        self.lid_median_pred = None
+        # Median LID estimate of the samples labeled from each class
+        self.lid_median_true = None
         # Scores for the training data
         self.scores_train = None
-        # Number of bootstrap resamples to estimate p-value
-        self.n_bootstrap = 100
-        # Bootstrap assignment matrices
-        self.assignment_mat_pred = dict()
-        self.assignment_mat_true = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None):
         """
@@ -350,20 +345,29 @@ class LIDScore(TestStatistic):
         # Get the LID estimates for all samples based on their nearest neighbors distances
         lid_estimates = lid_mle_amsaleg(nn_distances)
 
+        self.lid_median_pred = np.ones(self.n_classes)
+        self.lid_median_true = np.ones(self.n_classes)
+        # First score is conditioned the predicted class and the second score is conditioned on the true class
+        self.scores_train = np.zeros(self.n_train, 2)
         for c in self.labels_unique:
+            i = self.label_encoder([c])[0]
             # LID values of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
-            nc = ind.shape[0]
-            self.lid_estimates_pred.append(lid_estimates[ind])
-            self.assignment_mat_pred[c] = \
-                bernoulli.rvs(0.5, size=(self.n_bootstrap * nc)).reshape((self.n_bootstrap, nc))
+            if ind.shape[0]:
+                self.lid_median_pred[i] = np.median(lid_estimates[ind])
+                self.scores_train[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
+            else:
+                logger.warning("No samples are predicted into class '{}'. Setting the median LID "
+                               "value to 1.".format(c))
 
             # LID values of samples labeled as class `c`
             ind = np.where(labels == c)[0]
-            nc = ind.shape[0]
-            self.lid_estimates_true.append(lid_estimates[ind])
-            self.assignment_mat_true[c] = \
-                bernoulli.rvs(0.5, size=(self.n_bootstrap * nc)).reshape((self.n_bootstrap, nc))
+            if ind.shape[0]:
+                self.lid_median_true[i] = np.median(lid_estimates[ind])
+                self.scores_train[ind, 1] = lid_estimates[ind] / self.lid_median_true[i]
+            else:
+                logger.warning("No samples are labeled from class '{}'. Setting the median LID "
+                               "value to 1.".format(c))
 
         return self.scores_train
 
@@ -385,12 +389,30 @@ class LIDScore(TestStatistic):
         n_test = labels_pred_test.shape[0]
         # Query the index of `self.n_neighbors` nearest neighbors of each test sample
         if is_train:
-            nn_indices, _ = self.index_knn.query_self(k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
         else:
-            nn_indices, _ = self.index_knn.query(features_test, k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
+
+        # LID estimates of the test samples
+        lid_estimates = lid_mle_amsaleg(nn_distances)
 
         scores = np.zeros(n_test, 1 + self.n_classes)
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
+        cnt_par = 0
+        for c_hat in preds_unique:
+            i = self.label_encoder([c_hat])[0]
+            # Index of samples predicted into class `c_hat`
+            ind = np.where(labels_pred_test == c_hat)[0]
+            if ind.shape[0]:
+                # LID scores normalized by the median LID value for the samples predicted into class `c`
+                scores[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
 
+                cnt_par += ind.shape[0]
+                if cnt_par >= n_test:
+                    break
+
+        for i, c in enumerate(self.labels_unique):
+            # LID scores normalized by the median LID value for the samples labeled as class `c`
+            scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
 
         return scores
