@@ -4,8 +4,7 @@ Test statistics to be calculated at the different layers of the trained deep neu
 """
 import numpy as np
 from abc import ABC, abstractmethod
-import multiprocessing
-from functools import partial
+from scipy.stats import bernoulli
 import logging
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
@@ -13,6 +12,7 @@ from helpers.multinomial import (
     multinomial_estimation,
     special_dirichlet_prior
 )
+from helpers.lid_estimators import lid_mle_amsaleg
 from helpers.utils import get_num_jobs
 from constants import (
     NEIGHBORHOOD_CONST,
@@ -197,17 +197,18 @@ class MultinomialScore(TestStatistic):
         mat_ones = np.ones((self.n_classes, self.n_classes))
         self.proba_params_pred = (1. / self.n_classes) * mat_ones
         for c_hat in self.labels_unique:
+            i = self.label_encoder([c_hat])[0]
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred == c_hat)[0]
             if ind.shape[0]:
                 data_counts_temp = self.data_counts_train[ind, :]
 
                 # Estimate the multinomial probability parameters given the predicted class `c_hat`
-                self.proba_params_pred[c_hat, :] = multinomial_estimation(
-                    data_counts_temp, alpha_prior=alpha_diric[c_hat, :]
+                self.proba_params_pred[i, :] = multinomial_estimation(
+                    data_counts_temp, alpha_prior=alpha_diric[i, :]
                 )
                 # Likelihood ratio statistic for multinomial distribution
-                self.scores_train[ind, 0] = self.multinomial_lrt(data_counts_temp, self.proba_params_pred[c_hat, :],
+                self.scores_train[ind, 0] = self.multinomial_lrt(data_counts_temp, self.proba_params_pred[i, :],
                                                                  self.n_neighbors)
             else:
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
@@ -216,16 +217,17 @@ class MultinomialScore(TestStatistic):
         # Parameter estimation conditioned on the true class
         self.proba_params_true = (1. / self.n_classes) * mat_ones
         for c in self.labels_unique:
+            i = self.label_encoder([c])[0]
             # Index of samples with class label `c`
             ind = np.where(labels == c)[0]
             if ind.shape[0]:
                 data_counts_temp = self.data_counts_train[ind, :]
 
                 # Estimate the multinomial probability parameters given the true class `c`
-                self.proba_params_true[c, :] = multinomial_estimation(data_counts_temp,
-                                                                      alpha_prior=alpha_diric[c, :])
+                self.proba_params_true[i, :] = multinomial_estimation(data_counts_temp,
+                                                                      alpha_prior=alpha_diric[i, :])
                 # Likelihood ratio statistic for multinomial distribution
-                self.scores_train[ind, 1] = self.multinomial_lrt(data_counts_temp, self.proba_params_true[c, :],
+                self.scores_train[ind, 1] = self.multinomial_lrt(data_counts_temp, self.proba_params_true[i, :],
                                                                  self.n_neighbors)
             else:
                 # Unexpected, should not occur in practice
@@ -263,19 +265,20 @@ class MultinomialScore(TestStatistic):
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
+            i = self.label_encoder([c_hat])[0]
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
                 # Likelihood ratio statistic conditioned on the predicted class `c_hat`
-                scores[ind, 0] = self.multinomial_lrt(data_counts[ind, :], self.proba_params_pred[c_hat, :],
+                scores[ind, 0] = self.multinomial_lrt(data_counts[ind, :], self.proba_params_pred[i, :],
                                                       self.n_neighbors)
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
                     break
 
-        for i, c in enumerate(self.labels_unique, start=1):
+        for i, c in enumerate(self.labels_unique):
             # Likelihood ratio statistic conditioned on the candidate true class `c`
-            scores[:, i] = self.multinomial_lrt(data_counts, self.proba_params_true[c, :], self.n_neighbors)
+            scores[:, i + 1] = self.multinomial_lrt(data_counts, self.proba_params_true[i, :], self.n_neighbors)
 
         return scores
 
@@ -283,3 +286,111 @@ class MultinomialScore(TestStatistic):
     def multinomial_lrt(data_counts, proba_params, n_neighbors):
         mat = data_counts * (np.log(np.clip(data_counts, 1e-16, None)) - np.log(n_neighbors * proba_params))
         return np.sum(mat, axis=1)
+
+
+class LIDScore(TestStatistic):
+    """
+    Class that calculates the local intrinsic dimensionality (LID) based test score given the layer embeddings
+    and the predicted class of samples.
+    """
+    def __init__(self, **kwargs):
+        super(LIDScore, self).__init__(
+            neighborhood_constant=kwargs.get('neighborhood_constant', NEIGHBORHOOD_CONST),
+            n_neighbors=kwargs.get('n_neighbors', None),
+            metric='euclidean',     # Has to be 'euclidean' for LID estimation
+            shared_nearest_neighbors=False,     # Intentionally set to False
+            approx_nearest_neighbors=kwargs.get('approx_nearest_neighbors', True),
+            n_jobs=kwargs.get('n_jobs', 1),
+            low_memory=kwargs.get('low_memory', False),
+            seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
+        )
+        # LID estimates for samples from each predicted class
+        self.lid_estimates_pred = []
+        # LID estimates for samples from each true class
+        self.lid_estimates_true = []
+        # Scores for the training data
+        self.scores_train = None
+        # Number of bootstrap resamples to estimate p-value
+        self.n_bootstrap = 100
+        # Bootstrap assignment matrices
+        self.assignment_mat_pred = dict()
+        self.assignment_mat_true = dict()
+
+    def fit(self, features, labels, labels_pred, labels_unique=None):
+        """
+        Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
+
+        :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                         dimension respectively.
+        :param labels: numpy array of shape `(N, )` with the true labels per sample.
+        :param labels_pred: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
+                              be supplied as input during repeated calls to avoid having the find the unique
+                              labels each time.
+        :return:
+            scores_train: numpy array of two scores for each training sample. Has shape `(N, 2)`, where the first
+                          column gives the scores conditioned on the predicted class, and the second column gives
+                          the scores conditioned on the true class.
+        """
+        super(LIDScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
+
+        # Build the KNN index for the given feature vectors
+        self.index_knn = KNNIndex(
+            features, n_neighbors=self.n_neighbors,
+            metric=self.metric, metric_kwargs=self.metric_kwargs,
+            shared_nearest_neighbors=self.shared_nearest_neighbors,
+            approx_nearest_neighbors=self.approx_nearest_neighbors,
+            n_jobs=self.n_jobs,
+            low_memory=self.low_memory,
+            seed_rng=self.seed_rng
+        )
+        # Indices and distances of the nearest neighbors of the points from `features`
+        nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+
+        # Get the LID estimates for all samples based on their nearest neighbors distances
+        lid_estimates = lid_mle_amsaleg(nn_distances)
+
+        for c in self.labels_unique:
+            # LID values of samples predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            nc = ind.shape[0]
+            self.lid_estimates_pred.append(lid_estimates[ind])
+            self.assignment_mat_pred[c] = \
+                bernoulli.rvs(0.5, size=(self.n_bootstrap * nc)).reshape((self.n_bootstrap, nc))
+
+            # LID values of samples labeled as class `c`
+            ind = np.where(labels == c)[0]
+            nc = ind.shape[0]
+            self.lid_estimates_true.append(lid_estimates[ind])
+            self.assignment_mat_true[c] = \
+                bernoulli.rvs(0.5, size=(self.n_bootstrap * nc)).reshape((self.n_bootstrap, nc))
+
+        return self.scores_train
+
+    def score(self, features_test, labels_pred_test, is_train=False):
+        """
+        Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
+        each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
+
+        :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                              dimension respectively.
+        :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+
+        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
+                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
+                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
+                 being the candidate true class for the test sample.
+        """
+        n_test = labels_pred_test.shape[0]
+        # Query the index of `self.n_neighbors` nearest neighbors of each test sample
+        if is_train:
+            nn_indices, _ = self.index_knn.query_self(k=self.n_neighbors)
+        else:
+            nn_indices, _ = self.index_knn.query(features_test, k=self.n_neighbors)
+
+        scores = np.zeros(n_test, 1 + self.n_classes)
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
+
+
+        return scores
