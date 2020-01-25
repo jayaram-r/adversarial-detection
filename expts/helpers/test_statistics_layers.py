@@ -192,31 +192,27 @@ class MultinomialScore(TestStatistic):
         # Dirichlet prior counts for MAP estimation
         alpha_diric = special_dirichlet_prior(self.n_classes)
 
-        # Parameter estimation conditioned on the predicted class
+        # Parameter estimation conditioned on the predicted class and the true class
         mat_ones = np.ones((self.n_classes, self.n_classes))
         self.proba_params_pred = (1. / self.n_classes) * mat_ones
-        for c_hat in self.labels_unique:
-            i = self.label_encoder([c_hat])[0]
-            # Index of samples predicted into class `c_hat`
-            ind = np.where(labels_pred == c_hat)[0]
+        self.proba_params_true = (1. / self.n_classes) * mat_ones
+        for c in self.labels_unique:
+            i = self.label_encoder([c])[0]
+            # Index of samples predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
             if ind.shape[0]:
                 data_counts_temp = self.data_counts_train[ind, :]
 
-                # Estimate the multinomial probability parameters given the predicted class `c_hat`
-                self.proba_params_pred[i, :] = multinomial_estimation(
-                    data_counts_temp, alpha_prior=alpha_diric[i, :]
-                )
+                # Estimate the multinomial probability parameters given the predicted class `c`
+                self.proba_params_pred[i, :] = multinomial_estimation(data_counts_temp,
+                                                                      alpha_prior=alpha_diric[i, :])
                 # Likelihood ratio statistic for multinomial distribution
                 self.scores_train[ind, 0] = self.multinomial_lrt(data_counts_temp, self.proba_params_pred[i, :],
                                                                  self.n_neighbors)
             else:
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
-                               "estimation and assigning uniform probabilities.".format(c_hat))
+                               "estimation and assigning uniform probabilities.".format(c))
 
-        # Parameter estimation conditioned on the true class
-        self.proba_params_true = (1. / self.n_classes) * mat_ones
-        for c in self.labels_unique:
-            i = self.label_encoder([c])[0]
             # Index of samples with class label `c`
             ind = np.where(labels == c)[0]
             if ind.shape[0]:
@@ -230,7 +226,7 @@ class MultinomialScore(TestStatistic):
                                                                  self.n_neighbors)
             else:
                 # Unexpected, should not occur in practice
-                logger.warning("No samples are available from class '{}'. Skipping multinomial parameter estimation "
+                logger.warning("No labeled samples from class '{}'. Skipping multinomial parameter estimation "
                                "and assigning uniform probabilities.".format(c))
 
         return self.scores_train
@@ -291,6 +287,9 @@ class LIDScore(TestStatistic):
     """
     Class that calculates the local intrinsic dimensionality (LID) based test score given the layer embeddings
     and the predicted class of samples.
+
+    NOTE: For this method, do not apply dimension reduction to the layer embeddings. We want to estimate the LID
+    values in the original feature space.
     """
     def __init__(self, **kwargs):
         super(LIDScore, self).__init__(
@@ -366,8 +365,7 @@ class LIDScore(TestStatistic):
                 self.lid_median_true[i] = np.median(lid_estimates[ind])
                 self.scores_train[ind, 1] = lid_estimates[ind] / self.lid_median_true[i]
             else:
-                logger.warning("No samples are labeled from class '{}'. Setting the median LID "
-                               "value to 1.".format(c))
+                logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
 
         return self.scores_train
 
