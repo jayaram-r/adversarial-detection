@@ -11,7 +11,7 @@ criterion (BIC) for model complexity.
 import numpy as np
 import logging
 from sklearn.mixture import GaussianMixture
-from constants import SEED_RNG
+from constants import SEED_DEFAULT
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ def select_covar_types(nd, ns):
     :param ns: number of samples.
     :return: list of covariance types.
     """
-    if nd <= 20:
+    if nd <= 50:
         # low dimensional
         if ns >= (100 * nd):
             covar_types = ['full', 'diag', 'tied']
@@ -52,9 +52,9 @@ def select_covar_types(nd, ns):
             covar_types = ['diag', 'tied']
         else:
             covar_types = ['diag', 'spherical']
-    elif nd <= 100:
+    elif nd <= 250:
         # medium dimensional
-        if ns >= (100 * nd):
+        if ns >= (10 * nd):
             covar_types = ['diag', 'tied']
         else:
             covar_types = ['diag', 'spherical']
@@ -74,7 +74,7 @@ def train_log_normal_mixture(data,
                              n_init=10,
                              max_iter=500,
                              num_successive_steps=3,
-                             seed_rng=SEED_RNG):
+                             seed_rng=SEED_DEFAULT):
     """
     Fit a log-normal mixture density model to the data by searching over the number of mixture components and
     exploring suitable covariance types. Select the best number of components and covariance type using the
@@ -125,13 +125,12 @@ def train_log_normal_mixture(data,
                                       random_state=seed_rng, verbose=0)
             _ = mod_gmm.fit(data)
             v = mod_gmm.bic(data)
-            logger.info("Number of mixture components = {:d}, Covariance type = {}, BIC score = {:.4f}".
-                        format(k, ct, v))
+            logger.info(" #components = {:d}, covariance type = {}, BIC score = {:.4f}".format(k, ct, v))
             if v < bic_min_curr:
                 bic_min_curr = v
                 mod_best_curr = mod_gmm
 
-        if bic_min < bic_min_curr:
+        if bic_min_curr < bic_min:
             bic_min = bic_min_curr
             mod_best = mod_best_curr
             cnt = 0
@@ -142,7 +141,8 @@ def train_log_normal_mixture(data,
         if cnt >= num_successive_steps:
             break
 
-    logger.info("Best model: number of mixture components = {:d}, covariance type = {}, BIC score = {:.4f}".
+    logger.info(" Model training complete.")
+    logger.info(" Best model: #components = {:d}, covariance type = {}, BIC score = {:.4f}".
                 format(mod_best.n_components, mod_best.covariance_type, bic_min))
     return mod_best
 
