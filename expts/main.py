@@ -10,27 +10,39 @@ from torch.optim.lr_scheduler import StepLR
 from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
+from nets.resnet import *
 import os
 import foolbox
 from constants import ROOT
-
+from helpers.bar import progress_bar
 
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
     model.train()
+    train_loss = 0
+    correct = 0
+    total = 0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target)
         if criterion is not None:
             loss = criterion(output, target)
-
+        else:
+            loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
-        if batch_idx % args.log_interval == 0:
+        if batch_idx % args.log_interval == 0 and criterion is None:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.
                   format(epoch, batch_idx * len(data), len(train_loader.dataset),
                          100. * batch_idx / len(train_loader), loss.item()))
+        if criterion is not None:
+            train_loss += loss.item()
+            _, predicted = output.max(1)
+            total += target.size(0)
+            correct += predicted.eq(target).sum().item()
+        if batch_idx % args.log_interval == 0 and criterion is not None:
+            progress_bar(batch_idx, len(train_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                    % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
 
     return model
 
@@ -41,7 +53,7 @@ def test(args, model, device, test_loader, criterion=None):
     correct = 0
     total = 0
     with torch.no_grad():
-        for data, target in test_loader:
+        for batch_idx, (data, target) in enumerate(test_loader):
             #print(data.shape, target.shape, type(data), type(target))
             data, target = data.to(device), target.to(device)
             output = model(data)
@@ -51,16 +63,18 @@ def test(args, model, device, test_loader, criterion=None):
                 correct += pred.eq(target.view_as(pred)).sum().item()
                 test_loss /= len(test_loader.dataset)
             else:
-                _, predicted = torch.max(output.data, 1)
+                loss = criterion(output, target)
+                _, predicted = output.max(1)
                 total += target.size(0)
-                correct += (predicted == target).sum().item()
+                correct += predicted.eq(target).sum().item()
                 #test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
-
+                progress_bar(batch_idx, len(test_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
     if criterion is None:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.
               format(test_loss, correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
-    else:
-        print('Accuracy of the network on the %d test images: %d %%' % (total, 100. * correct / total))
+    #else:
+    #    print('Accuracy of the network on the %d test images: %d %%' % (total, 100. * correct / total))
 
     return model
 
@@ -79,19 +93,19 @@ def main():
     parser = argparse.ArgumentParser(description='Arguments')
     parser.add_argument('--batch-size', type=int, default=64, metavar='N', help='input batch size for training (default: 64)')
     parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 14)')
+    parser.add_argument('--epochs', type=int, default=200, metavar='N', help='number of epochs to train (default: 14)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR', help='learning rate (default: 1.0)')
     parser.add_argument('--gamma', type=float, default=0.7, metavar='M', help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
     parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N', help='how many batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    parser.add_argument('--model-type', default='mnist', help='model type')
+    parser.add_argument('--model-type', default='cifar10', help='model type')
     parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
     parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
     parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
-    parser.add_argument('--train', type=bool, default=False, help='commence training')
-    parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
+    parser.add_argument('--train', type=bool, default=True, help='commence training')
+    parser.add_argument('--ckpt', type=bool, default=False, help='use ckpt')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -113,14 +127,16 @@ def main():
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
 
     elif args.model_type == 'cifar10':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-        trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
+        transform_train = transforms.Compose([transforms.RandomCrop(32, padding=4), transforms.RandomHorizontalFlip(), 
+            transforms.ToTensor(), transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))])
+        transform_test = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))])
+        trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform_train)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
+        testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
-        model = CIFAR10().to(device)
+        model = ResNet18().to(device)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+        optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=5e-4)
     
     elif args.model_type == 'svhn':
         transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
@@ -161,7 +177,7 @@ def main():
             scheduler.step()
    
     elif args.ckpt:
-        model_path = os.path.join(ROOT, 'models', args.model_type, '_cnn.pt')
+        model_path = os.path.join(os.path.join(ROOT, 'models'), args.model_type + '_cnn.pt')
         if os.path.isdir(model_path):
             if args.model_type == 'mnist':
                 model.load_state_dict(torch.load(model_path))
@@ -201,7 +217,7 @@ def main():
         #adversarials = attack_model(images, labels)
     
     if args.save_model:
-        model_path = os.path.join(ROOT, 'models', args.model_type, '_cnn.pt')
+        model_path = os.path.join(os.path.join(ROOT, 'models'), args.model_type+'_cnn.pt')
         if args.model_type == 'mnist':
             torch.save(model.state_dict(), model_path)
         elif args.model_type == 'cifar10':
