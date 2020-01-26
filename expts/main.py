@@ -6,7 +6,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 from torchvision import datasets, transforms
-from torch.optim.lr_scheduler import StepLR
+from torch.optim.lr_scheduler import StepLR, MultiStepLR
 from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
@@ -148,6 +148,7 @@ def main():
         )
         model = MNIST().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+        scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
         bounds = (-255, 255)
         num_classes = 10
 
@@ -168,7 +169,9 @@ def main():
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = ResNet18().to(device)
         criterion = nn.CrossEntropyLoss()
-        optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=5e-4)
+        # Settings recommended in: https://github.com/kuangliu/pytorch-cifar
+        optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
+        scheduler = MultiStepLR(optimizer, [150, 250, 350], gamma=0.1)
         bounds = (-255, 255)
         num_classes = 10
 
@@ -183,14 +186,13 @@ def main():
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+        scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
         bounds = (-255, 255)
         num_classes = 10
 
     else:
         print(args.model_type + " not in candidate models to be trained; halt!")
         exit()
-
-    scheduler = StepLR(optimizer, step_size=1, gamma=args.gamma)
    
     if args.train:
         for epoch in range(1, args.epochs + 1):
