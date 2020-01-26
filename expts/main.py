@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 import argparse
 import torch
 import torch.nn as nn
@@ -104,20 +104,27 @@ def attack(attack_model, device, test_loader):
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='Arguments')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N', help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=200, metavar='N', help='number of epochs to train (default: 14)')
+    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
+                        help='model type or name of the dataset')
+    parser.add_argument('--batch-size', '-b', type=int, default=64, metavar='N',
+                        help='input batch size for training (default: 64)')
+    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
+                        help='input batch size for testing (default: 1000)')
+    parser.add_argument('--epochs', '-e', type=int, default=200, metavar='N',
+                        help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR', help='learning rate (default: 1.0)')
-    parser.add_argument('--gamma', type=float, default=0.7, metavar='M', help='Learning rate step gamma (default: 0.7)')
+    parser.add_argument('--gamma', '-g', type=float, default=0.7, metavar='M',
+                        help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=100, metavar='N', help='how many batches to wait before logging training status')
+    parser.add_argument('--seed', '-s', type=int, default=1, metavar='S', help='random seed (default: 1)')
+    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
+                        help='number of batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    parser.add_argument('--model-type', default='cifar10', help='model type')
-    parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
+    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
+                        help='type of adversarial attack')
     parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
-    parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
-    parser.add_argument('--train', type=bool, default=True, help='commence training')
+    parser.add_argument('--distance', '-d', type=str, default='inf', help='p norm for attack')
+    parser.add_argument('--train', '-t', type=bool, default=True, help='commence training')
     parser.add_argument('--ckpt', type=bool, default=False, help='use ckpt')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
