@@ -16,11 +16,15 @@ import foolbox
 from constants import ROOT
 from helpers.bar import progress_bar
 
+
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
     model.train()
-    train_loss = 0
-    correct = 0
-    total = 0
+
+    len_train_loader = len(train_loader)
+    len_data = train_loader.dataset.targets.size(0)
+    train_loss = 0.
+    correct = 0.
+    total = 0.
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
@@ -29,51 +33,59 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
             loss = criterion(output, target)
         else:
             loss = F.nll_loss(output, target)
+
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0 and criterion is None:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.
-                  format(epoch, batch_idx * len(data), len(train_loader.dataset),
-                         100. * batch_idx / len(train_loader), loss.item()))
+                  format(epoch, batch_idx * target.size(0), len_data,
+                         100. * batch_idx / len_train_loader, loss.item()))
+
         if criterion is not None:
             train_loss += loss.item()
             _, predicted = output.max(1)
             total += target.size(0)
             correct += predicted.eq(target).sum().item()
+
         if batch_idx % args.log_interval == 0 and criterion is not None:
-            progress_bar(batch_idx, len(train_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                    % (train_loss/(batch_idx+1), 100.*correct/total, correct, total))
+            progress_bar(batch_idx, len_train_loader, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                    % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
     return model
 
 
 def test(args, model, device, test_loader, criterion=None):
     model.eval()
-    test_loss = 0
-    correct = 0
-    total = 0
+
+    len_test_loader = len(test_loader)
+    len_data = test_loader.dataset.targets.size(0)
+    test_loss = 0.
+    correct = 0.
+    total = 0.
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(test_loader):
-            #print(data.shape, target.shape, type(data), type(target))
+            # print(data.shape, target.shape, type(data), type(target))
             data, target = data.to(device), target.to(device)
             output = model(data)
             if criterion is None:
                 test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
                 pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
                 correct += pred.eq(target.view_as(pred)).sum().item()
-                test_loss /= len(test_loader.dataset)
+                test_loss /= len_data
             else:
-                loss = criterion(output, target)
+                # loss = criterion(output, target)
                 _, predicted = output.max(1)
                 total += target.size(0)
                 correct += predicted.eq(target).sum().item()
-                #test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
-                progress_bar(batch_idx, len(test_loader), 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                % (test_loss/(batch_idx+1), 100.*correct/total, correct, total))
+                # test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
+                # NOTE: `test_loss` is not calculated
+                progress_bar(batch_idx, len_test_loader, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
+                % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+
     if criterion is None:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.
-              format(test_loss, correct, len(test_loader.dataset), 100. * correct / len(test_loader.dataset)))
-    #else:
+              format(test_loss, correct, len_data, 100. * correct / len_data))
+    # else:
     #    print('Accuracy of the network on the %d test images: %d %%' % (total, 100. * correct / total))
 
     return model
@@ -83,8 +95,8 @@ def attack(attack_model, device, test_loader):
     # model.eval()
     for data, target in test_loader:
         data, target = data.to(device), target.to(device)
-        data_numpy = (data.data.cpu()).numpy()
-        target_numpy = (target.data.cpu()).numpy()
+        data_numpy = data.data.cpu().numpy()
+        target_numpy = target.data.cpu().numpy()
         adversarials = attack_model(data_numpy, target_numpy) #, target_numpy, unpack=False)
 
 
@@ -119,17 +131,36 @@ def main():
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     data_path = os.path.join(ROOT, 'data')
+    criterion = None
     if args.model_type == 'mnist':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)) ])
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=False, transform=transform), batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.1307,), (0.3081,))]
+        )
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(data_path, train=True, download=True, transform=transform),
+            batch_size=args.batch_size, shuffle=True, **kwargs
+        )
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(data_path, train=False, transform=transform),
+            batch_size=args.test_batch_size, shuffle=True, **kwargs
+        )
         model = MNIST().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
+        bounds = (-255, 255)
+        num_classes = 10
 
     elif args.model_type == 'cifar10':
-        transform_train = transforms.Compose([transforms.RandomCrop(32, padding=4), transforms.RandomHorizontalFlip(), 
-            transforms.ToTensor(), transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))])
-        transform_test = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))])
+        transform_train = transforms.Compose(
+            [transforms.RandomCrop(32, padding=4),
+             transforms.RandomHorizontalFlip(),
+             transforms.ToTensor(),
+             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+        )
+        transform_test = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+        )
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform_train)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
@@ -137,16 +168,23 @@ def main():
         model = ResNet18().to(device)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=5e-4)
-    
+        bounds = (-255, 255)
+        num_classes = 10
+
     elif args.model_type == 'svhn':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        )
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)
-    
+        bounds = (-255, 255)
+        num_classes = 10
+
     else:
         print(args.model_type + " not in candidate models to be trained; halt!")
         exit()
@@ -155,39 +193,13 @@ def main():
    
     if args.train:
         for epoch in range(1, args.epochs + 1):
-            if args.model_type == 'mnist':
-                model = train(args, model, device, train_loader, optimizer, epoch)
-                model = test(args, model, device, test_loader)
-                bounds = (-255, 255)
-                num_classes = 10
-            elif args.model_type == 'cifar10':
-                model = train(args, model, device, train_loader, optimizer, epoch, criterion)
-                model = test(args, model, device, test_loader, criterion)
-                bounds = (-255, 255)
-                num_classes = 10
-            elif args.model_type == 'svhn':
-                model = train(args, model, device, train_loader, optimizer, epoch)
-                model = test(args, model, device, test_loader)
-                bounds = (-255, 255)
-                num_classes = 10
-            else:
-                print(args.model_type+" not in candidate models; halt!")
-                exit()
-
+            model = train(args, model, device, train_loader, optimizer, epoch, criterion=criterion)
+            model = test(args, model, device, test_loader, criterion=criterion)
             scheduler.step()
    
     elif args.ckpt:
-        model_path = os.path.join(os.path.join(ROOT, 'models'), args.model_type + '_cnn.pt')
-        if os.path.isdir(model_path):
-            if args.model_type == 'mnist':
-                model.load_state_dict(torch.load(model_path))
-            if args.model_type == 'cifar10':
-                model.load_state_dict(torch.load(model_path))
-            if args.model_type == 'svhn':
-                model.load_state_dict(torch.load(model_path))
-        else:
-            print(model_path + ' not found')
-            exit()
+        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
+        model.load_state_dict(torch.load(model_path))
     
     if args.attack:
         distance = None
@@ -217,13 +229,8 @@ def main():
         #adversarials = attack_model(images, labels)
     
     if args.save_model:
-        model_path = os.path.join(os.path.join(ROOT, 'models'), args.model_type+'_cnn.pt')
-        if args.model_type == 'mnist':
-            torch.save(model.state_dict(), model_path)
-        elif args.model_type == 'cifar10':
-            torch.save(model.state_dict(), model_path)
-        elif args.model_type == 'svhn':
-            torch.save(model.state_dict(), model_path)
+        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
+        torch.save(model.state_dict(), model_path)
 
 if __name__ == '__main__':
     main()
