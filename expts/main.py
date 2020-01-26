@@ -71,14 +71,15 @@ def test(args, model, device, test_loader, criterion=None):
                 test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
                 pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
                 correct += pred.eq(target.view_as(pred)).sum().item()
+                # TODO: Check if this correct
                 test_loss /= len_data
             else:
-                # loss = criterion(output, target)
+                loss = criterion(output, target)
                 _, predicted = output.max(1)
                 total += target.size(0)
                 correct += predicted.eq(target).sum().item()
+                test_loss += loss.item()
                 # test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
-                # NOTE: `test_loss` is not calculated
                 progress_bar(batch_idx, len_test_loader, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
                 % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
