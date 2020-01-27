@@ -14,7 +14,7 @@ from nets.resnet import *
 import os
 import foolbox
 from .constants import ROOT, NORMALIZE_IMAGES
-from helpers.bar import progress_bar
+from helpers.utils_pytorch import progress_bar
 from .utils import (
     load_model_checkpoint,
     save_model_checkpoint
