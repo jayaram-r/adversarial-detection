@@ -178,7 +178,7 @@ def main():
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
-        model = ResNet18().to(device)
+        model = ResNet34().to(device)
         criterion = nn.CrossEntropyLoss()
         # Settings recommended in: https://github.com/kuangliu/pytorch-cifar
         optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
