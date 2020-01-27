@@ -13,7 +13,7 @@ from nets.svhn import *
 from nets.resnet import *
 import os
 import foolbox
-from constants import ROOT
+from constants import ROOT, NORMALIZE_IMAGES
 from helpers.bar import progress_bar
 
 
@@ -122,10 +122,10 @@ def main():
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
                         help='type of adversarial attack')
-    parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
+    parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
     parser.add_argument('--distance', '-d', type=str, default='inf', help='p norm for attack')
-    parser.add_argument('--train', '-t', type=bool, default=True, help='commence training')
-    parser.add_argument('--ckpt', type=bool, default=False, help='use ckpt')
+    parser.add_argument('--train', '-t', action='store_true', default=True, help='commence training')
+    parser.add_argument('--ckpt', action='store_true', default=False, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -143,7 +143,7 @@ def main():
     if args.model_type == 'mnist':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.1307,), (0.3081,))]
+             transforms.Normalize(*NORMALIZE_IMAGES['mnist'])]
         )
         train_loader = torch.utils.data.DataLoader(
             datasets.MNIST(data_path, train=True, download=True, transform=transform),
@@ -164,11 +164,11 @@ def main():
             [transforms.RandomCrop(32, padding=4),
              transforms.RandomHorizontalFlip(),
              transforms.ToTensor(),
-             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+             transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         transform_test = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+             transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform_train)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -185,7 +185,7 @@ def main():
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+             transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)

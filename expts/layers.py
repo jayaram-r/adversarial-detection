@@ -30,7 +30,8 @@ from constants import (
     METRIC_DEF,
     PCA_CUTOFF,
     METHOD_INTRINSIC_DIM,
-    METHOD_DIM_REDUCTION
+    METHOD_DIM_REDUCTION,
+    NORMALIZE_IMAGES
 )
 try:
     import cPickle as pickle
@@ -154,10 +155,10 @@ def main():
     # parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
     # parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
     #                     help='type of adversarial attack')
-    # parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
+    # parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
     # parser.add_argument('--distance', '-d', type=str, default='inf', help='p norm for attack')
-    # parser.add_argument('--train', '-t', type=bool, default=True, help='commence training')
-    parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
+    # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
+    parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     parser.add_argument('--output', '-o', type=str, default='output_layer_extraction.txt',
                         help='output file basename')
@@ -175,7 +176,7 @@ def main():
     if args.model_type == 'mnist':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.1307,), (0.3081,))]
+             transforms.Normalize(*NORMALIZE_IMAGES['mnist'])]
         )
         train_loader = torch.utils.data.DataLoader(
             datasets.MNIST(data_path, train=True, download=True, transform=transform),
@@ -191,7 +192,7 @@ def main():
     elif args.model_type == 'cifar10':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+             transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -203,7 +204,7 @@ def main():
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+             transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
