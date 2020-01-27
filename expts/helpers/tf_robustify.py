@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+Source for this code: https://github.com/yk/icml19_public/tree/master/tf_robustify
+"""
 
 import os
 import numpy as np
