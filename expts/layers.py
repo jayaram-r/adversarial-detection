@@ -24,7 +24,7 @@ from helpers.dimension_reduction_methods import (
     transform_data_from_model,
     load_dimension_reduction_models
 )
-from constants import (
+from .constants import (
     ROOT,
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
@@ -33,6 +33,7 @@ from constants import (
     METHOD_DIM_REDUCTION,
     NORMALIZE_IMAGES
 )
+from .utils import load_model_checkpoint
 try:
     import cPickle as pickle
 except:
@@ -158,7 +159,7 @@ def main():
     # parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
     # parser.add_argument('--distance', '-d', type=str, default='inf', help='p norm for attack')
     # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
-    parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
+    # parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     parser.add_argument('--output', '-o', type=str, default='output_layer_extraction.txt',
                         help='output file basename')
@@ -217,9 +218,8 @@ def main():
         print(args.model_type + " not in candidate models; halt!")
         exit()
 
-    if args.ckpt:
-        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
-        model.load_state_dict(torch.load(model_path))
+    # Load the saved model checkpoint
+    model = load_model_checkpoint(model, args.model_type)
 
     # Get the feature embeddings from all the layers and the labels
     embeddings, labels, counts = extract_layer_embeddings(model, device, train_loader)

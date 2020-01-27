@@ -18,8 +18,8 @@ from helpers.metrics_custom import (
     distance_SNN,
     remove_self_neighbors
 )
-from helpers.utils import get_num_jobs
-from constants import (
+from .utils import get_num_jobs
+from .constants import (
     NEIGHBORHOOD_CONST,
     MIN_N_NEIGHBORS,
     RHO,

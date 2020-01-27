@@ -13,8 +13,12 @@ from nets.svhn import *
 from nets.resnet import *
 import os
 import foolbox
-from constants import ROOT, NORMALIZE_IMAGES
+from .constants import ROOT, NORMALIZE_IMAGES
 from helpers.bar import progress_bar
+from .utils import (
+    load_model_checkpoint,
+    save_model_checkpoint
+)
 
 
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
@@ -208,8 +212,7 @@ def main():
             scheduler.step()
    
     elif args.ckpt:
-        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
-        model.load_state_dict(torch.load(model_path))
+        model = load_model_checkpoint(model, args.model_type)
     
     if args.attack:
         distance = None
@@ -236,11 +239,11 @@ def main():
             exit()
 
         attack(attack_model, device, test_loader)
-        #adversarials = attack_model(images, labels)
+        # adversarials = attack_model(images, labels)
     
     if args.save_model:
-        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
-        torch.save(model.state_dict(), model_path)
+        save_model_checkpoint(model, args.model_type)
+
 
 if __name__ == '__main__':
     main()

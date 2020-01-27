@@ -6,15 +6,12 @@ import sys
 import argparse
 import os
 import numpy as np
-from constants import (
+from sklearn.model_selection import StratifiedKFold
+from .constants import (
     ROOT,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
     ATTACK_PROPORTION_DEF
-)
-from helpers.layers import (
-    combine_and_vectorize,
-    transform_layer_embeddings
 )
 
 
@@ -48,7 +45,8 @@ def main():
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
                         help='type of adversarial attack')
     parser.add_argument('--attack-proportion', '--ap', type=float, default=ATTACK_PROPORTION_DEF,
-                        help='Proportion of attack samples in the test set (default: 0.1)')
+                        help='Proportion of attack samples in the test set (default: {:.2f})'.
+                        format(ATTACK_PROPORTION_DEF))
     parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
                         help='Use option to enable a mixed attack strategy with multiple methods in '
                              'different proportions')
@@ -73,6 +71,17 @@ def main():
     if apply_dim_reduc:
         if not args.model_dim_reduc:
             model_dim_reduc = os.path.join(ROOT, 'outputs', args.model_type, 'models_dimension_reduction.pkl')
+
+    """
+    # Stratified cross-validation split
+    skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
+    for ind_tr, ind_te in skf.split(data, labels):
+        data_tr = data[ind_tr, :]
+        labels_tr = labels[ind_tr]
+        data_te = data[ind_te, :]
+        labels_te = labels[ind_te]
+    """
+
 
 if __name__ == '__main__':
     main()
