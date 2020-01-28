@@ -58,43 +58,51 @@ def combine_and_vectorize(data_batches):
     return data
 
 
-def extract_layer_embeddings(model, device, train_loader, num_samples=None):
-    tot_target = []
+def extract_layer_embeddings(model, device, data_loader, num_samples=None):
+    labels = []
+    labels_pred = []
     embeddings = []
     num_samples_partial = 0
-    # counter = 180   # number of data batches
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
+    with torch.no_grad():
+        for batch_idx, (data, target) in enumerate(data_loader):
+            data, target = data.to(device), target.to(device)
 
-        temp = target.detach().cpu().numpy()
-        tot_target.extend(temp)
-        num_samples_partial += temp.shape[0]
-        #print(batch_idx)
+            temp = target.detach().cpu().numpy()
+            labels.extend(temp)
+            num_samples_partial += temp.shape[0]
+            # print(batch_idx)
 
-        output = model.layer_wise(data)
-        if batch_idx > 0:
-            for i in range(len(output)):    # each layer
-                embeddings[i].append(output[i].detach().cpu().numpy())
-        else:
-            embeddings = [[v.detach().cpu().numpy()] for v in output]
+            # Predicted class
+            outputs = model(data)
+            _, predicted = outputs.max(1)
+            labels_pred.extend(predicted.detach().cpu().numpy())
+            # Layer outputs
+            outputs_layers = model.layer_wise(data)
+            if batch_idx > 0:
+                for i in range(len(outputs_layers)):    # each layer
+                    embeddings[i].append(outputs_layers[i].detach().cpu().numpy())
+            else:
+                embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
-        if num_samples:
-            if num_samples_partial >= num_samples:
-                break
+            if num_samples:
+                if num_samples_partial >= num_samples:
+                    break
 
     # `embeddings` will be a list of length equal to the number of layers.
     # `embeddings[i]` will be a list of numpy arrays corresponding to the data batches for layer `i`.
     # `embeddings[i][j]` will have shape `(b, d1, d2, d3)` or `(b, d1)` where `b` is the batch size and the rest
     # are dimensions.
-    tot_target = np.array(tot_target, dtype=np.int)
-    labels_uniq, counts = np.unique(tot_target, return_counts=True)
+    labels = np.array(labels, dtype=np.int)
+    labels_pred = np.array(labels_pred, dtype=np.int)
+    # Unique label counts
+    labels_uniq, counts = np.unique(labels, return_counts=True)
     for a, b in zip(labels_uniq, counts):
-        print("label {}, count = {:d}, proportion = {:.4f}".format(a, b, b / tot_target.shape[0]))
+        print("label {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels.shape[0]))
 
     if (np.max(counts) / np.min(counts)) >= 1.2:
         print("WARNING: classes are not balanced")
 
-    return embeddings, tot_target, counts
+    return embeddings, labels, labels_pred, counts
 
 
 def transform_layer_embeddings(embeddings_in, transform_models=None, transform_models_file=None):
@@ -222,8 +230,8 @@ def main():
     model = load_model_checkpoint(model, args.model_type)
 
     # Get the feature embeddings from all the layers and the labels
-    embeddings, labels, counts = extract_layer_embeddings(model, device, train_loader)
-    embeddings_test, labels_test, counts_test = extract_layer_embeddings(model, device, test_loader)
+    embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, train_loader)
+    embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(model, device, test_loader)
     print("embeddings calculated!")
 
     max_samples = 10000  # number of samples to use for ID estimation and dimension reduction
