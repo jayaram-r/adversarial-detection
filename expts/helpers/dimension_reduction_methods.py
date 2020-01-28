@@ -33,8 +33,8 @@ import multiprocessing
 from functools import partial
 from helpers.lid_estimators import estimate_intrinsic_dimension
 from helpers.knn_index import KNNIndex
-from helpers.utils import get_num_jobs
-from constants import (
+from ..utils import get_num_jobs
+from ..constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF
