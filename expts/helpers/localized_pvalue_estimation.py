@@ -15,9 +15,9 @@ import sys
 import multiprocessing
 from functools import partial
 from helpers.knn_index import KNNIndex
-from ..utils import get_num_jobs
+from helpers.utils import get_num_jobs
 from sklearn.metrics import pairwise_distances
-from ..constants import (
+from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF

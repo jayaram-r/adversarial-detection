@@ -12,8 +12,8 @@ from helpers.multinomial import (
     special_dirichlet_prior
 )
 from helpers.lid_estimators import lid_mle_amsaleg
-from ..utils import get_num_jobs
-from ..constants import (
+from helpers.utils import get_num_jobs
+from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF

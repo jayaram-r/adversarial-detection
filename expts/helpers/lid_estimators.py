@@ -6,7 +6,7 @@ import numpy as np
 from scipy import stats
 import sys
 from helpers.knn_index import KNNIndex
-from ..constants import (
+from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT
 )

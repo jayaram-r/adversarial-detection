@@ -17,8 +17,8 @@ import numpy as np
 import sys
 from helpers.lid_estimators import lid_mle_amsaleg
 from helpers.knn_index import KNNIndex
-from ..utils import get_num_jobs
-from ..constants import (
+from helpers.utils import get_num_jobs
+from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT
 )
