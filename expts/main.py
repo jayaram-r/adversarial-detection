@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
 from nets.mnist import *
@@ -13,9 +12,9 @@ from nets.svhn import *
 from nets.resnet import *
 import os
 import foolbox
-from .constants import ROOT, NORMALIZE_IMAGES
+from helpers.constants import ROOT, NORMALIZE_IMAGES
 from helpers.utils_pytorch import progress_bar
-from .utils import (
+from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint
 )
@@ -155,7 +154,7 @@ def main():
             batch_size=args.batch_size, shuffle=True, **kwargs
         )
         test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(data_path, train=False, transform=transform),
+            datasets.MNIST(data_path, train=False, download=True, transform=transform),
             batch_size=args.test_batch_size, shuffle=True, **kwargs
         )
         model = MNIST().to(device)
@@ -175,9 +174,9 @@ def main():
             [transforms.ToTensor(),
              transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
-        trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform_train)
+        trainset = datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform_train)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
+        testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = ResNet34().to(device)
         criterion = nn.CrossEntropyLoss()
@@ -192,9 +191,9 @@ def main():
             [transforms.ToTensor(),
              transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
-        trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
+        trainset = datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        testset = torchvision.datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
+        testset = datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
         optimizer = optim.Adadelta(model.parameters(), lr=args.lr)

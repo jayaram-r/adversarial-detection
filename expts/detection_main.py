@@ -7,7 +7,7 @@ import argparse
 import os
 import numpy as np
 from sklearn.model_selection import StratifiedKFold
-from .constants import (
+from helpers.constants import (
     ROOT,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,

@@ -17,8 +17,8 @@ from helpers.dimension_reduction_methods import (
     wrapper_data_projection,
     METHODS_LIST
 )
-from ..utils import get_num_jobs
-from ..constants import (
+from helpers.utils import get_num_jobs
+from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
