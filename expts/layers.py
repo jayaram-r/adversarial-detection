@@ -31,7 +31,8 @@ from .constants import (
     PCA_CUTOFF,
     METHOD_INTRINSIC_DIM,
     METHOD_DIM_REDUCTION,
-    NORMALIZE_IMAGES
+    NORMALIZE_IMAGES,
+    MAX_SAMPLES_DIM_REDUCTION
 )
 from .utils import load_model_checkpoint
 try:
@@ -165,7 +166,8 @@ def main():
     # parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
     #                     help='type of adversarial attack')
     # parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
-    # parser.add_argument('--distance', '-d', type=str, default='inf', help='p norm for attack')
+    # parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
+    #                     help="p norm for the adversarial attack; options are '2' and 'inf'")
     # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
     # parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
@@ -223,28 +225,31 @@ def main():
         num_classes = 10
     
     else:
-        print(args.model_type + " not in candidate models; halt!")
-        exit()
+        raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
     # Load the saved model checkpoint
     model = load_model_checkpoint(model, args.model_type)
 
     # Get the feature embeddings from all the layers and the labels
     embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, train_loader)
-    embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(model, device, test_loader)
-    print("embeddings calculated!")
+    embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(model, device,
+                                                                                           test_loader)
+    print("Layer embeddings calculated!")
+    accu_test = np.sum(labels_test == labels_pred_test) / float(labels_test.shape[0])
+    print("Test set accuracy = {:.4f}".format(accu_test))
 
-    max_samples = 10000  # number of samples to use for ID estimation and dimension reduction
-
-    # Take a random class-stratified subsample of the data for intrinsic dimension estimation and
-    # dimensionality reduction
-    sss = StratifiedShuffleSplit(n_splits=1, test_size=max_samples, random_state=args.seed)
-    temp = np.zeros((labels.shape[0], 2))   # placeholder data array
-    _, indices_sample = next(sss.split(temp, labels))
+    ns = labels.shape[0]
+    if ns > MAX_SAMPLES_DIM_REDUCTION:
+        # Take a random class-stratified subsample of the data for intrinsic dimension estimation and
+        # dimensionality reduction
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=MAX_SAMPLES_DIM_REDUCTION, random_state=args.seed)
+        temp = np.zeros((ns, 2))   # placeholder data array
+        _, indices_sample = next(sss.split(temp, labels))
+    else:
+        indices_sample = np.arange(ns)
 
     n_layers = len(embeddings)
-    print("number of layers = {}".format(n_layers))
-
+    print("Number of layers = {}".format(n_layers))
     # Use half the number of available cores
     cc = cpu_count()
     n_jobs = max(1, int(0.5 * cc))
@@ -257,8 +262,8 @@ def main():
     # Projection model from the different layers
     model_projection_layers = []
     # Projected (dimension reduced) training and test data from the different layers
-    data_train_layers = []
-    data_test_layers = []
+    # data_train_layers = []
+    # data_test_layers = []
     for i in range(n_layers):    # number of layers in the CNN
         lines = []
         mode = 'w' if i == 0 else 'a'
@@ -272,10 +277,7 @@ def main():
         data_test = combine_and_vectorize(embeddings_test[i])
 
         if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
-            print("label - sample mismatch; break!")
-            exit()
-        else:
-            print("num labels == num samples; proceeding with intrisic dimensionality calculation!")
+            raise ValueError("Mismatch in the size of the data and labels array!")
 
         # Random stratified sample from the training portion of the data
         data_sample = data[indices_sample, :]
