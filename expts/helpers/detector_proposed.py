@@ -13,6 +13,7 @@ from helpers.density_model_layer_statistics import (
     score_log_normal_mixture
 )
 from layers import (
+    extract_layer_embeddings,
     combine_and_vectorize,
     transform_layer_embeddings
 )
