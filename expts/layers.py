@@ -25,8 +25,8 @@ from helpers.constants import (
     NORMALIZE_IMAGES,
     MAX_SAMPLES_DIM_REDUCTION
 )
-from helpers.utils import (
-    load_model_checkpoint,
+from helpers.utils import load_model_checkpoint
+from helpers.detector_proposed import (
     combine_and_vectorize,
     extract_layer_embeddings
 )
