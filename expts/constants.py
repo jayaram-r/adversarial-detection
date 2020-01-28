@@ -33,6 +33,7 @@ METHOD_INTRINSIC_DIM = 'lid_mle'
 
 # Method for dimension reduction
 METHOD_DIM_REDUCTION = 'NPP'
+MAX_SAMPLES_DIM_REDUCTION = 10000
 
 # Cumulative variance cutoff for PCA
 PCA_CUTOFF = 0.995

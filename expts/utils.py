@@ -12,12 +12,15 @@ from sklearn.metrics import (
 from .constants import ROOT
 
 
-def get_model_file(model_type):
-    return os.path.join(ROOT, 'models', model_type + '_cnn.pt')
+def get_model_file(model_type, epoch=None):
+    if epoch is None:
+        return os.path.join(ROOT, 'models', '{}_cnn.pt'.format(model_type))
+    else:
+        return os.path.join(ROOT, 'models', '{}_epoch_{}_cnn.pt'.format(model_type, epoch))
 
 
-def load_model_checkpoint(model, model_type):
-    model_path = get_model_file(model_type)
+def load_model_checkpoint(model, model_type, epoch=None):
+    model_path = get_model_file(model_type, epoch=epoch)
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path))
     else:
@@ -26,8 +29,8 @@ def load_model_checkpoint(model, model_type):
     return model
 
 
-def save_model_checkpoint(model, model_type):
-    model_path = get_model_file(model_type)
+def save_model_checkpoint(model, model_type, epoch=None):
+    model_path = get_model_file(model_type, epoch=epoch)
     torch.save(model.state_dict(), model_path)
 
 
