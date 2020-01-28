@@ -1,5 +1,6 @@
 
 import numpy as np
+import torch
 import os
 from multiprocessing import cpu_count
 from helpers.generate_data import MFA_model

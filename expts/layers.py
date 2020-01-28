@@ -4,6 +4,7 @@ import torch
 from torchvision import datasets, transforms
 from nets.mnist import *
 from nets.cifar10 import *
+from nets.resnet import *
 from nets.svhn import *
 import os
 import foolbox
@@ -86,7 +87,7 @@ def main():
             batch_size=args.batch_size, shuffle=True, **kwargs
         )
         test_loader = torch.utils.data.DataLoader(
-            datasets.MNIST(data_path, train=False, transform=transform),
+            datasets.MNIST(data_path, train=False, download=True, transform=transform),
             batch_size=args.test_batch_size, shuffle=True, **kwargs
         )
         model = MNIST().to(device)
@@ -101,7 +102,7 @@ def main():
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
-        model = CIFAR10().to(device)
+        model = ResNet34().to(device)
         num_classes = 10
     
     elif args.model_type == 'svhn':
