@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 import argparse
 import torch
 import torch.nn as nn
@@ -13,15 +13,19 @@ from nets.svhn import *
 from nets.resnet import *
 import os
 import foolbox
-from constants import ROOT
-from helpers.bar import progress_bar
+from .constants import ROOT, NORMALIZE_IMAGES
+from helpers.utils_pytorch import progress_bar
+from .utils import (
+    load_model_checkpoint,
+    save_model_checkpoint
+)
 
 
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
     model.train()
 
     len_train_loader = len(train_loader)
-    len_data = train_loader.dataset.targets.size(0)
+    len_data = len(train_loader.dataset)
     train_loss = 0.
     correct = 0.
     total = 0.
@@ -38,8 +42,8 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
         optimizer.step()
         if batch_idx % args.log_interval == 0 and criterion is None:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.
-                  format(epoch, batch_idx * target.size(0), len_data,
-                         100. * batch_idx / len_train_loader, loss.item()))
+                  format(epoch, (batch_idx + 1) * target.size(0), len_data,
+                         100. * (batch_idx + 1) / len_train_loader, loss.item()))
 
         if criterion is not None:
             train_loss += loss.item()
@@ -49,7 +53,7 @@ def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
 
         if batch_idx % args.log_interval == 0 and criterion is not None:
             progress_bar(batch_idx, len_train_loader, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                    % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                         % (train_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
     return model
 
@@ -58,7 +62,7 @@ def test(args, model, device, test_loader, criterion=None):
     model.eval()
 
     len_test_loader = len(test_loader)
-    len_data = test_loader.dataset.targets.size(0)
+    len_data = len(test_loader.dataset)
     test_loss = 0.
     correct = 0.
     total = 0.
@@ -81,7 +85,7 @@ def test(args, model, device, test_loader, criterion=None):
                 test_loss += loss.item()
                 # test_loss += criterion(output, target, reduction='sum').item()  # sum up batch loss
                 progress_bar(batch_idx, len_test_loader, 'Loss: %.3f | Acc: %.3f%% (%d/%d)'
-                % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
+                             % (test_loss / (batch_idx + 1), 100. * correct / total, correct, total))
 
     if criterion is None:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.
@@ -104,21 +108,29 @@ def attack(attack_model, device, test_loader):
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='Arguments')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N', help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=200, metavar='N', help='number of epochs to train (default: 14)')
+    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
+                        help='model type or name of the dataset')
+    parser.add_argument('--batch-size', '-b', type=int, default=64, metavar='N',
+                        help='input batch size for training (default: 64)')
+    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
+                        help='input batch size for testing (default: 1000)')
+    parser.add_argument('--epochs', '-e', type=int, default=100, metavar='N',
+                        help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR', help='learning rate (default: 1.0)')
-    parser.add_argument('--gamma', type=float, default=0.7, metavar='M', help='Learning rate step gamma (default: 0.7)')
+    parser.add_argument('--gamma', '-g', type=float, default=0.7, metavar='M',
+                        help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
-    parser.add_argument('--log-interval', type=int, default=100, metavar='N', help='how many batches to wait before logging training status')
+    parser.add_argument('--seed', '-s', type=int, default=1, metavar='S', help='random seed (default: 1)')
+    parser.add_argument('--log-interval', type=int, default=100, metavar='N',
+                        help='number of batches to wait before logging training status')
     parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    parser.add_argument('--model-type', default='cifar10', help='model type')
-    parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
-    parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
-    parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
-    parser.add_argument('--train', type=bool, default=True, help='commence training')
-    parser.add_argument('--ckpt', type=bool, default=False, help='use ckpt')
+    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
+                        help='type of adversarial attack')
+    parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
+    parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
+                        help="p norm for the adversarial attack; options are '2' and 'inf'")
+    parser.add_argument('--train', '-t', action='store_true', default=True, help='commence training')
+    parser.add_argument('--ckpt', action='store_true', default=False, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -136,7 +148,7 @@ def main():
     if args.model_type == 'mnist':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.1307,), (0.3081,))]
+             transforms.Normalize(*NORMALIZE_IMAGES['mnist'])]
         )
         train_loader = torch.utils.data.DataLoader(
             datasets.MNIST(data_path, train=True, download=True, transform=transform),
@@ -157,17 +169,17 @@ def main():
             [transforms.RandomCrop(32, padding=4),
              transforms.RandomHorizontalFlip(),
              transforms.ToTensor(),
-             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+             transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         transform_test = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994,0.2010))]
+             transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform_train)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
-        model = ResNet18().to(device)
+        model = ResNet34().to(device)
         criterion = nn.CrossEntropyLoss()
         # Settings recommended in: https://github.com/kuangliu/pytorch-cifar
         optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -178,7 +190,7 @@ def main():
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
             [transforms.ToTensor(),
-             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+             transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -191,49 +203,48 @@ def main():
         num_classes = 10
 
     else:
-        print(args.model_type + " not in candidate models to be trained; halt!")
-        exit()
+        raise ValueError("'{}' is not a valid model type".format(args.model_type))
    
     if args.train:
         for epoch in range(1, args.epochs + 1):
             model = train(args, model, device, train_loader, optimizer, epoch, criterion=criterion)
             model = test(args, model, device, test_loader, criterion=criterion)
             scheduler.step()
+            # periodic checkpoint of the model
+            if epoch % 20 == 0:
+                save_model_checkpoint(model, args.model_type, epoch=epoch)
    
     elif args.ckpt:
-        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
-        model.load_state_dict(torch.load(model_path))
+        model = load_model_checkpoint(model, args.model_type)
     
     if args.attack:
         distance = None
-        if args.distance == '2':
+        if args.p_norm == '2':
             distance = foolbox.distances.Linf
-        elif args.distance == 'inf':
+        elif args.p_norm == 'inf':
             distance = foolbox.distances.Linf
         else:
-            print(args.distance + " not in candidate distances; halt!")
-            exit()
+            raise ValueError("'{}' is not a valid or supported p-norm type".format(args.p_norm))
     
         model.to(device)
         model.eval()
         fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
         
         if args.adv_attack == 'FGSM':
-            attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) #distance=foolbox.distances.Linf)
+            attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) # distance=foolbox.distances.Linf)
         if args.adv_attack == 'PGD':
             attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
         if args.adv_attack == 'CW':
             attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
         else:
-            print(args.adv_attack + " not in candidate attacks; halt!")
-            exit()
+            raise ValueError("'{}' is not a valid adversarial attack".format(args.adv_attack))
 
         attack(attack_model, device, test_loader)
-        #adversarials = attack_model(images, labels)
+        # adversarials = attack_model(images, labels)
     
     if args.save_model:
-        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
-        torch.save(model.state_dict(), model_path)
+        save_model_checkpoint(model, args.model_type)
+
 
 if __name__ == '__main__':
     main()

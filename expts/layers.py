@@ -1,4 +1,4 @@
-from __future__ import print_function
+from __future__ import absolute_import, division, print_function
 import argparse
 import torch
 import torch.nn as nn
@@ -24,14 +24,17 @@ from helpers.dimension_reduction_methods import (
     transform_data_from_model,
     load_dimension_reduction_models
 )
-from constants import (
+from .constants import (
     ROOT,
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
     PCA_CUTOFF,
     METHOD_INTRINSIC_DIM,
-    METHOD_DIM_REDUCTION
+    METHOD_DIM_REDUCTION,
+    NORMALIZE_IMAGES,
+    MAX_SAMPLES_DIM_REDUCTION
 )
+from .utils import load_model_checkpoint
 try:
     import cPickle as pickle
 except:
@@ -56,43 +59,51 @@ def combine_and_vectorize(data_batches):
     return data
 
 
-def extract_layer_embeddings(model, device, train_loader, num_samples=None):
-    tot_target = []
+def extract_layer_embeddings(model, device, data_loader, num_samples=None):
+    labels = []
+    labels_pred = []
     embeddings = []
     num_samples_partial = 0
-    # counter = 180   # number of data batches
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
+    with torch.no_grad():
+        for batch_idx, (data, target) in enumerate(data_loader):
+            data, target = data.to(device), target.to(device)
 
-        temp = target.detach().cpu().numpy()
-        tot_target.extend(temp)
-        num_samples_partial += temp.shape[0]
-        #print(batch_idx)
+            temp = target.detach().cpu().numpy()
+            labels.extend(temp)
+            num_samples_partial += temp.shape[0]
+            # print(batch_idx)
 
-        output = model.layer_wise(data)
-        if batch_idx > 0:
-            for i in range(len(output)):    # each layer
-                embeddings[i].append(output[i].detach().cpu().numpy())
-        else:
-            embeddings = [[v.detach().cpu().numpy()] for v in output]
+            # Predicted class
+            outputs = model(data)
+            _, predicted = outputs.max(1)
+            labels_pred.extend(predicted.detach().cpu().numpy())
+            # Layer outputs
+            outputs_layers = model.layer_wise(data)
+            if batch_idx > 0:
+                for i in range(len(outputs_layers)):    # each layer
+                    embeddings[i].append(outputs_layers[i].detach().cpu().numpy())
+            else:
+                embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
-        if num_samples:
-            if num_samples_partial >= num_samples:
-                break
+            if num_samples:
+                if num_samples_partial >= num_samples:
+                    break
 
     # `embeddings` will be a list of length equal to the number of layers.
     # `embeddings[i]` will be a list of numpy arrays corresponding to the data batches for layer `i`.
     # `embeddings[i][j]` will have shape `(b, d1, d2, d3)` or `(b, d1)` where `b` is the batch size and the rest
     # are dimensions.
-    tot_target = np.array(tot_target, dtype=np.int)
-    labels_uniq, counts = np.unique(tot_target, return_counts=True)
+    labels = np.array(labels, dtype=np.int)
+    labels_pred = np.array(labels_pred, dtype=np.int)
+    # Unique label counts
+    labels_uniq, counts = np.unique(labels, return_counts=True)
     for a, b in zip(labels_uniq, counts):
-        print("label {}, count = {:d}, proportion = {:.4f}".format(a, b, b / tot_target.shape[0]))
+        print("label {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels.shape[0]))
 
     if (np.max(counts) / np.min(counts)) >= 1.2:
         print("WARNING: classes are not balanced")
 
-    return embeddings, tot_target, counts
+    return embeddings, labels, labels_pred, counts
 
 
 def transform_layer_embeddings(embeddings_in, transform_models=None, transform_models_file=None):
@@ -136,23 +147,32 @@ def transform_layer_embeddings(embeddings_in, transform_models=None, transform_m
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='Arguments')
-    parser.add_argument('--batch-size', type=int, default=64, metavar='N', help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N', help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', type=int, default=10, metavar='N', help='number of epochs to train (default: 14)')
+    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
+                        help='model type or name of the dataset')
+    parser.add_argument('--batch-size', '-b', type=int, default=64, metavar='N',
+                        help='input batch size for training (default: 64)')
+    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
+                        help='input batch size for testing (default: 1000)')
+    parser.add_argument('--epochs', '-e', type=int, default=10, metavar='N',
+                        help='number of epochs to train (default: 10)')
     parser.add_argument('--lr', type=float, default=1.0, metavar='LR', help='learning rate (default: 1.0)')
-    parser.add_argument('--gamma', type=float, default=0.7, metavar='M', help='Learning rate step gamma (default: 0.7)')
+    parser.add_argument('--gamma', '-g', type=float, default=0.7, metavar='M',
+                        help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-    parser.add_argument('--seed', type=int, default=1, metavar='S', help='random seed (default: 1)')
-    #parser.add_argument('--log-interval', type=int, default=100, metavar='N', help='how many batches to wait before logging training status')
-    #parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    parser.add_argument('--model-type', default='mnist', help='model type')
-    #parser.add_argument('--adv-attack', default='FGSM', help='type of adversarial attack')
-    #parser.add_argument('--attack', type=bool, default=False, help='launch attack? True or False')
-    #parser.add_argument('--distance', type=str, default='inf', help='p norm for attack')
-    #parser.add_argument('--train', type=bool, default=False, help='commence training')
-    parser.add_argument('--ckpt', type=bool, default=True, help='use ckpt')
+    parser.add_argument('--seed', '-s', type=int, default=1, metavar='S', help='random seed (default: 1)')
+    # parser.add_argument('--log-interval', type=int, default=100, metavar='N',
+    #                     help='number of batches to wait before logging training status')
+    # parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
+    # parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
+    #                     help='type of adversarial attack')
+    # parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
+    # parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
+    #                     help="p norm for the adversarial attack; options are '2' and 'inf'")
+    # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
+    # parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
-    parser.add_argument('--output', type=str, default='output_layer_extraction.txt', help='output file basename')
+    parser.add_argument('--output', '-o', type=str, default='output_layer_extraction.txt',
+                        help='output file basename')
     args = parser.parse_args()
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -165,66 +185,71 @@ def main():
 
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))])
-        train_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=True, download=True, transform=transform), batch_size=args.batch_size, shuffle=True, **kwargs)
-        test_loader = torch.utils.data.DataLoader(datasets.MNIST(data_path, train=False, transform=transform),
-                                                  batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize(*NORMALIZE_IMAGES['mnist'])]
+        )
+        train_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(data_path, train=True, download=True, transform=transform),
+            batch_size=args.batch_size, shuffle=True, **kwargs
+        )
+        test_loader = torch.utils.data.DataLoader(
+            datasets.MNIST(data_path, train=False, transform=transform),
+            batch_size=args.test_batch_size, shuffle=True, **kwargs
+        )
         model = MNIST().to(device)
+        num_classes = 10
 
     elif args.model_type == 'cifar10':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
+        )
         trainset = torchvision.datasets.CIFAR10(root=data_path, train=True, download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = CIFAR10().to(device)
+        num_classes = 10
     
     elif args.model_type == 'svhn':
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        transform = transforms.Compose(
+            [transforms.ToTensor(),
+             transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
+        )
         trainset = torchvision.datasets.SVHN(root=data_path, split='train', download=True, transform=transform)
         train_loader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, **kwargs)
         testset = torchvision.datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         model = SVHN().to(device)
+        num_classes = 10
     
     else:
-        print(args.model_type + " not in candidate models; halt!")
-        exit()
+        raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-    if args.ckpt:
-        model_path = os.path.join(ROOT, 'models', args.model_type + '_cnn.pt')
-        if os.path.exists(model_path):
-            if args.model_type == 'mnist':
-                model.load_state_dict(torch.load(model_path))
-            if args.model_type == 'cifar10':
-                model.load_state_dict(torch.load(model_path))
-            if args.model_type == 'svhn':
-                model.load_state_dict(torch.load(model_path))
-
-        else:
-            print(model_path + ' not found')
-            exit()
-    
-        print("empty embeddings list loaded!")
+    # Load the saved model checkpoint
+    model = load_model_checkpoint(model, args.model_type)
 
     # Get the feature embeddings from all the layers and the labels
-    embeddings, labels, counts = extract_layer_embeddings(model, device, train_loader)
-    embeddings_test, labels_test, counts_test = extract_layer_embeddings(model, device, test_loader)
+    embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, train_loader)
+    embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(model, device,
+                                                                                           test_loader)
+    print("Layer embeddings calculated!")
+    accu_test = np.sum(labels_test == labels_pred_test) / float(labels_test.shape[0])
+    print("Test set accuracy = {:.4f}".format(accu_test))
 
-    max_samples = 10000  # number of samples to use for ID estimation and dimension reduction
+    ns = labels.shape[0]
+    if ns > MAX_SAMPLES_DIM_REDUCTION:
+        # Take a random class-stratified subsample of the data for intrinsic dimension estimation and
+        # dimensionality reduction
+        sss = StratifiedShuffleSplit(n_splits=1, test_size=MAX_SAMPLES_DIM_REDUCTION, random_state=args.seed)
+        temp = np.zeros((ns, 2))   # placeholder data array
+        _, indices_sample = next(sss.split(temp, labels))
+    else:
+        indices_sample = np.arange(ns)
 
-    # Take a random class-stratified subsample of the data for intrinsic dimension estimation and
-    # dimensionality reduction
-    sss = StratifiedShuffleSplit(n_splits=1, test_size=max_samples, random_state=args.seed)
-    temp = np.zeros((labels.shape[0], 2))   # placeholder data array
-    _, indices_sample = next(sss.split(temp, labels))
-
-    #perform some processing on the counts if it is not class balanced
-    print("embeddings calculated!")
     n_layers = len(embeddings)
-    print("number of layers = {}".format(n_layers))
-    #exit()
-
+    print("Number of layers = {}".format(n_layers))
     # Use half the number of available cores
     cc = cpu_count()
     n_jobs = max(1, int(0.5 * cc))
@@ -237,8 +262,8 @@ def main():
     # Projection model from the different layers
     model_projection_layers = []
     # Projected (dimension reduced) training and test data from the different layers
-    data_train_layers = []
-    data_test_layers = []
+    # data_train_layers = []
+    # data_test_layers = []
     for i in range(n_layers):    # number of layers in the CNN
         lines = []
         mode = 'w' if i == 0 else 'a'
@@ -252,10 +277,7 @@ def main():
         data_test = combine_and_vectorize(embeddings_test[i])
 
         if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
-            print("label - sample mismatch; break!")
-            exit()
-        else:
-            print("num labels == num samples; proceeding with intrisic dimensionality calculation!")
+            raise ValueError("Mismatch in the size of the data and labels array!")
 
         # Random stratified sample from the training portion of the data
         data_sample = data[indices_sample, :]
