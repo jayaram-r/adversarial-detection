@@ -203,6 +203,15 @@ class DetectorLayerStatistics:
         self.labels_unique = None
         self.n_classes = None
         self.n_samples = None
+        # List of test statistic model instances for each layer
+        self.test_stats_instances = []
+        # dict mapping each class `c` to the joint density model of the test statistics conditioned on predicted
+        # class being `c`
+        self.density_models_pred = dict()
+        # dict mapping each class `c` to the joint density model of the test statistics conditioned on true
+        # class being `c`
+        self.density_models_true = dict()
+
 
     def fit(self, layer_embeddings, labels, labels_pred):
         self.n_layers = len(layer_embeddings)
@@ -243,7 +252,6 @@ class DetectorLayerStatistics:
 
         for i in range(self.n_layers):
             logger.info("Parameter estimation and test statistics calculation for layer {:d}:".format(i + 1))
-            ts_obj = None
             if self.layer_statistic == 'multinomial':
                 ts_obj = MultinomialScore(
                     neighborhood_constant=self.neighborhood_constant,
@@ -275,14 +283,18 @@ class DetectorLayerStatistics:
             The remaining columns `scores_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on `i - 1`
             being the candidate true class for the sample.
             '''
+            self.test_stats_instances.append(ts_obj)
             for j, c in enumerate(self.labels_unique):
                 # Test statistics from layer `i`
                 test_stats_pred[c][:, i] = scores_temp[indices_pred[c], 0]
                 test_stats_true[c][:, i] = scores_temp[indices_true[c], j + 1]
 
-        # Get the top ranked order statistics if required
-        if self.use_top_ranked:
-            for c in self.labels_unique:
+        # Learn a joint probability density model for the test statistics
+        for c in self.labels_unique:
+            # Get the top ranked order statistics if required
+            if self.use_top_ranked:
+                logger.info("Using the largest (smallest) {:d} test statistics conditioned on the predicted "
+                            "(true) class.".format(self.num_top_ranked))
                 # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
                 # test statistics across the layers
                 arr = np.fliplr(np.sort(test_stats_pred[c], axis=1))
@@ -293,4 +305,12 @@ class DetectorLayerStatistics:
                 arr = np.sort(test_stats_true[c], axis=1)
                 test_stats_true[c] = arr[:, :self.num_top_ranked]
 
-        # Learn a probability density model for the test statistics
+            logger.info("Learning a probability density model for the test statistics conditioned on the "
+                        "predicted class {}.".format(c))
+            logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_pred[c].shape))
+            self.density_models_pred[c] = train_log_normal_mixture(test_stats_pred[c], seed_rng=self.seed_rng)
+
+            logger.info("Learning a probability density model for the test statistics conditioned on the "
+                        "true class {}.".format(c))
+            logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
+            self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
