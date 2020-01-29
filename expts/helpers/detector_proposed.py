@@ -7,7 +7,8 @@ from helpers.constants import (
     SEED_DEFAULT,
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
-    NUM_TOP_RANKED
+    NUM_TOP_RANKED,
+    TEST_STATS_SUPPORTED
 )
 from helpers.dimension_reduction_methods import (
     transform_data_from_model,
@@ -45,6 +46,22 @@ def combine_and_vectorize(data_batches):
 
 
 def extract_layer_embeddings(model, device, data_loader, num_samples=None):
+    """
+    Extract the layer embeddings produced by a trained DNN model on the given data set. Also, returns the true class
+    and the predicted class for each sample.
+
+    :param model: torch NN model.
+    :param device: torch device type - cuda or cpu.
+    :param data_loader: torch data loader object which is an instancee of `torch.utils.data.DataLoader`.
+    :param num_samples: None or an int value specifying the number of samples to select.
+
+    :return:
+        - embeddings: list of numpy arrays, one per layer, where the i-th array has shape `(N, d_i)`, `N` being
+                      the number of samples and `d_i` being the vectorized dimension of layer `i`.
+        - labels: numpy array of class labels. Has shape `(N, )`.
+        - labels_pred: numpy array of the model-predicted class labels. Has shape `(N, )`.
+        - counts: numpy array of sample counts for each distinct class in `labels`.
+    """
     labels = []
     labels_pred = []
     embeddings = []
@@ -74,10 +91,14 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
                 if num_samples_partial >= num_samples:
                     break
 
-    # `embeddings` will be a list of length equal to the number of layers.
-    # `embeddings[i]` will be a list of numpy arrays corresponding to the data batches for layer `i`.
-    # `embeddings[i][j]` will have shape `(b, d1, d2, d3)` or `(b, d1)` where `b` is the batch size and the rest
-    # are dimensions.
+    '''
+    `embeddings` will be a list of length equal to the number of layers.
+    `embeddings[i]` will be a list of numpy arrays corresponding to the data batches for layer `i`.
+    `embeddings[i][j]` will be an array of shape `(b, d1, d2, d3)` or `(b, d1)` where `b` is the batch size
+     and the rest are dimensions.
+    '''
+    embeddings = [combine_and_vectorize(v) for v in embeddings]
+
     labels = np.array(labels, dtype=np.int)
     labels_pred = np.array(labels_pred, dtype=np.int)
     # Unique label counts
@@ -86,8 +107,8 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
     for a, b in zip(labels_uniq, counts):
         print("class {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels.shape[0]))
 
-    if (np.max(counts) / np.min(counts)) >= 1.2:
-        logger.warning("Classes are not balanced.")
+    # if (np.max(counts) / np.min(counts)) >= 1.2:
+    #    logger.warning("Classes are not balanced.")
 
     print("\nNumber of predicted samples per class:")
     preds_uniq, counts_pred = np.unique(labels_pred, return_counts=True)
@@ -100,40 +121,28 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
     return embeddings, labels, labels_pred, counts
 
 
-def transform_layer_embeddings(embeddings_in, transform_models=None, transform_models_file=None):
+def transform_layer_embeddings(embeddings_in, transform_models):
     """
     Perform dimension reduction on the data embeddings from each layer. The transformation or projection matrix
-    for each layer is provided via one of the inputs `transform_models` or `transform_models_file`. Only one of
-    them should be specified. In the case of `transform_models_file`, the models are loaded from a pickle file.
+    for each layer is provided via the input `transform_models`.
 
-    NOTE: In order to not perform dimension reduction at a particular layer, the corresponding element of
+    NOTE: In order to skip dimension reduction at a particular layer, the corresponding element of
     `transform_models` can be set to `None`. Thus, a list of `None` values can be passed to completely skip
     dimension reduction.
 
     :param embeddings_in: list of data embeddings per layer. `embeddings_in[i]` is a list of numpy arrays
                           corresponding to the data batches from layer `i`.
-    :param transform_models: None or a list of dictionaries with the transformation models per layer. The length of
+    :param transform_models: A list of dictionaries with the transformation models per layer. The length of
                              `transform_models` should be equal to the length of `embeddings_in`.
-    :param transform_models_file: None or a string with the file path. This should be a pickle file with the saved
-                                  transformation models per layer.
-
     :return: list of transformed data arrays, one per layer.
     """
-    if transform_models_file is None:
-        if transform_models is None:
-            raise ValueError("Both inputs 'transform_models' and 'transform_models_file' are not specified.")
-
-    else:
-        transform_models = load_dimension_reduction_models(transform_models_file)
-
     n_layers = len(embeddings_in)
     assert len(transform_models) == n_layers, ("Length of 'transform_models' is not equal to the length of "
                                                "'embeddings_in'")
     embeddings_out = []
     for i in range(n_layers):
-        print("Transforming embeddings from layer {:d}".format(i + 1))
-        data_in = combine_and_vectorize(embeddings_in[i])
-        embeddings_out.append(transform_data_from_model(data_in, transform_models[i]))
+        logger.info("Transforming the embeddings from layer {:d}".format(i + 1))
+        embeddings_out.append(transform_data_from_model(embeddings_in[i], transform_models[i]))
 
     return embeddings_out
 
@@ -148,6 +157,7 @@ class DetectorLayerStatistics:
                  use_top_ranked=False,
                  num_top_ranked=NUM_TOP_RANKED,
                  skip_dim_reduction=False,
+                 model_file_dim_reduction=None,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric=METRIC_DEF, metric_kwargs=None,
                  approx_nearest_neighbors=True,
@@ -159,6 +169,7 @@ class DetectorLayerStatistics:
         self.use_top_ranked = use_top_ranked
         self.num_top_ranked = num_top_ranked
         self.skip_dim_reduction = skip_dim_reduction
+        self.model_file_dim_reduction = model_file_dim_reduction
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
         self.metric = metric
@@ -168,8 +179,48 @@ class DetectorLayerStatistics:
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
+        if self.layer_statistic not in TEST_STATS_SUPPORTED:
+            raise ValueError("Invalid value '{}' for the input argument 'layer_statistic'.".
+                             format(self.layer_statistic))
+
         if self.layer_statistic == 'lid':
             if not self.skip_dim_reduction:
                 logger.warning("Option 'skip_dim_reduction' is set to False for the LID test statistic. Setting it to "
                                "True because it is preferred to skip dimension reduction for this test statistic.")
-            self.skip_dim_reduction = True
+                self.skip_dim_reduction = True
+
+        # Load the dimension reduction models per-layer if required
+        self.transform_models = None
+        if not self.skip_dim_reduction:
+            if self.model_file_dim_reduction is None:
+                raise ValueError("Model file for dimension reduction is required but not specified as input.")
+
+            self.transform_models = load_dimension_reduction_models(self.model_file_dim_reduction)
+
+        self.n_layers = None
+        self.labels_unique = None
+        self.n_classes = None
+
+    def fit(self, layer_embeddings, labels, labels_pred):
+        self.n_layers = len(layer_embeddings)
+        self.labels_unique = np.unique(labels)
+        self.n_classes = len(self.labels_unique)
+
+        logger.info("Number of classes: {:d}.".format(self.n_classes))
+        logger.info("Number of layer embeddings: {:d}".format(self.n_layers))
+        num_samples = labels.shape[0]
+        if labels_pred.shape[0] != num_samples:
+            raise ValueError("Inputs 'labels' and 'labels_pred' do not have the same size.")
+
+        if not all([layer_embeddings[i].shape[0] == num_samples for i in range(self.n_layers)]):
+            raise ValueError("Input 'layer_embeddings' does not have the expected format")
+
+        if self.use_top_ranked:
+            if self.num_top_ranked > self.n_layers:
+                logger.warning("Number of top-ranked layer statistics cannot be larger than the number of layers. "
+                               "Setting it equal to the number of layers ({:d}).".format(self.n_layers))
+                self.num_top_ranked = self.n_layers
+
+        if self.transform_models:
+            # Dimension reduction at each via a layer-specific linear transformation
+            layer_embeddings = transform_layer_embeddings(layer_embeddings, self.transform_models)

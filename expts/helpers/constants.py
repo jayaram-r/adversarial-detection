@@ -43,3 +43,6 @@ ATTACK_PROPORTION_DEF = 0.1
 
 # Number of top ranked layer test statistics to use for detection (default value)
 NUM_TOP_RANKED = 3
+
+# List of layerwise test statistics supported by the proposed method
+TEST_STATS_SUPPORTED = ['multinomial', 'lid']

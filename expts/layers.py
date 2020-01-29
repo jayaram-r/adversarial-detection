@@ -27,10 +27,7 @@ from helpers.constants import (
     MAX_SAMPLES_DIM_REDUCTION
 )
 from helpers.utils import load_model_checkpoint
-from helpers.detector_proposed import (
-    combine_and_vectorize,
-    extract_layer_embeddings
-)
+from helpers.detector_proposed import extract_layer_embeddings
 try:
     import cPickle as pickle
 except:
@@ -166,8 +163,8 @@ def main():
         lines.append(str0 + '\n')
 
         # Embeddings from layer i
-        data = combine_and_vectorize(embeddings[i])
-        data_test = combine_and_vectorize(embeddings_test[i])
+        data = embeddings[i]
+        data_test = embeddings_test[i]
 
         if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
             raise ValueError("Mismatch in the size of the data and labels array!")
