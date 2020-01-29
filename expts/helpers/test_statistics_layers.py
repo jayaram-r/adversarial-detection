@@ -163,9 +163,10 @@ class MultinomialScore(TestStatistic):
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
         :return:
-            scores_train: numpy array of two scores for each training sample. Has shape `(N, 2)`, where the first
-                          column gives the scores conditioned on the predicted class, and the second column gives
-                          the scores conditioned on the true class.
+            numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
+            of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
+            The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
+            being the candidate true class for the sample.
         """
         super(MultinomialScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
@@ -186,9 +187,6 @@ class MultinomialScore(TestStatistic):
         self.labels_train_enc = self.label_encoder(labels)
         _, self.data_counts_train = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
-        # First score is conditioned the predicted class and the second score is conditioned on the true class
-        self.scores_train = np.zeros(self.n_train, 2)
-
         # Dirichlet prior counts for MAP estimation
         alpha_diric = special_dirichlet_prior(self.n_classes)
 
@@ -206,9 +204,6 @@ class MultinomialScore(TestStatistic):
                 # Estimate the multinomial probability parameters given the predicted class `c`
                 self.proba_params_pred[i, :] = multinomial_estimation(data_counts_temp,
                                                                       alpha_prior=alpha_diric[i, :])
-                # Likelihood ratio statistic for multinomial distribution
-                self.scores_train[ind, 0] = self.multinomial_lrt(data_counts_temp, self.proba_params_pred[i, :],
-                                                                 self.n_neighbors)
             else:
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
                                "estimation and assigning uniform probabilities.".format(c))
@@ -221,14 +216,13 @@ class MultinomialScore(TestStatistic):
                 # Estimate the multinomial probability parameters given the true class `c`
                 self.proba_params_true[i, :] = multinomial_estimation(data_counts_temp,
                                                                       alpha_prior=alpha_diric[i, :])
-                # Likelihood ratio statistic for multinomial distribution
-                self.scores_train[ind, 1] = self.multinomial_lrt(data_counts_temp, self.proba_params_true[i, :],
-                                                                 self.n_neighbors)
             else:
                 # Unexpected, should not occur in practice
                 logger.warning("No labeled samples from class '{}'. Skipping multinomial parameter estimation "
                                "and assigning uniform probabilities.".format(c))
 
+        # Calculate the scores for each sample
+        self.scores_train = self.score(features, labels_pred, is_train=True)
         return self.scores_train
 
     def score(self, features_test, labels_pred_test, is_train=False):
@@ -321,10 +315,11 @@ class LIDScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
-        :return:
-            scores_train: numpy array of two scores for each training sample. Has shape `(N, 2)`, where the first
-                          column gives the scores conditioned on the predicted class, and the second column gives
-                          the scores conditioned on the true class.
+
+        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
+                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
+                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
+                 being the candidate true class for the sample.
         """
         super(LIDScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
@@ -346,15 +341,12 @@ class LIDScore(TestStatistic):
 
         self.lid_median_pred = np.ones(self.n_classes)
         self.lid_median_true = np.ones(self.n_classes)
-        # First score is conditioned the predicted class and the second score is conditioned on the true class
-        self.scores_train = np.zeros(self.n_train, 2)
         for c in self.labels_unique:
             i = self.label_encoder([c])[0]
             # LID values of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
             if ind.shape[0]:
                 self.lid_median_pred[i] = np.median(lid_estimates[ind])
-                self.scores_train[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
             else:
                 logger.warning("No samples are predicted into class '{}'. Setting the median LID "
                                "value to 1.".format(c))
@@ -363,10 +355,11 @@ class LIDScore(TestStatistic):
             ind = np.where(labels == c)[0]
             if ind.shape[0]:
                 self.lid_median_true[i] = np.median(lid_estimates[ind])
-                self.scores_train[ind, 1] = lid_estimates[ind] / self.lid_median_true[i]
             else:
                 logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
 
+        # Calculate the scores for each sample
+        self.scores_train = self.score(features, labels_pred, is_train=True)
         return self.scores_train
 
     def score(self, features_test, labels_pred_test, is_train=False):

@@ -141,8 +141,10 @@ def transform_layer_embeddings(embeddings_in, transform_models):
                                                "'embeddings_in'")
     embeddings_out = []
     for i in range(n_layers):
-        logger.info("Transforming the embeddings from layer {:d}".format(i + 1))
+        logger.info("Transforming the embeddings from layer {:d}:".format(i + 1))
         embeddings_out.append(transform_data_from_model(embeddings_in[i], transform_models[i]))
+        logger.info("Input dimension = {:d}, projected dimension = {:d}".format(embeddings_in[i].shape[1],
+                                                                                embeddings_out[-1].shape[1]))
 
     return embeddings_out
 
@@ -200,19 +202,21 @@ class DetectorLayerStatistics:
         self.n_layers = None
         self.labels_unique = None
         self.n_classes = None
+        self.n_samples = None
 
     def fit(self, layer_embeddings, labels, labels_pred):
         self.n_layers = len(layer_embeddings)
         self.labels_unique = np.unique(labels)
         self.n_classes = len(self.labels_unique)
+        self.n_samples = labels.shape[0]
 
         logger.info("Number of classes: {:d}.".format(self.n_classes))
         logger.info("Number of layer embeddings: {:d}".format(self.n_layers))
-        num_samples = labels.shape[0]
-        if labels_pred.shape[0] != num_samples:
+        logger.info("Number of samples: {:d}.".format(self.n_samples))
+        if labels_pred.shape[0] != self.n_samples:
             raise ValueError("Inputs 'labels' and 'labels_pred' do not have the same size.")
 
-        if not all([layer_embeddings[i].shape[0] == num_samples for i in range(self.n_layers)]):
+        if not all([layer_embeddings[i].shape[0] == self.n_samples for i in range(self.n_layers)]):
             raise ValueError("Input 'layer_embeddings' does not have the expected format")
 
         if self.use_top_ranked:
@@ -224,3 +228,5 @@ class DetectorLayerStatistics:
         if self.transform_models:
             # Dimension reduction at each via a layer-specific linear transformation
             layer_embeddings = transform_layer_embeddings(layer_embeddings, self.transform_models)
+
+        # Calculate the test statistic at each layer for the (transformed) layer embeddings
