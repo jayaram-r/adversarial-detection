@@ -199,10 +199,8 @@ class MultinomialScore(TestStatistic):
             # Index of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
             if ind.shape[0]:
-                data_counts_temp = self.data_counts_train[ind, :]
-
                 # Estimate the multinomial probability parameters given the predicted class `c`
-                self.proba_params_pred[i, :] = multinomial_estimation(data_counts_temp,
+                self.proba_params_pred[i, :] = multinomial_estimation(self.data_counts_train[ind, :],
                                                                       alpha_prior=alpha_diric[i, :])
             else:
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
@@ -211,10 +209,8 @@ class MultinomialScore(TestStatistic):
             # Index of samples with class label `c`
             ind = np.where(labels == c)[0]
             if ind.shape[0]:
-                data_counts_temp = self.data_counts_train[ind, :]
-
                 # Estimate the multinomial probability parameters given the true class `c`
-                self.proba_params_true[i, :] = multinomial_estimation(data_counts_temp,
+                self.proba_params_true[i, :] = multinomial_estimation(self.data_counts_train[ind, :],
                                                                       alpha_prior=alpha_diric[i, :])
             else:
                 # Unexpected, should not occur in practice

@@ -229,4 +229,68 @@ class DetectorLayerStatistics:
             # Dimension reduction at each via a layer-specific linear transformation
             layer_embeddings = transform_layer_embeddings(layer_embeddings, self.transform_models)
 
-        # Calculate the test statistic at each layer for the (transformed) layer embeddings
+        indices_true = dict()
+        indices_pred = dict()
+        test_stats_true = dict()
+        test_stats_pred = dict()
+        for c in self.labels_unique:
+            indices_true[c] = np.where(labels == c)[0]
+            indices_pred[c] = np.where(labels_pred == c)[0]
+            # Test statistics across the layers for the samples labeled into class `c`
+            test_stats_true[c] = np.zeros((indices_true[c].shape[0], self.n_layers))
+            # Test statistics across the layers for the samples predicted into class `c`
+            test_stats_pred[c] = np.zeros((indices_pred[c].shape[0], self.n_layers))
+
+        for i in range(self.n_layers):
+            logger.info("Parameter estimation and test statistics calculation for layer {:d}:".format(i + 1))
+            ts_obj = None
+            if self.layer_statistic == 'multinomial':
+                ts_obj = MultinomialScore(
+                    neighborhood_constant=self.neighborhood_constant,
+                    n_neighbors=self.n_neighbors,
+                    metric=self.metric,
+                    metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=False,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+            elif self.layer_statistic == 'lid':
+                ts_obj = LIDScore(
+                    neighborhood_constant=self.neighborhood_constant,
+                    n_neighbors=self.n_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+
+            scores_temp = ts_obj.fit(layer_embeddings[i], labels, labels_pred,
+                                     labels_unique=self.labels_unique)
+            '''
+            `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
+            test statistics for each sample.
+            The first column `scores_temp[:, 0]` gives the scores conditioned on the predicted class.
+            The remaining columns `scores_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on `i - 1`
+            being the candidate true class for the sample.
+            '''
+            for j, c in enumerate(self.labels_unique):
+                # Test statistics from layer `i`
+                test_stats_pred[c][:, i] = scores_temp[indices_pred[c], 0]
+                test_stats_true[c][:, i] = scores_temp[indices_true[c], j + 1]
+
+        # Get the top ranked order statistics if required
+        if self.use_top_ranked:
+            for c in self.labels_unique:
+                # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
+                # test statistics across the layers
+                arr = np.fliplr(np.sort(test_stats_pred[c], axis=1))
+                test_stats_pred[c] = arr[:, :self.num_top_ranked]
+
+                # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
+                # test statistics across the layers
+                arr = np.sort(test_stats_true[c], axis=1)
+                test_stats_true[c] = arr[:, :self.num_top_ranked]
+
+        # Learn a probability density model for the test statistics
