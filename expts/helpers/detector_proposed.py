@@ -8,7 +8,8 @@ from helpers.constants import (
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
     NUM_TOP_RANKED,
-    TEST_STATS_SUPPORTED
+    TEST_STATS_SUPPORTED,
+    FPR_TARGETS_DEF
 )
 from helpers.dimension_reduction_methods import (
     transform_data_from_model,
@@ -166,7 +167,38 @@ class DetectorLayerStatistics:
                  n_jobs=1,
                  low_memory=False,
                  seed_rng=SEED_DEFAULT):
+        """
 
+        :param layer_statistic: Type of test statistic to calculate at the layers. Valid values are 'multinomial'
+                                and 'lid'.
+        :param use_top_ranked: Set to True in order to use only a few top ranked test statistics for detection.
+        :param num_top_ranked: If `use_top_ranked` is set to True, this specifies the number of top-ranked test
+                               statistics to use for detection. This number should be smaller than the number of
+                               layers considered for detection.
+        :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
+        :param model_file_dim_reduction: Path to the model file that contains the models for performing dimension
+                                         reduction at each layerr. This will be a pickle file that loads into a list
+                                         of model dictionaries.
+        :param neighborhood_constant: float value in (0, 1), that specifies the number of nearest neighbors as a
+                                      function of the number of samples (data size). If `N` is the number of samples,
+                                      then the number of neighbors is set to `N^neighborhood_constant`. It is
+                                      recommended to set this value in the range 0.4 to 0.5.
+        :param n_neighbors: None or int value specifying the number of nearest neighbors. If this value is specified,
+                            the `neighborhood_constant` is ignored. It is sufficient to specify either
+                            `neighborhood_constant` or `n_neighbors`.
+        :param metric: string or a callable that specifies the distance metric to use.
+        :param metric_kwargs: optional keyword arguments required by the distance metric specified in the form of a
+                              dictionary.
+        :param approx_nearest_neighbors: Set to True in order to use an approximate nearest neighbor algorithm to
+                                         find the nearest neighbors. The NN-descent method is used for approximate
+                                         nearest neighbor searches.
+        :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
+        :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
+                           is likely to increase the running time.
+        :param seed_rng: int value specifying the seed for the random number generator. This is passed around to
+                         all the classes/functions that require random number generation. Set this to a fixed value
+                         for reproducible results.
+        """
         self.layer_statistic = layer_statistic.lower()
         self.use_top_ranked = use_top_ranked
         self.num_top_ranked = num_top_ranked
@@ -213,6 +245,19 @@ class DetectorLayerStatistics:
         self.density_models_true = dict()
 
     def fit(self, layer_embeddings, labels, labels_pred):
+        """
+        Estimate parameters of the detection method given natural (non-adversarial) input data.
+        NOTE: Inputs to this method can be obtained by calling the function `extract_layer_embeddings`.
+
+        :param layer_embeddings: list of numpy arrays with the layer embedding data. Length of the list is equal to
+                                 the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
+                                 is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
+        :param labels: numpy array of labels for the classification problem addressed by the DNN. Should have shape
+                       `(n, )`, where `n` is the number of samples.
+        :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
+
+        :return: Instance of the class with all parameters fit to the data.
+        """
         self.n_layers = len(layer_embeddings)
         self.labels_unique = np.unique(labels)
         self.n_classes = len(self.labels_unique)
@@ -318,7 +363,27 @@ class DetectorLayerStatistics:
 
         return self
 
-    def score(self, layer_embeddings, labels_pred):
+    def score(self, layer_embeddings, labels_pred, is_train=False):
+        """
+        Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
+        score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
+        scores correspond to a higher probability that the test sample is adversarial or OOD. The scores can be
+        thresholded, with values above the threshold declared as adversarial or OOD. The threshold can be set such
+        that the detector has a target false positive rate.
+
+        :param layer_embeddings: list of numpy arrays with the layer embedding data. Length of the list is equal to
+                                 the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
+                                 is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
+        :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
+        :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
+
+        :return: (scores_adver, scores_ood)
+            - scores_adver: numpy array of scores corresponding to attack detection. The array should have shape
+                            `(labels_pred.shape[0], )`. Larger values of the scores correspond to a higher probability
+                            that the test sample is adversarial.
+            - scores_ood: numpy array of scores corresponding to OOD detection. Same shape as `scores_adver`. Larger
+                          values of the scores correspond to a higher probability that the test sample is OOD.
+        """
         n_test = labels_pred.shape[0]
         l = len(layer_embeddings)
         if l != self.n_layers:
@@ -335,7 +400,7 @@ class DetectorLayerStatistics:
                 data_proj = layer_embeddings[i]
 
             # Test statistics for layer `i`
-            scores_temp = self.test_stats_models[i].score(data_proj, labels_pred)
+            scores_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train)
             # `scores_test` will have shape `(n_test, self.n_classes + 1)`
 
             test_stats_pred[:, i] = scores_temp[:, 0]
@@ -379,7 +444,6 @@ class DetectorLayerStatistics:
                     j += 1
 
             scores_adver[ind] = np.max(s2, axis=1) - s1
-
             cnt_par += n_pred
             if cnt_par >= n_test:
                 break
@@ -387,6 +451,14 @@ class DetectorLayerStatistics:
         return scores_adver, scores_ood
 
     def get_top_ranked(self, test_stats, reverse=False):
+        """
+        Get the top-ranked (largest or smallest) test statistics across the layers.
+
+        :param test_stats: numpy array of shape `(n, d)`, where `n` is the number of samples and `d` is the
+                           number of test statistics.
+        :param reverse: set to True to get the largest scores.
+        :return:
+        """
         if reverse:
             return np.fliplr(np.sort(test_stats, axis=1))[:, :self.num_top_ranked]
         else:
