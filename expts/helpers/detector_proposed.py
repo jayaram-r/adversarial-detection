@@ -204,14 +204,13 @@ class DetectorLayerStatistics:
         self.n_classes = None
         self.n_samples = None
         # List of test statistic model instances for each layer
-        self.test_stats_instances = []
+        self.test_stats_models = []
         # dict mapping each class `c` to the joint density model of the test statistics conditioned on predicted
         # class being `c`
         self.density_models_pred = dict()
         # dict mapping each class `c` to the joint density model of the test statistics conditioned on true
         # class being `c`
         self.density_models_true = dict()
-
 
     def fit(self, layer_embeddings, labels, labels_pred):
         self.n_layers = len(layer_embeddings)
@@ -220,7 +219,7 @@ class DetectorLayerStatistics:
         self.n_samples = labels.shape[0]
 
         logger.info("Number of classes: {:d}.".format(self.n_classes))
-        logger.info("Number of layer embeddings: {:d}".format(self.n_layers))
+        logger.info("Number of layer embeddings: {:d}.".format(self.n_layers))
         logger.info("Number of samples: {:d}.".format(self.n_samples))
         if labels_pred.shape[0] != self.n_samples:
             raise ValueError("Inputs 'labels' and 'labels_pred' do not have the same size.")
@@ -233,10 +232,6 @@ class DetectorLayerStatistics:
                 logger.warning("Number of top-ranked layer statistics cannot be larger than the number of layers. "
                                "Setting it equal to the number of layers ({:d}).".format(self.n_layers))
                 self.num_top_ranked = self.n_layers
-
-        if self.transform_models:
-            # Dimension reduction at each via a layer-specific linear transformation
-            layer_embeddings = transform_layer_embeddings(layer_embeddings, self.transform_models)
 
         indices_true = dict()
         indices_pred = dict()
@@ -251,7 +246,16 @@ class DetectorLayerStatistics:
             test_stats_pred[c] = np.zeros((indices_pred[c].shape[0], self.n_layers))
 
         for i in range(self.n_layers):
-            logger.info("Parameter estimation and test statistics calculation for layer {:d}:".format(i + 1))
+            if self.transform_models:
+                logger.info("Transforming the embeddings from layer {:d}.".format(i + 1))
+                data_proj = transform_data_from_model(layer_embeddings[i], self.transform_models[i])
+                logger.info("Input dimension = {:d}, projected dimension = {:d}".
+                            format(layer_embeddings[i].shape[1], data_proj.shape[1]))
+            else:
+                data_proj = layer_embeddings[i]
+
+            logger.info("Parameter estimatison and test statistics calculation for layer {:d}:".format(i + 1))
+            ts_obj = None
             if self.layer_statistic == 'multinomial':
                 ts_obj = MultinomialScore(
                     neighborhood_constant=self.neighborhood_constant,
@@ -274,8 +278,7 @@ class DetectorLayerStatistics:
                     seed_rng=self.seed_rng
                 )
 
-            scores_temp = ts_obj.fit(layer_embeddings[i], labels, labels_pred,
-                                     labels_unique=self.labels_unique)
+            scores_temp = ts_obj.fit(data_proj, labels, labels_pred, labels_unique=self.labels_unique)
             '''
             `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
             test statistics for each sample.
@@ -283,7 +286,7 @@ class DetectorLayerStatistics:
             The remaining columns `scores_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on `i - 1`
             being the candidate true class for the sample.
             '''
-            self.test_stats_instances.append(ts_obj)
+            self.test_stats_models.append(ts_obj)
             for j, c in enumerate(self.labels_unique):
                 # Test statistics from layer `i`
                 test_stats_pred[c][:, i] = scores_temp[indices_pred[c], 0]
@@ -297,20 +300,94 @@ class DetectorLayerStatistics:
                             "(true) class.".format(self.num_top_ranked))
                 # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
                 # test statistics across the layers
-                arr = np.fliplr(np.sort(test_stats_pred[c], axis=1))
-                test_stats_pred[c] = arr[:, :self.num_top_ranked]
+                test_stats_pred[c] = self.get_top_ranked(test_stats_pred[c], reverse=True)
 
                 # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
                 # test statistics across the layers
-                arr = np.sort(test_stats_true[c], axis=1)
-                test_stats_true[c] = arr[:, :self.num_top_ranked]
+                test_stats_true[c] = self.get_top_ranked(test_stats_true[c])
 
-            logger.info("Learning a probability density model for the test statistics conditioned on the "
-                        "predicted class {}.".format(c))
+            logger.info("Learning a joint probability density model for the test statistics conditioned on the "
+                        "predicted class '{}':".format(c))
             logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_pred[c].shape))
             self.density_models_pred[c] = train_log_normal_mixture(test_stats_pred[c], seed_rng=self.seed_rng)
 
-            logger.info("Learning a probability density model for the test statistics conditioned on the "
-                        "true class {}.".format(c))
+            logger.info("Learning a joint probability density model for the test statistics conditioned on the "
+                        "true class '{}':".format(c))
             logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
             self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
+
+        return
+
+    def score(self, layer_embeddings, labels_pred):
+        n_test = labels_pred.shape[0]
+        l = len(layer_embeddings)
+        if l != self.n_layers:
+            raise ValueError("Expecting {:d} layers in the input data, but received {:d}".format(self.n_layers, l))
+
+        # Test statistics at each layer conditioned on the predicted class and candidate true classes
+        test_stats_pred = np.zeros((n_test, self.n_layers))
+        test_stats_true = {c: np.zeros((n_test, self.n_layers)) for c in self.labels_unique}
+        for i in range(self.n_layers):
+            if self.transform_models:
+                # Dimension reduction
+                data_proj = transform_data_from_model(layer_embeddings[i], self.transform_models[i])
+            else:
+                data_proj = layer_embeddings[i]
+
+            # Test statistics for layer `i`
+            scores_temp = self.test_stats_models[i].score(data_proj, labels_pred)
+            # `scores_test` will have shape `(n_test, self.n_classes + 1)`
+
+            test_stats_pred[:, i] = scores_temp[:, 0]
+            for j, c in enumerate(self.labels_unique):
+                test_stats_true[c][:, i] = scores_temp[:, j + 1]
+
+        if self.use_top_ranked:
+            # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
+            # test statistics across the layers
+            test_stats_pred = self.get_top_ranked(test_stats_pred, reverse=True)
+
+            for c in self.labels_unique:
+                # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
+                # test statistics across the layers
+                test_stats_true[c] = self.get_top_ranked(test_stats_true[c])
+
+        # Adversarial or OOD scores for the test samples
+        scores_adver = np.zeros(n_test)
+        scores_ood = np.zeros(n_test)
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred[0]]
+        cnt_par = 0
+        for c in preds_unique:
+            # Scoring samples that are predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            n_pred = ind.shape[0]
+            if n_pred == 0:
+                continue
+
+            # OOD score:
+            # $- log p(t_1, \cdots, t_L | \hat{C} = c)$
+            s1 = score_log_normal_mixture(test_stats_pred[ind, :], self.density_models_pred[c])
+            scores_ood[ind] = -s1
+
+            # Adversarial score:
+            # $max_{k \neq c} log p(t_1, \cdots, t_L | C = k) - log p(t_1, \cdots, t_L | \hat{C} = c)$
+            s2 = np.zeros((n_pred, self.n_classes - 1))
+            j = 0
+            for k in self.labels_unique:
+                if k != c:
+                    s2[:, j] = score_log_normal_mixture(test_stats_true[k][ind, :], self.density_models_true[k])
+                    j += 1
+
+            scores_adver[ind] = np.max(s2, axis=1) - s1
+
+            cnt_par += n_pred
+            if cnt_par >= n_test:
+                break
+
+        return scores_adver, scores_ood
+
+    def get_top_ranked(self, test_stats, reverse=False):
+        if reverse:
+            return np.fliplr(np.sort(test_stats, axis=1))[:, :self.num_top_ranked]
+        else:
+            return np.sort(test_stats, axis=1)[:, :self.num_top_ranked]
