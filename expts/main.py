@@ -6,19 +6,24 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.optim.lr_scheduler import StepLR, MultiStepLR
+
 from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
+
 import os
-import foolbox
+
+#import foolbox
+
 from helpers.constants import ROOT, NORMALIZE_IMAGES
 from helpers.utils_pytorch import progress_bar
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint
 )
-
+from helpers.stats import statistics
+from helpers.attacks import *
 
 def train(args, model, device, train_loader, optimizer, epoch, criterion=None):
     model.train()
@@ -94,16 +99,6 @@ def test(args, model, device, test_loader, criterion=None):
 
     return model
 
-
-def attack(attack_model, device, test_loader):
-    # model.eval()
-    for data, target in test_loader:
-        data, target = data.to(device), target.to(device)
-        data_numpy = data.data.cpu().numpy()
-        target_numpy = target.data.cpu().numpy()
-        adversarials = attack_model(data_numpy, target_numpy) #, target_numpy, unpack=False)
-
-
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='Arguments')
@@ -122,28 +117,29 @@ def main():
     parser.add_argument('--seed', '-s', type=int, default=1, metavar='S', help='random seed (default: 1)')
     parser.add_argument('--log-interval', type=int, default=100, metavar='N',
                         help='number of batches to wait before logging training status')
-    parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
+    parser.add_argument('--save-model', action='store_true', default=False, help='For Saving the current Model')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
                         help='type of adversarial attack')
-    parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
+    parser.add_argument('--attack', action='store_true', default=True, help='option to launch adversarial attack')
     parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '2' and 'inf'")
-    parser.add_argument('--train', '-t', action='store_true', default=True, help='commence training')
-    parser.add_argument('--ckpt', action='store_true', default=False, help='Use the saved model checkpoint')
+    parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
+    parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
     args = parser.parse_args()
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
 
-    device = torch.device("cuda" if use_cuda else "cpu")
-
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    
+    device = torch.device("cuda" if use_cuda else "cpu")
     
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     data_path = os.path.join(ROOT, 'data')
     criterion = None
+    # ToDo: Verify if the bounds is accurate; needed for adv. example generation
     if args.model_type == 'mnist':
         transform = transforms.Compose(
             [transforms.ToTensor(),
@@ -214,33 +210,14 @@ def main():
                 save_model_checkpoint(model, args.model_type, epoch=epoch)
    
     elif args.ckpt:
+        print("Loading model from checkpoint")
         model = load_model_checkpoint(model, args.model_type)
     
     if args.attack:
-        distance = None
-        if args.p_norm == '2':
-            distance = foolbox.distances.Linf
-        elif args.p_norm == 'inf':
-            distance = foolbox.distances.Linf
-        else:
-            raise ValueError("'{}' is not a valid or supported p-norm type".format(args.p_norm))
-    
-        model.to(device)
-        model.eval()
-        fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
-        
-        if args.adv_attack == 'FGSM':
-            attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) # distance=foolbox.distances.Linf)
-        if args.adv_attack == 'PGD':
-            attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
-        if args.adv_attack == 'CW':
-            attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
-        else:
-            raise ValueError("'{}' is not a valid adversarial attack".format(args.adv_attack))
+        # ToDo: Verify correctness
+        #https://stackoverflow.com/questions/56699048/how-to-get-the-filename-of-a-sample-from-a-dataloader
+        adversarials = foolbox_attack(model, device, test_loader, bounds, p_norm=args.p_norm, adv_attack=args.adv_attack)
 
-        attack(attack_model, device, test_loader)
-        # adversarials = attack_model(images, labels)
-    
     if args.save_model:
         save_model_checkpoint(model, args.model_type)
 
