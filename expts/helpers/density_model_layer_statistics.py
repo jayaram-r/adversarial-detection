@@ -157,10 +157,11 @@ def score_log_normal_mixture(data, model, log_transform=True):
     :param model:
     :param log_transform:
 
-    :return: numpy array of scores for each point in `data`. Has shape `(data.shape[0], )`.
+    :return: numpy array with the log-likelihood values of each point (row) in `data` under the given model.
+             Has shape `(data.shape[0], )`.
     """
     if log_transform:
         # Ensure that the data has only non-negative values and return the log of the values
         data = log_transform_data(data)
 
-    return -1.0 * model.score_samples(data)
+    return model.score_samples(data)
