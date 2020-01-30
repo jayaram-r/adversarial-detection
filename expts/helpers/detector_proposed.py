@@ -316,7 +316,7 @@ class DetectorLayerStatistics:
             logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
             self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
 
-        return
+        return self
 
     def score(self, layer_embeddings, labels_pred):
         n_test = labels_pred.shape[0]
