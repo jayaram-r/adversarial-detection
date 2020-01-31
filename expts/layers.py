@@ -60,7 +60,7 @@ def main():
     #                     help="p norm for the adversarial attack; options are '2' and 'inf'")
     # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
     # parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
-    parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
+    parser.add_argument('--gpu', type=str, default='1', help='gpus to execute code on')
     parser.add_argument('--output', '-o', type=str, default='output_layer_extraction.txt',
                         help='output file basename')
     args = parser.parse_args()
