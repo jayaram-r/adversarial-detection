@@ -93,7 +93,7 @@ class ResNet(nn.Module):
         out = self.layer4(out)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
-        out = self.linear(out)
+        out = self.linear(out)  # logit values that go into the softmax or log-softmax
         return out
 
     def layer_wise(self, x):
@@ -117,17 +117,19 @@ class ResNet(nn.Module):
         return output
 
     def layer_forward(self, x):
+        # Method to get the latent layer and logit layer outputs for the "odds-are-odd" method
         output = []
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         out = self.layer3(out)
-        out.append(out) # lats
         out = self.layer4(out)
         out = F.avg_pool2d(out, 4)
-        output.append(out) #logits
         out = out.view(out.size(0), -1)
+        output.append(out)  # lats
         out = self.linear(out)
+        output.append(out)  # logits
+
         return output
 
 def ResNet18():
