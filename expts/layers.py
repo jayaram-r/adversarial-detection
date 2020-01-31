@@ -189,17 +189,22 @@ def main():
 
         k_max = int(N_samples ** NEIGHBORHOOD_CONST)
         k_range = np.unique(np.linspace(1, k_max, num=10, dtype=np.int))
-        if dim_orig > 20:
+        if dim_orig > 50:
             print("\nSearching for the best number of neighbors (k) and projected dimension.")
             d_max = min(10 * d, dim_orig)
             dim_proj_range = np.unique(np.linspace(d, d_max, num=20, dtype=np.int))
+            # Apply PCA preprocessing prior to NPP only if the data dimension exceeds 1000
+            if dim_orig < 1000:
+                pc = 1.0
+            else:
+                pc = PCA_CUTOFF
 
             k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
                 data_sample, labels_sample, k_range,
                 dim_proj_range=dim_proj_range,
                 method_proj=METHOD_DIM_REDUCTION,
                 metric=METRIC_DEF,
-                pca_cutoff=PCA_CUTOFF,
+                pca_cutoff=pc,
                 n_jobs=n_jobs
             )
         else:
