@@ -79,3 +79,25 @@ class SVHN(nn.Module):
         # output.append(x)
 
         return output
+
+    def layer_forward(self, x):
+        output = []
+        x = self.conv1(x)
+        x = F.relu(x)
+        x = self.conv2(x)
+        x = F.relu(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout1(x)
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.dropout2(x)
+        x = self.fc2(x)
+        output.append(x) #lats
+        x = F.relu(x)
+        x = self.dropout3(x)
+        x = self.fc3(x)
+        output.append(x)    # logits
+        final = F.log_softmax(x, dim=1)
+
+        return output
