@@ -75,9 +75,9 @@ class MNIST(nn.Module):
         x = self.dropout1(x)
         x = torch.flatten(x, 1)
         x = self.fc1(x)
-        output.append(x) #lats
         x = F.relu(x)
         x = self.dropout2(x)
+        output.append(x)  # latents
         x = self.fc2(x)
         output.append(x) #logits
         # final = F.log_softmax(x, dim=1)

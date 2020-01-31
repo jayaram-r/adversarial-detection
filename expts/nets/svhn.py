@@ -94,9 +94,9 @@ class SVHN(nn.Module):
         x = F.relu(x)
         x = self.dropout2(x)
         x = self.fc2(x)
-        output.append(x) #lats
         x = F.relu(x)
         x = self.dropout3(x)
+        output.append(x)  # latents
         x = self.fc3(x)
         output.append(x)    # logits
         # final = F.log_softmax(x, dim=1)
