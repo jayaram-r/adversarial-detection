@@ -66,9 +66,8 @@ class MNIST(nn.Module):
         return output
 
     def layer_forward(self, x):
-        # Input is included as the first layer
-        output = []    # 1
-
+        # Method to get the latent layer and logit layer outputs for the "odds-are-odd" method
+        output = []
         x = self.conv1(x)
         x = F.relu(x)
         x = self.conv2(x)
@@ -81,6 +80,6 @@ class MNIST(nn.Module):
         x = self.dropout2(x)
         x = self.fc2(x)
         output.append(x) #logits
-        final = F.log_softmax(x, dim=1)
+        # final = F.log_softmax(x, dim=1)
 
         return output

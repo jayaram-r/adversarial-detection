@@ -81,6 +81,7 @@ class SVHN(nn.Module):
         return output
 
     def layer_forward(self, x):
+        # Method to get the latent layer and logit layer outputs for the "odds-are-odd" method
         output = []
         x = self.conv1(x)
         x = F.relu(x)
@@ -98,6 +99,6 @@ class SVHN(nn.Module):
         x = self.dropout3(x)
         x = self.fc3(x)
         output.append(x)    # logits
-        final = F.log_softmax(x, dim=1)
+        # final = F.log_softmax(x, dim=1)
 
         return output
