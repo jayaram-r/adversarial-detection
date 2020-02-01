@@ -11,7 +11,6 @@ import foolbox
 import sys
 from pympler.asizeof import asizeof
 import numpy as np
-from multiprocessing import cpu_count
 from sklearn.model_selection import StratifiedShuffleSplit
 from helpers.knn_classifier import knn_parameter_search
 from helpers.lid_estimators import estimate_intrinsic_dimension
@@ -26,7 +25,7 @@ from helpers.constants import (
     NORMALIZE_IMAGES,
     MAX_SAMPLES_DIM_REDUCTION
 )
-from helpers.utils import load_model_checkpoint
+from helpers.utils import load_model_checkpoint, get_num_jobs
 from helpers.detector_proposed import extract_layer_embeddings
 try:
     import cPickle as pickle
@@ -50,21 +49,15 @@ def main():
                         help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
     parser.add_argument('--seed', '-s', type=int, default=1, metavar='S', help='random seed (default: 1)')
-    # parser.add_argument('--log-interval', type=int, default=100, metavar='N',
-    #                     help='number of batches to wait before logging training status')
+    parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
     # parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    # parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
-    #                     help='type of adversarial attack')
-    # parser.add_argument('--attack', action='store_true', default=False, help='option to launch adversarial attack')
-    # parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
-    #                     help="p norm for the adversarial attack; options are '2' and 'inf'")
     # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
     # parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
     parser.add_argument('--gpu', type=str, default='1', help='gpus to execute code on')
     parser.add_argument('--output', '-o', type=str, default='output_layer_extraction.txt',
                         help='output file basename')
     args = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
@@ -72,6 +65,8 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
 
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+
+    n_jobs = get_num_jobs(args.n_jobs)
 
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
@@ -121,12 +116,16 @@ def main():
     model = load_model_checkpoint(model, args.model_type)
 
     # Get the feature embeddings from all the layers and the labels
-    embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, train_loader)
-    embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(model, device,
-                                                                                           test_loader)
-    print("Layer embeddings calculated!")
+    print("Calculating layer embeddings for the train data:")
+    embeddings, labels, labels_pred, counts = extract_layer_embeddings(
+        model, device, train_loader, method='proposed'
+    )
+    print("\nCalculating layer embeddings for the test data:")
+    embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(
+        model, device, test_loader, method='proposed'
+    )
     accu_test = np.sum(labels_test == labels_pred_test) / float(labels_test.shape[0])
-    print("Test set accuracy = {:.4f}".format(accu_test))
+    print("\nTest set accuracy = {:.4f}".format(accu_test))
 
     ns = labels.shape[0]
     if ns > MAX_SAMPLES_DIM_REDUCTION:
@@ -139,11 +138,7 @@ def main():
         indices_sample = np.arange(ns)
 
     n_layers = len(embeddings)
-    print("Number of layers = {}".format(n_layers))
-    # Use half the number of available cores
-    cc = cpu_count()
-    n_jobs = max(1, int(0.5 * cc))
-
+    print("\nNumber of layers = {}".format(n_layers))
     output_dir = os.path.join(ROOT, 'outputs', args.model_type)
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)

@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import logging
+import copy
 from helpers.constants import (
     ROOT,
     SEED_DEFAULT,
@@ -46,7 +47,7 @@ def combine_and_vectorize(data_batches):
     return data
 
 
-def extract_layer_embeddings(model, device, data_loader, num_samples=None):
+def extract_layer_embeddings(model, device, data_loader, method='proposed', num_samples=None):
     """
     Extract the layer embeddings produced by a trained DNN model on the given data set. Also, returns the true class
     and the predicted class for each sample.
@@ -54,6 +55,7 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
     :param model: torch NN model.
     :param device: torch device type - cuda or cpu.
     :param data_loader: torch data loader object which is an instancee of `torch.utils.data.DataLoader`.
+    :param method: string with the name of the proposed method. Valid choices are ['proposed', 'odds', 'lid'].
     :param num_samples: None or an int value specifying the number of samples to select.
 
     :return:
@@ -81,7 +83,15 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
             _, predicted = outputs.max(1)
             labels_pred.extend(predicted.detach().cpu().numpy())
             # Layer outputs
-            outputs_layers = model.layer_wise(data)
+            if method == 'proposed':
+                outputs_layers = model.layer_wise(data)
+            elif method == 'odds':
+                outputs_layers = model.layer_wise_odds_are_odd(data)
+            elif method == 'lid':
+                outputs_layers = model.layer_wise_lid_method(data)
+            else:
+                raise ValueError("Invalid value '{}' for input 'method'".format(method))
+
             if batch_idx > 0:
                 for i in range(len(outputs_layers)):    # each layer
                     embeddings[i].append(outputs_layers[i].detach().cpu().numpy())
@@ -243,6 +253,8 @@ class DetectorLayerStatistics:
         # dict mapping each class `c` to the joint density model of the test statistics conditioned on true
         # class being `c`
         self.density_models_true = dict()
+        # Log of the class prior probabilities estimated from the training data labels
+        self.log_class_priors = None
 
     def fit(self, layer_embeddings, labels, labels_pred):
         """
@@ -278,6 +290,7 @@ class DetectorLayerStatistics:
                                "Setting it equal to the number of layers ({:d}).".format(self.n_layers))
                 self.num_top_ranked = self.n_layers
 
+        self.log_class_priors = np.zeros(self.n_classes)
         indices_true = dict()
         indices_pred = dict()
         test_stats_true = dict()
@@ -289,6 +302,9 @@ class DetectorLayerStatistics:
             test_stats_true[c] = np.zeros((indices_true[c].shape[0], self.n_layers))
             # Test statistics across the layers for the samples predicted into class `c`
             test_stats_pred[c] = np.zeros((indices_pred[c].shape[0], self.n_layers))
+            self.log_class_priors[c] = indices_true[c].shape[0]
+
+        self.log_class_priors = np.log(self.log_class_priors) - np.log(self.n_samples)
 
         for i in range(self.n_layers):
             if self.transform_models:
@@ -363,7 +379,7 @@ class DetectorLayerStatistics:
 
         return self
 
-    def score(self, layer_embeddings, labels_pred, is_train=False):
+    def score(self, layer_embeddings, labels_pred, return_corrected_predictions=False, is_train=False):
         """
         Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
         score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
@@ -375,14 +391,21 @@ class DetectorLayerStatistics:
                                  the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
                                  is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
         :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
+        :param return_corrected_predictions: Set to True in order to get the most probable class prediction based
+                                             on Bayes class posterior given the test statistic vector. Note that this
+                                             will change the returned values.
         :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
 
-        :return: (scores_adver, scores_ood)
+        :return: (scores_adver, scores_ood [, corrected_classes])
             - scores_adver: numpy array of scores corresponding to attack detection. The array should have shape
                             `(labels_pred.shape[0], )`. Larger values of the scores correspond to a higher probability
                             that the test sample is adversarial.
             - scores_ood: numpy array of scores corresponding to OOD detection. Same shape as `scores_adver`. Larger
                           values of the scores correspond to a higher probability that the test sample is OOD.
+            #
+            # returned only if `return_corrected_predictions = True`
+            - corrected_classes: numpy array of the corrected class predictions. Has same shape and dtype as the
+                                 array `labels_pred`.
         """
         n_test = labels_pred.shape[0]
         l = len(layer_embeddings)
@@ -420,6 +443,7 @@ class DetectorLayerStatistics:
         # Adversarial or OOD scores for the test samples
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
+        corrected_classes = copy.copy(labels_pred)
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred[0]]
         cnt_par = 0
         for c in preds_unique:
@@ -437,18 +461,40 @@ class DetectorLayerStatistics:
             # Adversarial score:
             # $max_{k \neq c} log p(t_1, \cdots, t_L | C = k) - log p(t_1, \cdots, t_L | \hat{C} = c)$
             s2 = np.zeros((n_pred, self.n_classes - 1))
-            j = 0
-            for k in self.labels_unique:
-                if k != c:
-                    s2[:, j] = score_log_normal_mixture(test_stats_true[k][ind, :], self.density_models_true[k])
-                    j += 1
+            if return_corrected_predictions:
+                logit_scores = np.zeros((n_pred, self.n_classes))
+            else:
+                logit_scores = None
 
+            jj = 0
+            for j, k in enumerate(self.labels_unique):
+                if k != c:
+                    s2[:, jj] = score_log_normal_mixture(test_stats_true[k][ind, :], self.density_models_true[k])
+                    if return_corrected_predictions:
+                        logit_scores[:, j] = self.log_class_priors[k] + s2[:, jj]
+
+                    jj += 1
+                else:
+                    if return_corrected_predictions:
+                        logit_scores[:, j] = self.log_class_priors[k] + \
+                                             score_log_normal_mixture(test_stats_true[k][ind, :],
+                                                                      self.density_models_true[k])
+
+            # Score for adversarial detection
             scores_adver[ind] = np.max(s2, axis=1) - s1
+            # Corrected class prediction based on the logit scores (for samples predicted into class c)
+            if return_corrected_predictions:
+                corrected_classes[ind] = [self.labels_unique[j] for j in np.argmax(logit_scores, axis=1)]
+
+            # Break if we have already covered all the test samples
             cnt_par += n_pred
             if cnt_par >= n_test:
                 break
 
-        return scores_adver, scores_ood
+        if return_corrected_predictions:
+            return scores_adver, scores_ood, corrected_classes
+        else:
+            return scores_adver, scores_ood
 
     def get_top_ranked(self, test_stats, reverse=False):
         """
