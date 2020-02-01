@@ -26,6 +26,9 @@ from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint
 )
+from helpers.attack import *
+from helpers.logits_and_latents_identifier import * #ICLR'18
+from helpers.lid_differentiator import * #ICML'19
 
 import torch
 from torchvision import datasets, transforms
@@ -156,81 +159,42 @@ def main():
 
 
     if args.detection_mechanism == 'odds':
-        # to do: what are the X,Y values needed?
         # to do: pending verification
         ##params from torch_example.py
         batch_size=32
         eval_bs=256
-        eval_batches=None
-        epochs=50
-        num_evals=20
-        train_log_after=0
-        stop_after=-1
         cuda=True
-        optim='sgd'
-        lr=1e-4
         attack_lr=.25
         eps=8/255
-        eps_rand=None
-        eps_eval=None
-        rep=0
-        img_size=32
-        iters=10
+        pgd_iters=10
         noise_eps='n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
         noise_eps_detect='n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
         clip_alignments=True
-        pgd_strength=1.
-
         debug=False
-        mode='eval'
-        constrained=True
-        clamp_attack=False
-        clamp_uniform=False
-        train_adv=False
+        #mode='eval'
         wdiff_samples=256
         maxp_cutoff=.999
         collect_targeted=False
-        n_collect=10000
         save_alignments=False
         load_alignments=False
-        save_pgd_samples=False
-        load_pgd_train_samples=None
-        load_pgd_test_samples=None
         fit_classifier=True
         just_detect=False
-        attack='pgd'
-        cw_confidence=0
-        cw_c=1e-4
-        cw_lr=1e-4
-        cw_steps=300
-        cw_search_steps=10
-        mean_samples=16
-        mean_eps=.1
         ######
 
-        def net_forward(x, layer_by_layer=False, from_layer=0):
-            outputs = model.layer_wise_odds_are_odd(x)
-            return outputs
-
-        def latent_and_logits_fn(x):
-            lat, log = net_forward(x, True)[-2:]
-            lat = lat.reshape(lat.shape[0], -1)
-            return lat, log
-        
-        if args.model_type == 'mnist':
-            w_cls = model.fc2.weight
-        elif args.model_type == 'cifar10':
-            w_cls = list(model.children())[-1].weight
-        elif args.model_type == 'svhn':
-            w_cls = model.fc3.weight
+        w_cls = get_wcls(args.model_type) 
+        X,Y,pgd_train = get_data(test_loader)
 
         predictor = collect_statistics(X, Y, latent_and_logits_fn_th=latent_and_logits_fn, nb_classes=num_classes,
                 weights=w_cls, cuda=cuda, debug=debug, targeted=collect_targeted, noise_eps=noise_eps.split(','),
                 noise_eps_detect=noise_eps_detect.split(','), num_noise_samples=wdiff_samples, batch_size=eval_bs,
-                pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=iters, clip_min=clip_min, clip_max=clip_max,
-                p_ratio_cutoff=maxp_cutoff, save_alignments_dir='logs/stats' if save_alignments else None,
-                load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model)) if load_alignments else None,
+                pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=pgd_iters, clip_min=clip_min, clip_max=clip_max,
+                p_ratio_cutoff=maxp_cutoff, save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
+                load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model_type)) if load_alignments else None,
                 clip_alignments=clip_alignments, pgd_train=pgd_train, fit_classifier=fit_classifier, just_detect=just_detect)
+
+        #pending
+    if args.detection_mechanism == 'lid':
+        # to do: jayaram will complete the procedure
 
 if __name__ == '__main__':
     main()
