@@ -33,39 +33,39 @@ class MNIST(nn.Module):
         return output
 
     def layer_wise(self, x):
+        # Method to get the layer-wise embeddings for the proposed method
         # Input is included as the first layer
         output = [x]    # 1
 
         x = self.conv1(x)
-        #output.append(x)
+        # output.append(x)
         x = F.relu(x)
         output.append(x)    # 2
 
         x = self.conv2(x)
-        #output.append(x)
+        # output.append(x)
         x = F.max_pool2d(x, 2)
-        #output.append(x)
+        # output.append(x)
         x = self.dropout1(x)
         output.append(x)    # 3
 
         x = torch.flatten(x, 1)
-        #output.append(x)
+        # output.append(x)
         x = self.fc1(x)
-        #output.append(x)
+        # output.append(x)
         x = F.relu(x)
-        #output.append(x)
+        # output.append(x)
         x = self.dropout2(x)
         output.append(x)    # 4
 
         x = self.fc2(x)
-        output.append(x)    # 5
+        output.append(x)    # 5 (logits)
 
-        final = F.log_softmax(x, dim=1)
-        #output.append(final)
-
+        # final = F.log_softmax(x, dim=1)
+        # output.append(final)
         return output
 
-    def layer_forward(self, x):
+    def layer_wise_odds_are_odd(self, x):
         # Method to get the latent layer and logit layer outputs for the "odds-are-odd" method
         output = []
         x = self.conv1(x)
@@ -82,4 +82,35 @@ class MNIST(nn.Module):
         output.append(x) #logits
         # final = F.log_softmax(x, dim=1)
 
+        return output
+
+    def layer_wise_lid_method(self, x):
+        # Method to get the layer-wise embeddings for the LID adversarial subspaces paper
+        # Input is included as the first layer
+        output = [x]    # 1
+        x = self.conv1(x)
+        output.append(x)    # 2
+        x = F.relu(x)
+        output.append(x)    # 3
+        x = self.conv2(x)
+        output.append(x)    # 4
+        x = F.max_pool2d(x, 2)
+        output.append(x)    # 5
+        x = self.dropout1(x)
+        # Skipping this and taking its flattened version
+        # output.append(x)
+        x = torch.flatten(x, 1)
+        output.append(x)    # 6
+        x = self.fc1(x)
+        output.append(x)    # 7
+        x = F.relu(x)
+        output.append(x)    # 8
+        x = self.dropout2(x)
+        output.append(x)    # 9
+        x = self.fc2(x)
+        output.append(x)    # 10 (logits)
+
+        # Skipping this layer because it is simply a shifted version of the logit layer
+        # final = F.log_softmax(x, dim=1)
+        # output.append(final)
         return output
