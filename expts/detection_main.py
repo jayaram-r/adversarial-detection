@@ -209,7 +209,7 @@ def main():
         ######
 
         def net_forward(x, layer_by_layer=False, from_layer=0):
-            outputs = model.layer_forward(x)
+            outputs = model.layer_wise_odds_are_odd(x)
             return outputs
 
         def latent_and_logits_fn(x):

@@ -97,6 +97,8 @@ class ResNet(nn.Module):
         return out
 
     def layer_wise(self, x):
+        # Method to get the layer-wise embeddings for the proposed method
+        # Input is included as the first layer
         output = [x] #1
         out = F.relu(self.bn1(self.conv1(x)))
         output.append(out) #2
@@ -111,12 +113,13 @@ class ResNet(nn.Module):
         out = F.avg_pool2d(out, 4)
         output.append(out) #7
         out = out.view(out.size(0), -1)
-        # output.append(out) #8
+        # output.append(out)
         out = self.linear(out)
-        output.append(out) #8
+        output.append(out) #8 (logits)
+
         return output
 
-    def layer_forward(self, x):
+    def layer_wise_odds_are_odd(self, x):
         # Method to get the latent layer and logit layer outputs for the "odds-are-odd" method
         output = []
         out = F.relu(self.bn1(self.conv1(x)))
@@ -126,11 +129,39 @@ class ResNet(nn.Module):
         out = self.layer4(out)
         out = F.avg_pool2d(out, 4)
         out = out.view(out.size(0), -1)
-        output.append(out)  # lats
+        output.append(out)  # latent
         out = self.linear(out)
         output.append(out)  # logits
 
         return output
+
+    def layer_wise_lid_method(self, x):
+        # Method to get the layer-wise embeddings for the LID adversarial subspaces paper
+        # Input is included as the first layer
+        output = [x] #1
+        out = self.conv1(x)
+        output.append(out)  #2
+        out = self.bn1(out)
+        output.append(out)  #3
+        out = F.relu(out)
+        output.append(out)  #4
+        out = self.layer1(out)
+        output.append(out)  #5
+        out = self.layer2(out)
+        output.append(out)  #6
+        out = self.layer3(out)
+        output.append(out)  #7
+        out = self.layer4(out)
+        output.append(out)  #8
+        out = F.avg_pool2d(out, 4)
+        output.append(out)  #9
+        out = out.view(out.size(0), -1)
+        # output.append(out)
+        out = self.linear(out)
+        output.append(out)  #10 (logits)
+
+        return output
+
 
 def ResNet18():
     return ResNet(BasicBlock, [2,2,2,2])
