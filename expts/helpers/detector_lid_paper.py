@@ -17,6 +17,9 @@ from helpers.constants import (
     METRIC_DEF,
     FPR_TARGETS_DEF
 )
+from helpers.lid_estimators import lid_mle_amsaleg, estimate_intrinsic_dimension
+from sklearn.linear import LogisticRegression
+
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -47,7 +47,7 @@ def combine_and_vectorize(data_batches):
     return data
 
 
-def extract_layer_embeddings(model, device, data_loader, num_samples=None):
+def extract_layer_embeddings(model, device, data_loader, method='proposed', num_samples=None):
     """
     Extract the layer embeddings produced by a trained DNN model on the given data set. Also, returns the true class
     and the predicted class for each sample.
@@ -55,6 +55,7 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
     :param model: torch NN model.
     :param device: torch device type - cuda or cpu.
     :param data_loader: torch data loader object which is an instancee of `torch.utils.data.DataLoader`.
+    :param method: string with the name of the proposed method. Valid choices are ['proposed', 'odds', 'lid'].
     :param num_samples: None or an int value specifying the number of samples to select.
 
     :return:
@@ -82,7 +83,15 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None):
             _, predicted = outputs.max(1)
             labels_pred.extend(predicted.detach().cpu().numpy())
             # Layer outputs
-            outputs_layers = model.layer_wise(data)
+            if method == 'proposed':
+                outputs_layers = model.layer_wise(data)
+            elif method == 'odds':
+                outputs_layers = model.layer_wise_odds_are_odd(data)
+            elif method == 'lid':
+                outputs_layers = model.layer_wise_lid_method(data)
+            else:
+                raise ValueError("Invalid value '{}' for input 'method'".format(method))
+
             if batch_idx > 0:
                 for i in range(len(outputs_layers)):    # each layer
                     embeddings[i].append(outputs_layers[i].detach().cpu().numpy())
