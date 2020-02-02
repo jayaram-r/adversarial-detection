@@ -6,14 +6,13 @@ import sys
 import argparse
 import os
 import numpy as np
-
+import torch
+from torchvision import datasets, transforms
+from sklearn.model_selection import StratifiedKFold
 from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
-
-from sklearn.model_selection import StratifiedKFold
-
 from helpers.constants import (
     ROOT,
     SEED_DEFAULT,
@@ -21,17 +20,24 @@ from helpers.constants import (
     ATTACK_PROPORTION_DEF,
     NORMALIZE_IMAGES
 )
-from helpers.tf_robustify import *
+from helpers.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint
 )
-from helpers.attack import *
-from helpers.logits_and_latents_identifier import * #ICLR'18
-from helpers.lid_differentiator import * #ICML'19
+from helpers.attacks import *
+from helpers.logits_and_latents_identifier import (
+    get_samples_as_ndarray,
+    latent_and_logits_fn,
+    get_wcls,
+    return_data
+)   # ICML 2019
+from helpers.detector_lid_paper import (
+    flip,
+    get_noisy_samples,
+    DetectorLID
+)   # ICLR 2018
 
-import torch
-from torchvision import datasets, transforms
 
 # Proportion of attack samples from each method when a mixed attack strategy is used at test time.
 # The proportions should sum to 1. Note that this is a proportion of the subset of attack samples and not a
@@ -78,7 +84,7 @@ def main():
     parser.add_argument('--gpu', type=str, default="3", help='gpus to execute code on')
     args = parser.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -181,16 +187,20 @@ def main():
         just_detect=False
         ######
 
-        w_cls = get_wcls(args.model_type) 
-        X,Y,pgd_train = get_data(test_loader)
+        w_cls = get_wcls(args.model_type)
+        X, Y, pgd_train = return_data(test_loader)
 
-        predictor = collect_statistics(X, Y, latent_and_logits_fn_th=latent_and_logits_fn, nb_classes=num_classes,
-                weights=w_cls, cuda=cuda, debug=debug, targeted=collect_targeted, noise_eps=noise_eps.split(','),
-                noise_eps_detect=noise_eps_detect.split(','), num_noise_samples=wdiff_samples, batch_size=eval_bs,
-                pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=pgd_iters, clip_min=clip_min, clip_max=clip_max,
-                p_ratio_cutoff=maxp_cutoff, save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
-                load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model_type)) if load_alignments else None,
-                clip_alignments=clip_alignments, pgd_train=pgd_train, fit_classifier=fit_classifier, just_detect=just_detect)
+        predictor = collect_statistics(
+            X, Y, latent_and_logits_fn_th=latent_and_logits_fn, nb_classes=num_classes,
+            weights=w_cls, cuda=cuda, debug=debug, targeted=collect_targeted, noise_eps=noise_eps.split(','),
+            noise_eps_detect=noise_eps_detect.split(','), num_noise_samples=wdiff_samples, batch_size=eval_bs,
+            pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=pgd_iters, clip_min=clip_min, clip_max=clip_max,
+            p_ratio_cutoff=maxp_cutoff,
+            save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
+            load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model_type)) if load_alignments else None,
+            clip_alignments=clip_alignments, pgd_train=pgd_train, fit_classifier=fit_classifier,
+            just_detect=just_detect
+        )
 
         #pending
     if args.detection_mechanism == 'lid':

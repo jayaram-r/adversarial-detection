@@ -3,6 +3,7 @@ import torch
 import torchvision
 import numpy as np
 
+
 def foolbox_attack_helper(attack_model, device, test_loader):
     # model.eval()
     temp = []
@@ -19,7 +20,8 @@ def foolbox_attack_helper(attack_model, device, test_loader):
             total = np.vstack((total, adversarials))
     #print(total.shape)
     return total #numpy ndarray
-    
+
+
 def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM'):
         distance = None
         if p_norm == '2':
@@ -48,4 +50,3 @@ def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', ad
         adversarials = foolbox_attack_helper(attack_model, device, loader)
         return adversarials
         # adversarials = attack_model(images, labels)
-
