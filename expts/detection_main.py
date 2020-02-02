@@ -6,14 +6,13 @@ import sys
 import argparse
 import os
 import numpy as np
-
+import torch
+from torchvision import datasets, transforms
+from sklearn.model_selection import StratifiedKFold
 from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
-
-from sklearn.model_selection import StratifiedKFold
-
 from helpers.constants import (
     ROOT,
     SEED_DEFAULT,
@@ -21,17 +20,25 @@ from helpers.constants import (
     ATTACK_PROPORTION_DEF,
     NORMALIZE_IMAGES
 )
-from helpers.tf_robustify import *
+from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint
 )
-from helpers.attack import *
-from helpers.logits_and_latents_identifier import * #ICLR'18
-from helpers.lid_differentiator import * #ICML'19
+from helpers.attacks import *
+from detectors.logits_and_latents_identifier import (
+    get_samples_as_ndarray,
+    latent_and_logits_fn,
+    get_wcls,
+    return_data
+)   # ICML 2019
+from detectors.detector_lid_paper import (
+    flip,
+    get_noisy_samples,
+    DetectorLID
+)   # ICLR 2018
+from detectors.detector_proposed import DetectorLayerStatistics
 
-import torch
-from torchvision import datasets, transforms
 
 # Proportion of attack samples from each method when a mixed attack strategy is used at test time.
 # The proportions should sum to 1. Note that this is a proportion of the subset of attack samples and not a
@@ -52,7 +59,7 @@ def main():
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
-    parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds_are_odd'],
+    parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds'],
                         default='proposed', help='detection method to run')
     parser.add_argument('--test-statistic', '--ts', choices=['multinomial', 'lid'], default='multinomial',
                         help='type of test statistic to calculate at the layers for the proposed method')
@@ -75,10 +82,10 @@ def main():
                              'different proportions')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
-    parser.add_argument('--gpu', type=str, default="3", help='gpus to execute code on')
+    parser.add_argument('--gpu', type=str, default="1", help='gpus to execute code on')
     args = parser.parse_args()
 
-    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -181,20 +188,102 @@ def main():
         just_detect=False
         ######
 
+        #functions below are defined in detectors/logits_and_latents_identifier.py
         w_cls = get_wcls(args.model_type) 
-        X,Y,pgd_train = get_data(test_loader)
+        X, Y, pgd_train = return_data(test_loader)
 
-        predictor = collect_statistics(X, Y, latent_and_logits_fn_th=latent_and_logits_fn, nb_classes=num_classes,
-                weights=w_cls, cuda=cuda, debug=debug, targeted=collect_targeted, noise_eps=noise_eps.split(','),
-                noise_eps_detect=noise_eps_detect.split(','), num_noise_samples=wdiff_samples, batch_size=eval_bs,
-                pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=pgd_iters, clip_min=clip_min, clip_max=clip_max,
-                p_ratio_cutoff=maxp_cutoff, save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
-                load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model_type)) if load_alignments else None,
-                clip_alignments=clip_alignments, pgd_train=pgd_train, fit_classifier=fit_classifier, just_detect=just_detect)
+        #function below is defined in helpers/tf_robustify.py
+        predictor = collect_statistics(
+            X, Y, latent_and_logits_fn_th=latent_and_logits_fn, nb_classes=num_classes,
+            weights=w_cls, cuda=cuda, debug=debug, targeted=collect_targeted, noise_eps=noise_eps.split(','),
+            noise_eps_detect=noise_eps_detect.split(','), num_noise_samples=wdiff_samples, batch_size=eval_bs,
+            pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=pgd_iters, clip_min=clip_min, clip_max=clip_max,
+            p_ratio_cutoff=maxp_cutoff,
+            save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
+            load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model_type)) if load_alignments else None,
+            clip_alignments=clip_alignments, pgd_train=pgd_train, fit_classifier=fit_classifier,
+            just_detect=just_detect
+        )
 
-        #pending
-    if args.detection_mechanism == 'lid':
+        #pending modification + verification
+        for eval_batch in tqdm.tqdm(itt.islice(test_loader, args.eval_batches)):
+            if args.load_pgd_test_samples:
+                x, y, x_pgd = eval_batch
+            else:
+                x, y = eval_batch
+            if args.cuda:
+                x, y = x.cuda(), y.cuda()
+                if args.load_pgd_test_samples:
+                    x_pgd = x_pgd.cuda()
+
+            loss_clean, preds_clean = get_loss_and_preds(x, y)
+
+            eval_loss_clean.append((loss_clean.data).cpu().numpy())
+            eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy())
+            eval_preds_clean.extend(preds_clean)
+
+            if with_attack:
+                if args.clamp_uniform:
+                    x_rand = x + th.sign(th.empty_like(x).uniform_(-args.eps_rand, args.eps_rand)) * args.eps_rand
+                else:
+                    x_rand = x + th.empty_like(x).uniform_(-args.eps_rand, args.eps_rand)
+                loss_rand, preds_rand = get_loss_and_preds(x_rand, y)
+
+                eval_loss_rand.append((loss_rand.data).cpu().numpy())
+                eval_acc_rand.append((th.eq(preds_rand, y).float()).cpu().numpy())
+                eval_preds_rand.extend(preds_rand)
+
+                if args.attack == 'pgd':
+                    if not args.load_pgd_test_samples:
+                        x_pgd = attack_pgd(x, preds_clean, eps=args.eps_eval)
+                elif args.attack == 'pgdl2':
+                    x_pgd = attack_pgd(x, preds_clean, eps=args.eps_eval, l2=True)
+                elif args.attack == 'cw':
+                    x_pgd = attack_cw(x, preds_clean)
+
+                elif args.attack == 'mean':
+                    x_pgd = attack_mean(x, preds_clean, eps=args.eps_eval)
+                eval_x_pgd_l0.append(th.max(th.abs((x - x_pgd).view(x.size(0), -1)), -1)[0].detach().cpu().numpy())
+                eval_x_pgd_l2.append(th.norm((x - x_pgd).view(x.size(0), -1), p=2, dim=-1).detach().cpu().numpy())
+
+                loss_pgd, preds_pgd = get_loss_and_preds(x_pgd, y)
+
+                eval_loss_pgd.append((loss_pgd.data).cpu().numpy())
+                eval_acc_pgd.append((th.eq(preds_pgd, y).float()).cpu().numpy())
+                conf_pgd = confusion_matrix(preds_clean.cpu(), preds_pgd.cpu(), np.arange(nb_classes))
+                conf_pgd -= np.diag(np.diag(conf_pgd))
+                eval_conf_pgd.append(conf_pgd)
+                eval_preds_pgd.extend(preds_pgd)
+
+                loss_incr = loss_pgd - loss_clean
+                eval_loss_incr.append(loss_incr.detach().cpu())
+
+                x_pand = x_pgd + th.empty_like(x_pgd).uniform_(-args.eps_rand, args.eps_rand)
+                loss_pand, preds_pand = get_loss_and_preds(x_pand, y)
+
+                eval_loss_pand.append((loss_pand.data).cpu().numpy())
+                eval_acc_pand.append((th.eq(preds_pand, y).float()).cpu().numpy())
+                eval_preds_pand.extend(preds_pand)
+
+                preds_clean_after_corr, det_clean = predictor.send(x.cpu().numpy()).T
+                preds_pgd_after_corr, det_pgd = predictor.send(x_pgd.cpu().numpy()).T
+
+                acc_clean_after_corr.append(preds_clean_after_corr == y.cpu().numpy())
+                acc_pgd_after_corr.append(preds_pgd_after_corr == y.cpu().numpy())
+
+                eval_det_clean.append(det_clean)
+                eval_det_pgd.append(det_pgd)
+
+
+
+    elif args.detection_mechanism == 'lid':
         # to do: jayaram will complete the procedure
+        # required methods are in `detectors.detector_lid_paper`
+
+    elif args.detection_mechanism == 'proposed':
+        # to do: jayaram will complete the procedure
+        # required methods are in `detectors.detector_proposed`
+
 
 if __name__ == '__main__':
     main()
