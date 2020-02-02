@@ -26,7 +26,7 @@ from helpers.constants import (
     MAX_SAMPLES_DIM_REDUCTION
 )
 from helpers.utils import load_model_checkpoint, get_num_jobs
-from helpers.detector_proposed import extract_layer_embeddings
+from detectors.detector_proposed import extract_layer_embeddings
 try:
     import cPickle as pickle
 except:
