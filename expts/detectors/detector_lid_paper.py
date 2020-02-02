@@ -99,32 +99,79 @@ class DetectorLID:
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric='euclidean', metric_kwargs=None,
                  n_cv_folds=CROSS_VAL_SIZE,
-                 c_search_range=(-4, 4),
-                 num_c_values=10,
+                 c_search_values=None,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
                  low_memory=False,
                  seed_rng=SEED_DEFAULT):
+        """
+
+        :param neighborhood_constant: float value in (0, 1), that specifies the number of nearest neighbors as a
+                                      function of the number of samples (data size). If `N` is the number of samples,
+                                      then the number of neighbors is set to `N^neighborhood_constant`. It is
+                                      recommended to set this value in the range 0.4 to 0.5.
+        :param n_neighbors: None or int value specifying the number of nearest neighbors. If this value is specified,
+                            the `neighborhood_constant` is ignored. It is sufficient to specify either
+                            `neighborhood_constant` or `n_neighbors`.
+        :param metric: string or a callable that specifies the distance metric to use. Recommended to use 'euclidean'
+                       distance for the LID estimators.
+        :param metric_kwargs: optional keyword arguments required by the distance metric specified in the form of a
+                              dictionary.
+        :param n_cv_folds: number of cross-validation folds.
+        :param c_search_values: list or array of search values for the logistic regression hyper-parameter `C`. The
+                                default value is `None`.
+        :param approx_nearest_neighbors: Set to True in order to use an approximate nearest neighbor algorithm to
+                                         find the nearest neighbors. The NN-descent method is used for approximate
+                                         nearest neighbor searches.
+        :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
+        :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
+                           is likely to increase the running time.
+        :param seed_rng: int value specifying the seed for the random number generator. This is passed around to
+                         all the classes/functions that require random number generation. Set this to a fixed value
+                         for reproducible results.
+        """
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
         self.metric = metric
         self.metric_kwargs = metric_kwargs
         self.n_cv_folds = n_cv_folds
-        self.c_search_range = c_search_range
-        self.num_c_values = num_c_values
+        self.c_search_values = c_search_values
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.n_jobs = get_num_jobs(n_jobs)
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
         np.random.seed(self.seed_rng)
+        if self.c_search_values is None:
+            # Default search values for the `C` parameter of logistic regression
+            self.c_search_values = np.logspace(-4, 4, num=10)
+
         self.n_layers = None
         self.n_samples = []
         self.index_knn = None
         self.model_logistic = None
-        self.scores_train = None
 
     def fit(self, layer_embeddings_normal, layer_embeddings_noisy, layer_embeddings_adversarial):
+        """
+        Extract the LID feature vector for normal, noisy, and adversarial samples and train a logistic classifier
+        to separate adversarial samples from (normal + noisy). Cross-validation is used to select the hyper-parameter
+        `C` using area under the ROC curve as the validation metric.
+
+        :param layer_embeddings_normal: list of numpy arrays with the layer embeddings for normal samples.
+                                        Length of the list is equal to the number of layers. The numpy array at
+                                        index `i` has shape `(n, d_i)`, where `n` is the number of samples and `d_i`
+                                        is the dimension of the embeddings at layer `i`.
+        :param layer_embeddings_noisy: same format as `layer_embeddings_normal`, but corresponding to noisy data.
+        :param layer_embeddings_adversarial: same format as `layer_embeddings_normal`, but corresponding to
+                                             adversarial data.
+
+        :return: (self, scores_normal, scores_noisy, scores_adversarial), where
+            - self: trained instance of the class.
+            - scores_normal: numpy array with the scores (decision function of the logistic classifier) for normal
+                             samples. 1d array with the same number of samples as `layer_embeddings_normal`.
+            - scores_noisy: scores corresponding to `layer_embeddings_noisy`.
+            - scores_adversarial: scores corresponding to `layer_embeddings_adversarial`.
+        """
         self.n_layers = len(layer_embeddings_normal)
         logger.info("Number of layer embeddings: {:d}.".format(self.n_layers))
         if (len(layer_embeddings_noisy) != self.n_layers) or (len(layer_embeddings_adversarial) != self.n_layers):
@@ -192,9 +239,8 @@ class DetectorLID:
         labels = np.concatenate([np.zeros(features_lid_normal.shape[0], dtype=np.int),
                                  np.zeros(features_lid_noisy.shape[0], dtype=np.int),
                                  np.ones(features_lid_adversarial.shape[0], dtype=np.int)])
-        ns = labels.shape[0]
         # Randomly shuffle the samples to avoid determinism
-        ind_perm = np.random.permutation(ns)
+        ind_perm = np.random.permutation(labels.shape[0])
         features_lid = features_lid[ind_perm, :]
         labels = labels[ind_perm]
 
@@ -203,9 +249,8 @@ class DetectorLID:
         logger.info("Using {:d}-fold cross-validation with area under ROC curve (AUC) as the metric to select "
                     "the best C hyper-parameter.".format(self.n_cv_folds))
 
-        Cs = np.logspace(self.c_search_range[0], self.c_search_range[1], num=self.num_c_values)
         self.model_logistic = LogisticRegressionCV(
-            Cs=Cs,
+            Cs=self.c_search_values,
             cv=self.n_cv_folds,
             penalty='l2',
             scoring='roc_auc',
@@ -215,10 +260,25 @@ class DetectorLID:
         ).fit(features_lid, labels)
 
         # Larger values of this score correspond to a higher probability of predicting class 1 (adversarial)
-        self.scores_train = self.model_logistic.decision_function(features_lid)
-        return self
+        scores_normal = self.model_logistic.decision_function(features_lid_normal)
+        scores_noisy = self.model_logistic.decision_function(features_lid_noisy)
+        scores_adversarial = self.model_logistic.decision_function(features_lid_adversarial)
+
+        return self, scores_normal, scores_noisy, scores_adversarial
 
     def score(self, layer_embeddings):
+        """
+        Given a list of layer embeddings for test samples, extract the layer-wise LID feature vector and return the
+        decision function of the logistic classifier.
+
+        :param layer_embeddings: list of numpy arrays with the layer embeddings for normal samples. Length of the
+                                 list is equal to the number of layers. The numpy array at index `i` has shape
+                                 `(n, d_i)`, where `n` is the number of samples and `d_i` is the dimension of the
+                                 embeddings at layer `i`.
+        :return:
+            - numpy array of detection scores for the test samples. Has shape `(n, )` where `n` is the number of
+              samples. Larger values correspond to a higher confidence that the sample is adversarial.
+        """
         n_test = layer_embeddings[0].shape[0]
         l = len(layer_embeddings)
         if l != self.n_layers:
@@ -227,7 +287,7 @@ class DetectorLID:
 
         features_lid = np.zeros((n_test, self.n_layers))
         for i in range(self.n_layers):
-            logger.info("Calculating LID features for layer {:d}:".format(i + 1))
+            logger.info("Calculating LID features for layer {:d}.".format(i + 1))
             nn_indices, nn_distances = self.index_knn.query(layer_embeddings[i], k=self.n_neighbors)
             features_lid[:, i] = lid_mle_amsaleg(nn_distances)
 
