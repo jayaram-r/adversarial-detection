@@ -20,19 +20,19 @@ from helpers.constants import (
     ATTACK_PROPORTION_DEF,
     NORMALIZE_IMAGES
 )
-from helpers.tf_robustify import collect_statistics
+from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint
 )
 from helpers.attacks import *
-from helpers.logits_and_latents_identifier import (
+from detectors.logits_and_latents_identifier import (
     get_samples_as_ndarray,
     latent_and_logits_fn,
     get_wcls,
     return_data
 )   # ICML 2019
-from helpers.detector_lid_paper import (
+from detectors.detector_lid_paper import (
     flip,
     get_noisy_samples,
     DetectorLID
