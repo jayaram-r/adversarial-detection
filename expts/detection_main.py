@@ -23,15 +23,12 @@ from helpers.constants import (
 from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
-    save_model_checkpoint
+    save_model_checkpoint,
+    convert_to_list,
+    convert_to_loader
 )
 from helpers.attacks import *
-from detectors.logits_and_latents_identifier import (
-    get_samples_as_ndarray,
-    latent_and_logits_fn,
-    get_wcls,
-    return_data
-)   # ICML 2019
+from detectors.detector_odds_are_odd import *
 from detectors.detector_lid_paper import (
     flip,
     get_noisy_samples,
@@ -82,7 +79,11 @@ def main():
                              'different proportions')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
-    parser.add_argument('--gpu', type=str, default="1", help='gpus to execute code on')
+    parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
+    parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
+                        help="p norm for the adversarial attack; options are '2' and 'inf'")
+    
+    
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -126,6 +127,7 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
         num_classes = 10
+        bounds=(-255,255)
 
     elif args.model_type == 'cifar10':
         transform_test = transforms.Compose(
@@ -137,6 +139,7 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
+        bounds=(-255,255)
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -148,142 +151,51 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
+        bounds=(-255,255)
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
 
 
-    """
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
-    for ind_tr, ind_te in skf.split(data, labels):
+    for ind_tr, ind_te in skf.split(data, labels): #data, labels is undefined
         data_tr = data[ind_tr, :]
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
         labels_te = labels[ind_te]
-    """
 
+        #convert ndarray to list
+        data_te_list = convert_to_list(data_te)
+        labels_te_list = convert_to_list(labels_te)
+        
+        #convert list to loader
+        test_loader = convert_to_loader(data_te_list, labels_te_list)
 
-    if args.detection_mechanism == 'odds':
-        # to do: pending verification
-        ##params from torch_example.py
-        batch_size=32
-        eval_bs=256
-        cuda=True
-        attack_lr=.25
-        eps=8/255
-        pgd_iters=10
-        noise_eps='n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
-        noise_eps_detect='n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
-        clip_alignments=True
-        debug=False
-        #mode='eval'
-        wdiff_samples=256
-        maxp_cutoff=.999
-        collect_targeted=False
-        save_alignments=False
-        load_alignments=False
-        fit_classifier=True
-        just_detect=False
-        ######
+        #use dataloader to create adv. examples; adv_inputs is an ndarray
+        adv_inputs, adv_labels = foolbox_attack(model, device, test_loader, bounds, num_classes=num_classes, p_norm=args.p_norm, adv_attack=args.attack_type, labels = True)
 
-        #functions below are defined in detectors/logits_and_latents_identifier.py
-        w_cls = get_wcls(args.model_type) 
-        X, Y, pgd_train = return_data(test_loader)
+        #convert ndarray to list
+        adv_inputs_list, adv_labels_list = convert_to_list(adv_inputs), convert_to_list(adv_labels)
 
-        #function below is defined in helpers/tf_robustify.py
-        predictor = collect_statistics(
-            X, Y, latent_and_logits_fn_th=latent_and_logits_fn, nb_classes=num_classes,
-            weights=w_cls, cuda=cuda, debug=debug, targeted=collect_targeted, noise_eps=noise_eps.split(','),
-            noise_eps_detect=noise_eps_detect.split(','), num_noise_samples=wdiff_samples, batch_size=eval_bs,
-            pgd_eps=eps, pgd_lr=attack_lr, pgd_iters=pgd_iters, clip_min=clip_min, clip_max=clip_max,
-            p_ratio_cutoff=maxp_cutoff,
-            save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
-            load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(args.model_type)) if load_alignments else None,
-            clip_alignments=clip_alignments, pgd_train=pgd_train, fit_classifier=fit_classifier,
-            just_detect=just_detect
-        )
+        #convert list to loader
+        adv_loader = convert_to_loader(adv_inputs_list, adv_labels_list)
+ 
+        if args.detection_mechanism == 'odds':
+            # call function ICML_detector from detectors/detector_odds_are_odd.py
+            train_inputs = (data_tr, labels_tr)
+            predictor = fit_odds_are_odd(inputs, model, args.model_type, with_attack=True)
+            detect_odds_are_odd(predictor, test_loader, adv_loader, model)
 
-        #pending modification + verification
-        for eval_batch in tqdm.tqdm(itt.islice(test_loader, args.eval_batches)):
-            if args.load_pgd_test_samples:
-                x, y, x_pgd = eval_batch
-            else:
-                x, y = eval_batch
-            if args.cuda:
-                x, y = x.cuda(), y.cuda()
-                if args.load_pgd_test_samples:
-                    x_pgd = x_pgd.cuda()
-
-            loss_clean, preds_clean = get_loss_and_preds(x, y)
-
-            eval_loss_clean.append((loss_clean.data).cpu().numpy())
-            eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy())
-            eval_preds_clean.extend(preds_clean)
-
-            if with_attack:
-                if args.clamp_uniform:
-                    x_rand = x + th.sign(th.empty_like(x).uniform_(-args.eps_rand, args.eps_rand)) * args.eps_rand
-                else:
-                    x_rand = x + th.empty_like(x).uniform_(-args.eps_rand, args.eps_rand)
-                loss_rand, preds_rand = get_loss_and_preds(x_rand, y)
-
-                eval_loss_rand.append((loss_rand.data).cpu().numpy())
-                eval_acc_rand.append((th.eq(preds_rand, y).float()).cpu().numpy())
-                eval_preds_rand.extend(preds_rand)
-
-                if args.attack == 'pgd':
-                    if not args.load_pgd_test_samples:
-                        x_pgd = attack_pgd(x, preds_clean, eps=args.eps_eval)
-                elif args.attack == 'pgdl2':
-                    x_pgd = attack_pgd(x, preds_clean, eps=args.eps_eval, l2=True)
-                elif args.attack == 'cw':
-                    x_pgd = attack_cw(x, preds_clean)
-
-                elif args.attack == 'mean':
-                    x_pgd = attack_mean(x, preds_clean, eps=args.eps_eval)
-                eval_x_pgd_l0.append(th.max(th.abs((x - x_pgd).view(x.size(0), -1)), -1)[0].detach().cpu().numpy())
-                eval_x_pgd_l2.append(th.norm((x - x_pgd).view(x.size(0), -1), p=2, dim=-1).detach().cpu().numpy())
-
-                loss_pgd, preds_pgd = get_loss_and_preds(x_pgd, y)
-
-                eval_loss_pgd.append((loss_pgd.data).cpu().numpy())
-                eval_acc_pgd.append((th.eq(preds_pgd, y).float()).cpu().numpy())
-                conf_pgd = confusion_matrix(preds_clean.cpu(), preds_pgd.cpu(), np.arange(nb_classes))
-                conf_pgd -= np.diag(np.diag(conf_pgd))
-                eval_conf_pgd.append(conf_pgd)
-                eval_preds_pgd.extend(preds_pgd)
-
-                loss_incr = loss_pgd - loss_clean
-                eval_loss_incr.append(loss_incr.detach().cpu())
-
-                x_pand = x_pgd + th.empty_like(x_pgd).uniform_(-args.eps_rand, args.eps_rand)
-                loss_pand, preds_pand = get_loss_and_preds(x_pand, y)
-
-                eval_loss_pand.append((loss_pand.data).cpu().numpy())
-                eval_acc_pand.append((th.eq(preds_pand, y).float()).cpu().numpy())
-                eval_preds_pand.extend(preds_pand)
-
-                preds_clean_after_corr, det_clean = predictor.send(x.cpu().numpy()).T
-                preds_pgd_after_corr, det_pgd = predictor.send(x_pgd.cpu().numpy()).T
-
-                acc_clean_after_corr.append(preds_clean_after_corr == y.cpu().numpy())
-                acc_pgd_after_corr.append(preds_pgd_after_corr == y.cpu().numpy())
-
-                eval_det_clean.append(det_clean)
-                eval_det_pgd.append(det_pgd)
-
-
-
-    elif args.detection_mechanism == 'lid':
-        # to do: jayaram will complete the procedure
-        # required methods are in `detectors.detector_lid_paper`
-
-    elif args.detection_mechanism == 'proposed':
-        # to do: jayaram will complete the procedure
-        # required methods are in `detectors.detector_proposed`
-
+        elif args.detection_mechanism == 'lid':
+            # to do: jayaram will complete the procedure
+            # required methods are in `detectors.detector_lid_paper`
+            continue
+        elif args.detection_mechanism == 'proposed':
+            # to do: jayaram will complete the procedure
+            # required methods are in `detectors.detector_proposed`
+            continue
 
 if __name__ == '__main__':
     main()

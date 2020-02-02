@@ -216,7 +216,7 @@ def main():
     if args.attack:
         # ToDo: Verify correctness
         #https://stackoverflow.com/questions/56699048/how-to-get-the-filename-of-a-sample-from-a-dataloader
-        adversarials = foolbox_attack(model, device, test_loader, bounds, p_norm=args.p_norm, adv_attack=args.adv_attack)
+        adversarials, _ = foolbox_attack(model, device, test_loader, bounds, p_norm=args.p_norm, adv_attack=args.adv_attack)
 
     if args.save_model:
         save_model_checkpoint(model, args.model_type)

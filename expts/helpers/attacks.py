@@ -4,7 +4,7 @@ import torchvision
 import numpy as np
 
 
-def foolbox_attack_helper(attack_model, device, test_loader):
+def foolbox_attack_helper(attack_model, device, test_loader, labels=False):
     # model.eval()
     temp = []
     for batch_idx, (data, target) in enumerate(test_loader):
@@ -12,14 +12,24 @@ def foolbox_attack_helper(attack_model, device, test_loader):
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
         shape = data.shape
+        #line below requires alteration for variations in the perturbation size
         adversarials = attack_model(data_numpy, target_numpy, epsilons=1000, max_epsilon=0.5) #, target_numpy, unpack=False)
         if batch_idx == 0:
             total = adversarials
         else:
             #print(total.shape, adversarials.shape)
             total = np.vstack((total, adversarials))
+        if labels == True:
+            adversarial_classes = np.asarray([a.adversarial_class for a in adversarials])
+            if batch_idx == 0:
+                total_labels = adversarial_classes
+            else:
+                total_labels = np.vstack((total_labels, adversarial_classes))
     #print(total.shape)
-    return total #numpy ndarray
+    if labels == False:
+        return total,_#numpy ndarray
+    else:
+        return total, total_labels
 
 
 def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM'):
