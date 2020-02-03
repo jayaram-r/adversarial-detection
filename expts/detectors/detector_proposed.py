@@ -82,7 +82,7 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
             _, predicted = outputs.max(1)
             labels_pred.extend(predicted.detach().cpu().numpy())
             # Layer outputs
-            if method == 'proposed':
+            if method in ('proposed', 'dknn'):
                 outputs_layers = model.layer_wise(data)
             elif method == 'odds':
                 outputs_layers = model.layer_wise_odds_are_odd(data)
