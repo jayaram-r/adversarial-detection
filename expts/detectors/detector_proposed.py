@@ -4,13 +4,11 @@ import torch
 import logging
 import copy
 from helpers.constants import (
-    ROOT,
     SEED_DEFAULT,
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
     NUM_TOP_RANKED,
-    TEST_STATS_SUPPORTED,
-    FPR_TARGETS_DEF
+    TEST_STATS_SUPPORTED
 )
 from helpers.dimension_reduction_methods import (
     transform_data_from_model,
@@ -224,6 +222,7 @@ class DetectorLayerStatistics:
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
+        np.random.seed(self.seed_rng)
         if self.layer_statistic not in TEST_STATS_SUPPORTED:
             raise ValueError("Invalid value '{}' for the input argument 'layer_statistic'.".
                              format(self.layer_statistic))

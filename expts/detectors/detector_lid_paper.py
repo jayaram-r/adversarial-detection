@@ -188,7 +188,7 @@ class DetectorLID:
         if self.n_neighbors is None:
             # Set number of nearest neighbors based on the data size (of normal samples) and the
             # neighborhood constant
-            self.n_neighbors = int(np.ceil(self.n_train[0] ** self.neighborhood_constant))
+            self.n_neighbors = int(np.ceil(self.n_samples[0] ** self.neighborhood_constant))
 
         # The data arrays at all layers should have the same number of samples
         if not all([layer_embeddings_normal[i].shape[0] == self.n_samples[0] for i in range(self.n_layers)]):
@@ -200,6 +200,7 @@ class DetectorLID:
         if not all([layer_embeddings_adversarial[i].shape[0] == self.n_samples[2] for i in range(self.n_layers)]):
             raise ValueError("Input 'layer_embeddings_adversarial' does not have the expected format")
 
+        self.index_knn = [None for _ in range(self.n_layers)]
         features_lid_normal = np.zeros((self.n_samples[0], self.n_layers))
         features_lid_noisy = np.zeros((self.n_samples[1], self.n_layers))
         features_lid_adversarial = np.zeros((self.n_samples[2], self.n_layers))
@@ -207,7 +208,7 @@ class DetectorLID:
             logger.info("Processing layer {:d}:".format(i + 1))
             logger.info("Building a KNN index on the feature embeddings of normal samples.")
             # Build a KNN index on the set of feature embeddings from normal samples from layer `i`
-            self.index_knn = KNNIndex(
+            self.index_knn[i] = KNNIndex(
                 layer_embeddings_normal[i], n_neighbors=self.n_neighbors,
                 metric=self.metric, metric_kwargs=self.metric_kwargs,
                 approx_nearest_neighbors=self.approx_nearest_neighbors,
@@ -217,19 +218,19 @@ class DetectorLID:
             )
             logger.info("Calculating LID estimates for the feature embeddings of normal samples.")
             # Nearest neighbors of the normal feature embeddings from this layer
-            nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn[i].query_self(k=self.n_neighbors)
             # LID estimates of the normal feature embeddings from this layer
             features_lid_normal[:, i] = lid_mle_amsaleg(nn_distances)
 
             logger.info("Calculating LID estimates for the feature embeddings of noisy samples.")
             # Nearest neighbors of the noisy feature embeddings from this layer
-            nn_indices, nn_distances = self.index_knn.query(layer_embeddings_noisy[i], k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings_noisy[i], k=self.n_neighbors)
             # LID estimates of the noisy feature embeddings from this layer
             features_lid_noisy[:, i] = lid_mle_amsaleg(nn_distances)
 
             logger.info("Calculating LID estimates for the feature embeddings of adversarial samples.")
             # Nearest neighbors of the adversarial feature embeddings from this layer
-            nn_indices, nn_distances = self.index_knn.query(layer_embeddings_adversarial[i], k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings_adversarial[i], k=self.n_neighbors)
             # LID estimates of the adversarial feature embeddings from this layer
             features_lid_adversarial[:, i] = lid_mle_amsaleg(nn_distances)
 
@@ -288,7 +289,7 @@ class DetectorLID:
         features_lid = np.zeros((n_test, self.n_layers))
         for i in range(self.n_layers):
             logger.info("Calculating LID features for layer {:d}.".format(i + 1))
-            nn_indices, nn_distances = self.index_knn.query(layer_embeddings[i], k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings[i], k=self.n_neighbors)
             features_lid[:, i] = lid_mle_amsaleg(nn_distances)
 
         return self.model_logistic.decision_function(features_lid)
