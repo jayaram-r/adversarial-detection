@@ -158,9 +158,14 @@ def main():
 
 
 
+    #convert the data loader to 2 ndarrays
+    data, labels = get_samples_as_ndarray(test_loader)
+    
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
-    for ind_tr, ind_te in skf.split(data, labels): #data, labels is undefined
+    
+    #repeat for each fold in the split
+    for ind_tr, ind_te in skf.split(data, labels): 
         data_tr = data[ind_tr, :]
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
