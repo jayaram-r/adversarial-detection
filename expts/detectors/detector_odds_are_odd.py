@@ -35,7 +35,7 @@ def get_wcls(model, model_type):
     else:
         raise ValueError("Invalid model type '{}'".format(model_type))
 
-    return w_cls
+    return w_cls.detach()
 
 
 def return_data(model, test_loader):
@@ -45,7 +45,7 @@ def return_data(model, test_loader):
     return X, Y, pgd_train
 
 
-def fit_odds_are_odd(loader, model, model_type, with_attack=True):
+def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
         # to do: pending verification
         ##params from torch_example.py
         batch_size=32
@@ -66,7 +66,9 @@ def fit_odds_are_odd(loader, model, model_type, with_attack=True):
         load_alignments=False
         fit_classifier=True
         just_detect=False
-        
+        clip_min=0.
+        clip_max=1.
+
         #initializations
         cuda = cuda and th.cuda.is_available()
  

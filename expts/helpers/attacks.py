@@ -13,7 +13,7 @@ def foolbox_attack_helper(attack_model, device, test_loader, labels=False):
         target_numpy = target.data.cpu().numpy()
         shape = data.shape
         #line below requires alteration for variations in the perturbation size
-        adversarials = attack_model(data_numpy, target_numpy, epsilons=1000, max_epsilon=0.5) #, target_numpy, unpack=False)
+        adversarials = attack_model(data_numpy, target_numpy, unpack=False)
         if batch_idx == 0:
             total = adversarials
         else:
@@ -25,6 +25,7 @@ def foolbox_attack_helper(attack_model, device, test_loader, labels=False):
                 total_labels = adversarial_classes
             else:
                 total_labels = np.vstack((total_labels, adversarial_classes))
+        print("Finished processing batch id:", batch_idx)
     #print(total.shape)
     if labels == False:
         return total,_#numpy ndarray
@@ -32,12 +33,14 @@ def foolbox_attack_helper(attack_model, device, test_loader, labels=False):
         return total, total_labels
 
 
-def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM'):
+def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM', labels=False):
         distance = None
         if p_norm == '2':
-            distance = foolbox.distances.Linf
+            distance = foolbox.distances.MSE
         elif p_norm == 'inf':
             distance = foolbox.distances.Linf
+        elif p_norm == '0':
+            distance = foolbox.distances.L0
         else:
             raise ValueError("'{}' is not a valid or supported p-norm type".format(args.p_norm))
 
@@ -57,6 +60,6 @@ def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', ad
             raise ValueError("'{}' is not a valid adversarial attack".format(adv_attack))
 
         #attack_model.as_generator(epsilon=0.2)
-        adversarials = foolbox_attack_helper(attack_model, device, loader)
+        adversarials = foolbox_attack_helper(attack_model, device, loader, labels)
         return adversarials
         # adversarials = attack_model(images, labels)

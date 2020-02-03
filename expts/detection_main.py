@@ -35,7 +35,6 @@ from detectors.detector_lid_paper import (
     DetectorLID
 )   # ICLR 2018
 from detectors.detector_proposed import DetectorLayerStatistics
-from detectors.detector_deep_knn import DeepKNN
 
 
 # Proportion of attack samples from each method when a mixed attack strategy is used at test time.
@@ -70,7 +69,7 @@ def main():
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
     parser.add_argument('--detection-mechanism', '-dm', default='odds', help='the detection mechanism to use')
     parser.add_argument('--ckpt', default=False, help='to use checkpoint or not')
-    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='FGSM',
+    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
     parser.add_argument('--attack-proportion', '--ap', type=float, default=ATTACK_PROPORTION_DEF,
                         help='Proportion of attack samples in the test set (default: {:.2f})'.
@@ -180,7 +179,7 @@ def main():
         test_loader = convert_to_loader(data_te_list, labels_te_list)
 
         #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels = foolbox_attack(model, device, test_loader, bounds, num_classes=num_classes, p_norm=args.p_norm, adv_attack=args.attack_type, labels = True)
+        adv_inputs, adv_labels = foolbox_attack(model, device, test_loader, bounds, num_classes=num_classes, p_norm=args.p_norm, adv_attack=args.adv_attack, labels = True)
 
         #convert ndarray to list
         adv_inputs_list, adv_labels_list = convert_to_list(adv_inputs), convert_to_list(adv_labels)
@@ -191,7 +190,8 @@ def main():
         if args.detection_mechanism == 'odds':
             # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
-            predictor = fit_odds_are_odd(train_inputs, model, args.model_type, with_attack=True)
+            predictor = fit_odds_are_odd(train_inputs, model, args.model_type, num_classes, with_attack=True)
+            next(predictor)
             detect_odds_are_odd(predictor, test_loader, adv_loader, model)
 
         elif args.detection_mechanism == 'lid':
@@ -204,7 +204,6 @@ def main():
             continue
         elif args.detection_mechanism == 'dknn':
             continue
-
 
 if __name__ == '__main__':
     main()
