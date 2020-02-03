@@ -65,7 +65,7 @@ def main():
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds', 'dknn'],
                         default='proposed', help='detection method to run')
-    parser.add_argument('--test-statistic', '--ts', choices=['multinomial', 'lid'], default='multinomial',
+    parser.add_argument('--test-statistic', '--ts', choices=['multinomial', 'lid', 'lle'], default='multinomial',
                         help='type of test statistic to calculate at the layers for the proposed method')
     parser.add_argument('--ood', action='store_true', default=False,
                         help='Perform OOD detection instead of adversarial (if applicable)')
@@ -164,18 +164,18 @@ def main():
 
     # Only the test split of the data will be used for detection experiments
     # convert the data loader to 2 ndarrays
-    data, labels = get_samples_as_ndarray(test_loader)
+    data_clean, labels_clean = get_samples_as_ndarray(test_loader)
     
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
 
-    scores_adver_all = np.zeros(labels.shape[0])
+    scores_adver_all = np.zeros(labels_clean.shape[0])
     #repeat for each fold in the split
-    for j, (ind_tr, ind_te) in enumerate(skf.split(data, labels)):
-        data_tr_init = data[ind_tr, :]
-        labels_tr_init = labels[ind_tr]
-        data_te_init = data[ind_te, :]
-        labels_te_init = labels[ind_te]
+    for j, (ind_tr, ind_te) in enumerate(skf.split(data_clean, labels_clean)):
+        data_tr_init = data_clean[ind_tr, :]
+        labels_tr_init = labels_clean[ind_tr]
+        data_te_init = data_clean[ind_te, :]
+        labels_te_init = labels_clean[ind_te]
         print("\nCross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
               format(j + 1, labels_tr_init.shape[0], labels_te_init.shape[0]))
 
