@@ -14,7 +14,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, labels_req=False):
         target_numpy = target.data.cpu().numpy()
         shape = data.shape
         #line below requires alteration for variations in the perturbation size
-        adversarials = attack_model(data_numpy, target_numpy, epsilons=1000, max_epsilon=0.5) #, target_numpy, unpack=False)
+        adversarials = attack_model(data_numpy, target_numpy, unpack=False)
         if batch_idx == 0:
             total = adversarials
         else:
@@ -28,6 +28,8 @@ def foolbox_attack_helper(attack_model, device, data_loader, labels_req=False):
             else:
                 total_labels = np.vstack((total_labels, adversarial_classes))
 
+        print("Finished processing batch id:", batch_idx)
+
     # print(total.shape)
     if not labels_req:
         return total
@@ -38,9 +40,11 @@ def foolbox_attack_helper(attack_model, device, data_loader, labels_req=False):
 def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM', labels_req=False):
         distance = None
         if p_norm == '2':
-            distance = foolbox.distances.Linf
+            distance = foolbox.distances.MSE
         elif p_norm == 'inf':
             distance = foolbox.distances.Linf
+        elif p_norm == '0':
+            distance = foolbox.distances.L0
         else:
             raise ValueError("'{}' is not a valid or supported p-norm type".format(args.p_norm))
 
