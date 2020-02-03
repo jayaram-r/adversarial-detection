@@ -27,8 +27,14 @@ from helpers.utils import (
     convert_to_list,
     convert_to_loader
 )
-from helpers.attacks import *
-from detectors.detector_odds_are_odd import *
+from helpers.attacks import foolbox_attack, foolbox_attack_helper
+from detectors.detector_odds_are_odd import (
+    get_samples_as_ndarray,
+    get_wcls,
+    return_data,
+    fit_odds_are_odd,
+    detect_odds_are_odd
+)
 from detectors.detector_lid_paper import (
     flip,
     get_noisy_samples,
@@ -83,8 +89,7 @@ def main():
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
     parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '2' and 'inf'")
-    
-    
+    parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -101,7 +106,7 @@ def main():
 
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
-        # Dimension reduction is not applied when the test statistic is LID
+        # Dimension reduction is not applied when the test statistic is 'lid' or 'lpp'
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
@@ -128,7 +133,7 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
         num_classes = 10
-        bounds=(-255,255)
+        bounds = (-255, 255)
 
     elif args.model_type == 'cifar10':
         transform_test = transforms.Compose(
@@ -140,7 +145,7 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255,255)
+        bounds = (-255, 255)
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -152,47 +157,52 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255,255)
+        bounds = (-255, 255)
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-
-
-    #convert the data loader to 2 ndarrays
+    # Only the test split of the data will be used for detection experiments
+    # convert the data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
     
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
     
     #repeat for each fold in the split
-    for ind_tr, ind_te in skf.split(data, labels): 
+    for j, (ind_tr, ind_te) in enumerate(skf.split(data, labels)):
         data_tr = data[ind_tr, :]
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
         labels_te = labels[ind_te]
+        print("Cross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
+              format(j + 1, labels_tr.shape[0], labels_te.shape[0]))
 
-        #convert ndarray to list
-        data_te_list = convert_to_list(data_te)
-        labels_te_list = convert_to_list(labels_te)
-        
-        #convert list to loader
-        test_loader = convert_to_loader(data_te_list, labels_te_list)
+        # Data loader for the train data split
+        train_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.test_batch_size)
 
-        #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels = foolbox_attack(model, device, test_loader, bounds, num_classes=num_classes, p_norm=args.p_norm, adv_attack=args.attack_type, labels = True)
+        # Data loader for the test data split
+        # convert ndarray to list
+        # data_te_list = convert_to_list(data_te)
+        # labels_te_list = convert_to_list(labels_te)
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
 
-        #convert ndarray to list
-        adv_inputs_list, adv_labels_list = convert_to_list(adv_inputs), convert_to_list(adv_labels)
+        # TODO: create adversarial examples from the training split because this is used by the LID detection method
 
-        #convert list to loader
-        adv_loader = convert_to_loader(adv_inputs_list, adv_labels_list)
+        # use dataloader to create adv. examples from the test split; adv_inputs is an ndarray
+        adv_inputs, adv_labels = foolbox_attack(model, device, test_fold_loader, bounds, num_classes=num_classes,
+                                                p_norm=args.p_norm, adv_attack=args.attack_type, labels_req=True)
+
+        # convert ndarray to list
+        # adv_inputs_list, adv_labels_list = convert_to_list(adv_inputs), convert_to_list(adv_labels)
+        # convert adversarial array inputs to torch dataloader
+        adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
  
         if args.detection_mechanism == 'odds':
             # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
             predictor = fit_odds_are_odd(train_inputs, model, args.model_type, with_attack=True)
-            detect_odds_are_odd(predictor, test_loader, adv_loader, model)
+            detect_odds_are_odd(predictor, test_fold_loader, adv_loader, model)
 
         elif args.detection_mechanism == 'lid':
             # to do: jayaram will complete the procedure
