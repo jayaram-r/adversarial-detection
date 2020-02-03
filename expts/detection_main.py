@@ -40,7 +40,7 @@ from detectors.detector_lid_paper import (
     get_noisy_samples,
     DetectorLID
 )   # ICLR 2018
-from detectors.detector_proposed import DetectorLayerStatistics
+from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
 
 
@@ -110,10 +110,10 @@ def main():
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
+    model_dim_reduc = None
     if apply_dim_reduc:
         if not args.model_dim_reduc:
             model_dim_reduc = os.path.join(ROOT, 'outputs', args.model_type, 'models_dimension_reduction.pkl')
-
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -168,28 +168,39 @@ def main():
     
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
-    
+
+    scores_adver_all = np.zeros(labels.shape[0])
     #repeat for each fold in the split
     for j, (ind_tr, ind_te) in enumerate(skf.split(data, labels)):
-        data_tr = data[ind_tr, :]
-        labels_tr = labels[ind_tr]
-        data_te = data[ind_te, :]
-        labels_te = labels[ind_te]
-        print("Cross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
-              format(j + 1, labels_tr.shape[0], labels_te.shape[0]))
+        data_tr_init = data[ind_tr, :]
+        labels_tr_init = labels[ind_tr]
+        data_te_init = data[ind_te, :]
+        labels_te_init = labels[ind_te]
+        print("\nCross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
+              format(j + 1, labels_tr_init.shape[0], labels_te_init.shape[0]))
 
         # Data loader for the train data split
-        train_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.test_batch_size)
+        train_fold_loader = convert_to_loader(data_tr_init, labels_tr_init, batch_size=args.test_batch_size)
+
+        print("\nCalculating the layer embeddings and DNN predictions for the train data split:")
+        layer_embeddings_tr, labels_tr, labels_pred_tr, _ = extract_layer_embeddings(
+            model, device, train_fold_loader, method=args.detection_mechanism
+        )
 
         # Data loader for the test data split
         # convert ndarray to list
-        # data_te_list = convert_to_list(data_te)
-        # labels_te_list = convert_to_list(labels_te)
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
+        # data_te_list = convert_to_list(data_te_init)
+        # labels_te_list = convert_to_list(labels_te_init)
+        test_fold_loader = convert_to_loader(data_te_init, labels_te_init, batch_size=args.test_batch_size)
+
+        print("\nCalculating the layer embeddings and DNN predictions for the test data split:")
+        layer_embeddings_te, labels_te, labels_pred_te, _ = extract_layer_embeddings(
+            model, device, test_fold_loader, method=args.detection_mechanism
+        )
 
         # TODO: create adversarial examples from the training split because this is used by the LID detection method
 
-        # use dataloader to create adv. examples from the test split; adv_inputs is an ndarray
+        # use the test data loader to create adv. examples from the test split; adv_inputs is an ndarray
         adv_inputs, adv_labels = foolbox_attack(model, device, test_fold_loader, bounds, num_classes=num_classes,
                                                 p_norm=args.p_norm, adv_attack=args.attack_type, labels_req=True)
 
@@ -200,20 +211,42 @@ def main():
  
         if args.detection_mechanism == 'odds':
             # call functions from detectors/detector_odds_are_odd.py
-            train_inputs = (data_tr, labels_tr)
+            train_inputs = (data_tr_init, labels_tr_init)
             predictor = fit_odds_are_odd(train_inputs, model, args.model_type, with_attack=True)
             detect_odds_are_odd(predictor, test_fold_loader, adv_loader, model)
 
         elif args.detection_mechanism == 'lid':
-            # to do: jayaram will complete the procedure
-            # required methods are in `detectors.detector_lid_paper`
-            continue
+            # TODO: generate adversarial and noisy data from the clean training fold
+            model_det = DetectorLID(
+                n_neighbors=None,
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            model_det, _, _, _ = model_det.fit(layer_embeddings_tr, layer_embeddings_noisy_tr,
+                                               layer_embeddings_adversarial_tr)
+            scores_adver = model_det.score(layer_embeddings_te)
+
         elif args.detection_mechanism == 'proposed':
-            # to do: jayaram will complete the procedure
-            # required methods are in `detectors.detector_proposed`
-            continue
+            det_model = DetectorLayerStatistics(
+                layer_statistic=args.test_statistic,
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_file_dim_reduction=model_dim_reduc,
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            det_model = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr)
+            scores_adver, scores_ood = det_model.score(layer_embeddings_te, labels_pred_te)
+
         elif args.detection_mechanism == 'dknn':
-            continue
+            det_model = DeepKNN(
+                n_neighbors=None,   # can be set to other values used in the paper
+                skip_dim_reduction=True,
+                model_file_dim_reduction=model_dim_reduc,
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            det_model = det_model.fit(layer_embeddings_tr, labels_tr)
+            scores_adver, labels_pred_dknn = det_model.score(layer_embeddings_te)
 
 
 if __name__ == '__main__':
