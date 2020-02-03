@@ -10,7 +10,22 @@ from sklearn.metrics import (
     average_precision_score
 )
 from helpers.constants import ROOT
+from torch.utils import data
 
+def convert_to_list(array):
+    n_samples = array.shape[0]
+    output = []
+    for i in range(n_samples):
+        output.append(array[i])
+    return output
+
+def convert_to_loader(X, Y):
+    tensor_x = torch.Tensor(X) # transform to torch tensor
+    tensor_y = torch.Tensor(Y)
+
+    dataset = data.TensorDataset(tensor_x,tensor_y) # create your datset
+    dataloader = data.DataLoader(dataset)
+    return dataloader
 
 def get_model_file(model_type, epoch=None):
     if epoch is None:
