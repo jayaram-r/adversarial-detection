@@ -47,7 +47,6 @@ def return_data(model, test_loader):
 
 def fit_odds_are_odd(loader, model, model_type, with_attack=True):
         # to do: pending verification
-        '''
         ##params from torch_example.py
         batch_size=32
         eval_bs=256
@@ -67,73 +66,10 @@ def fit_odds_are_odd(loader, model, model_type, with_attack=True):
         load_alignments=False
         fit_classifier=True
         just_detect=False
-        ######
-        '''
-
-
-        ds='cifar10'
-        #model='cifar10'
-        batch_size=32
-        eval_bs=256
-        eval_batches=None
-        epochs=50
-        num_evals=20
-        train_log_after=0
-        stop_after=-1
-        cuda=True
-        optim='sgd'
-        lr=1e-4
-        attack_lr=.25
-        eps=8/255
-        eps_rand=None
-        eps_eval=None
-        rep=0
-        img_size=32
-        iters=10
-        noise_eps='n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
-        noise_eps_detect='n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
-        clip_alignments=True
-        pgd_strength=1.
-        debug=False
-        mode='eval'
-        constrained=True
         
-        clamp_attack=False
-        clamp_uniform=False
-        
-        train_adv=False
-        wdiff_samples=256
-        maxp_cutoff=.999
-        collect_targeted=False
-        n_collect=10000
-        save_alignments=False
-        load_alignments=False
-        
-        #pgd parameters
-        save_pgd_samples=False
-        load_pgd_train_samples=None
-        load_pgd_test_samples=None
-        
-        fit_classifier=True
-        just_detect=False
-        attack='pgd'
-        
-        #carlini wagner parameters
-        cw_confidence=0
-        cw_c=1e-4
-        cw_lr=1e-4
-        cw_steps=300
-        cw_search_steps=10
-        
-        mean_samples=16
-        mean_eps=.1
-
         #initializations
         cuda = cuda and th.cuda.is_available()
-        eps_rand = eps_rand or eps
-        eps_eval = eps_eval or eps
-        mean_eps = mean_eps * eps_eval
-
+ 
         w_cls = get_wcls(model, model_type)
 
         if type(loader) != tuple: #if loader is actually a torch data loader
@@ -196,62 +132,20 @@ def fit_odds_are_odd(loader, model, model_type, with_attack=True):
 
 
 def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
-        #ds='cifar10'
-        #model='cifar10'
-        batch_size=32
-        eval_bs=256
         eval_batches=None
-        epochs=50
-        num_evals=20
-        train_log_after=0
-        stop_after=-1
         cuda=True
         optim='sgd'
-        lr=1e-4
-        attack_lr=.25
         eps=8/255
         eps_rand=None
         eps_eval=None
-        rep=0
-        img_size=32
-        iters=10
         noise_eps='n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
         noise_eps_detect='n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
-        clip_alignments=True
-        pgd_strength=1.
-        debug=False
-        mode='eval'
-        constrained=True
-
-        clamp_attack=False
         clamp_uniform=False
 
-        train_adv=False
-        wdiff_samples=256
-        maxp_cutoff=.999
-        collect_targeted=False
-        n_collect=10000
-        save_alignments=False
-        load_alignments=False
-
         #pgd parameters
-        save_pgd_samples=False
-        load_pgd_train_samples=None
         load_pgd_test_samples=None
 
-        fit_classifier=True
-        just_detect=False
-        #attack='pgd'
-        attack = attack_type
 
-        #carlini wagner parameters
-        cw_confidence=0
-        cw_c=1e-4
-        cw_lr=1e-4
-        cw_steps=300
-        cw_search_steps=10
-
-        mean_samples=16
         mean_eps=.1
 
         #initializations
@@ -259,8 +153,6 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         eps_rand = eps_rand or eps
         eps_eval = eps_eval or eps
         mean_eps = mean_eps * eps_eval
-
-    
 
         #variables required for results; note: all may not be needed
         eval_loss_clean = []
@@ -271,19 +163,21 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         eval_acc_pgd = []
         eval_loss_pand = []
         eval_acc_pand = []
-        all_outputs = []
-        diffs_rand, diffs_pgd, diffs_pand = [], [], []
+        #all_outputs = []
+        #diffs_rand, diffs_pgd, diffs_pand = [], [], []
         eval_preds_clean, eval_preds_rand, eval_preds_pgd, eval_preds_pand = [], [], [], []
-        norms_clean, norms_pgd, norms_rand, norms_pand = [], [], [], []
-        norms_dpgd, norms_drand, norms_dpand = [], [], []
-        eval_important_valid = []
+        #norms_clean, norms_pgd, norms_rand, norms_pand = [], [], [], []
+        #norms_dpgd, norms_drand, norms_dpand = [], [], []
+        #eval_important_valid = []
         eval_loss_incr = []
         eval_conf_pgd = []
-        wdiff_corrs = []
-        udiff_corrs = []
-        grad_corrs = []
-        minps_clean = []
-        minps_pgd = []
+
+        #wdiff_corrs = []
+        #udiff_corrs = []
+        #grad_corrs = []
+        #minps_clean = []
+        #minps_pgd = []
+
         acc_clean_after_corr = []
         acc_pgd_after_corr = []
         eval_det_clean = []
@@ -291,9 +185,9 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         eval_x_pgd_l0 = []
         eval_x_pgd_l2 = []
 
-        all_eval_important_pixels = []
-        all_eval_important_single_pixels = []
-        all_eval_losses_per_pixel = []
+        #all_eval_important_pixels = []
+        #all_eval_important_single_pixels = []
+        #all_eval_losses_per_pixel = []
 
         def net_forward(x, layer_by_layer=False, from_layer=0):
             if layer_by_layer == True:
@@ -307,12 +201,10 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
             return lat, log
 
         def get_loss_and_preds(x, y):
-            logits = net_forward(x, layer_by_layer=False)
-            loss = loss_fn(logits, y)
-            _, preds = th.max(logits, 1)
+            logits = net_forward(x, layer_by_layer=False) #returns predictions (probability distribution)
+            loss = loss_fn(logits, y) #loss based on predictions and true labels
+            _, preds = th.max(logits, 1) #single prediction from softmax values
             return loss, preds
-
-
         
         #pending modification + verification
         #for eval_batch in tqdm.tqdm(itt.islice(test_loader, eval_batches)):
@@ -327,22 +219,23 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
             loss_clean, preds_clean = get_loss_and_preds(x, y)
 
             #append statements
-            eval_loss_clean.append((loss_clean.data).cpu().numpy())
-            eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy())
-            eval_preds_clean.extend(preds_clean)
+            eval_loss_clean.append((loss_clean.data).cpu().numpy()) #loss on clean samples
+            eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy()) #accuracy on clean samples
+            eval_preds_clean.extend(preds_clean) #predictions on clean samples
 
             if with_attack: #set to True
+                #create random samples
                 if clamp_uniform: #set to False
                     x_rand = x + th.sign(th.empty_like(x).uniform_(-eps_rand, eps_rand)) * eps_rand
                 else:
                     x_rand = x + th.empty_like(x).uniform_(-eps_rand, eps_rand)
                 loss_rand, preds_rand = get_loss_and_preds(x_rand, y)
 
-                eval_loss_rand.append((loss_rand.data).cpu().numpy())
-                eval_acc_rand.append((th.eq(preds_rand, y).float()).cpu().numpy())
-                eval_preds_rand.extend(preds_rand)
+                eval_loss_rand.append((loss_rand.data).cpu().numpy()) #loss on random samples
+                eval_acc_rand.append((th.eq(preds_rand, y).float()).cpu().numpy()) #accuracy on random samples
+                eval_preds_rand.extend(preds_rand) #predictions on random samples
 
-                #need to verify this block of if statements
+                #attack samples generated outside
                 '''
                 if attack == 'PGD':
                     if not load_pgd_test_samples: #load_pgd_test_samples set to False
@@ -355,14 +248,14 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                     x_pgd = attack_mean(x, preds_clean, eps=eps_eval)
                 '''
 
-                eval_x_pgd_l0.append(th.max(th.abs((x - x_pgd).view(x.size(0), -1)), -1)[0].detach().cpu().numpy())
-                eval_x_pgd_l2.append(th.norm((x - x_pgd).view(x.size(0), -1), p=2, dim=-1).detach().cpu().numpy())
+                eval_x_pgd_l0.append(th.max(th.abs((x - x_pgd).view(x.size(0), -1)), -1)[0].detach().cpu().numpy()) #max l0 difference between clean sample and pgd sample
+                eval_x_pgd_l2.append(th.norm((x - x_pgd).view(x.size(0), -1), p=2, dim=-1).detach().cpu().numpy()) #l2 difference between clean sample and pgd sample
 
-                loss_pgd, preds_pgd = get_loss_and_preds(x_pgd, y)
+                loss_pgd, preds_pgd = get_loss_and_preds(x_pgd, y) 
 
                 #append statements
-                eval_loss_pgd.append((loss_pgd.data).cpu().numpy())
-                eval_acc_pgd.append((th.eq(preds_pgd, y).float()).cpu().numpy())
+                eval_loss_pgd.append((loss_pgd.data).cpu().numpy()) #loss of pgd samples vs. clean labels
+                eval_acc_pgd.append((th.eq(preds_pgd, y).float()).cpu().numpy()) #accuracy of predictions on pgd samples vs. clean labels
                 
                 #from sklearn
                 conf_pgd = confusion_matrix(preds_clean.cpu(), preds_pgd.cpu(), np.arange(nb_classes))
