@@ -35,6 +35,7 @@ from detectors.detector_lid_paper import (
     DetectorLID
 )   # ICLR 2018
 from detectors.detector_proposed import DetectorLayerStatistics
+from detectors.detector_deep_knn import DeepKNN
 
 
 # Proportion of attack samples from each method when a mixed attack strategy is used at test time.
@@ -56,7 +57,7 @@ def main():
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
-    parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds'],
+    parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds', 'dknn'],
                         default='proposed', help='detection method to run')
     parser.add_argument('--test-statistic', '--ts', choices=['multinomial', 'lid'], default='multinomial',
                         help='type of test statistic to calculate at the layers for the proposed method')
@@ -201,6 +202,9 @@ def main():
             # to do: jayaram will complete the procedure
             # required methods are in `detectors.detector_proposed`
             continue
+        elif args.detection_mechanism == 'dknn':
+            continue
+
 
 if __name__ == '__main__':
     main()
