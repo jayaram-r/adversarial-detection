@@ -46,7 +46,7 @@ ATTACK_PROPORTION_DEF = 0.1
 NUM_TOP_RANKED = 3
 
 # List of layerwise test statistics supported by the proposed method
-TEST_STATS_SUPPORTED = ['multinomial', 'lid']
+TEST_STATS_SUPPORTED = ['multinomial', 'lid', 'lle']
 
 # Target false positive rates for setting thresholds. Default is set to equally spaced values from 1% to 10%
 FPR_TARGETS_DEF = numpy.linspace(0.01, 0.1, num=10)
