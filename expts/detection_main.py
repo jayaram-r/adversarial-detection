@@ -188,9 +188,9 @@ def main():
         adv_loader = convert_to_loader(adv_inputs_list, adv_labels_list)
  
         if args.detection_mechanism == 'odds':
-            # call function ICML_detector from detectors/detector_odds_are_odd.py
+            # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
-            predictor = fit_odds_are_odd(inputs, model, args.model_type, with_attack=True)
+            predictor = fit_odds_are_odd(train_inputs, model, args.model_type, with_attack=True)
             detect_odds_are_odd(predictor, test_loader, adv_loader, model)
 
         elif args.detection_mechanism == 'lid':
