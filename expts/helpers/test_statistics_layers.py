@@ -4,6 +4,8 @@ Test statistics to be calculated at the different layers of the trained deep neu
 """
 import numpy as np
 from abc import ABC, abstractmethod
+import multiprocessing
+from functools import partial
 import logging
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
@@ -12,6 +14,10 @@ from helpers.multinomial import (
     special_dirichlet_prior
 )
 from helpers.lid_estimators import lid_mle_amsaleg
+from helpers.dimension_reduction_methods import (
+    pca_wrapper,
+    helper_reconstruction_error
+)
 from helpers.utils import get_num_jobs
 from helpers.constants import (
     NEIGHBORHOOD_CONST,
@@ -170,7 +176,7 @@ class MultinomialScore(TestStatistic):
         """
         super(MultinomialScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
-        # Build the KNN index for the given feature vectors
+        logger.info("Building a KNN index for nearest neighbor queries.")
         self.index_knn = KNNIndex(
             features, n_neighbors=self.n_neighbors,
             metric=self.metric, metric_kwargs=self.metric_kwargs,
@@ -183,7 +189,8 @@ class MultinomialScore(TestStatistic):
         # Indices of the nearest neighbors of the points (rows) from `features`
         nn_indices, _ = self.index_knn.query_self(k=self.n_neighbors)
 
-        # Get the class label counts from the nearest neighbors of each sample
+        logger.info("Calculating the class label counts in the neighborhood of each sample and performing "
+                    "multinomial parameter estimation.")
         self.labels_train_enc = self.label_encoder(labels)
         _, self.data_counts_train = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
@@ -237,14 +244,12 @@ class MultinomialScore(TestStatistic):
                  being the candidate true class for the test sample.
         """
         n_test = labels_pred_test.shape[0]
-        # Query the index of `self.n_neighbors` nearest neighbors of each test sample
+        # Get the class label counts from the nearest neighbors of each sample
         if is_train:
-            nn_indices, _ = self.index_knn.query_self(k=self.n_neighbors)
+            data_counts = self.data_counts_train
         else:
             nn_indices, _ = self.index_knn.query(features_test, k=self.n_neighbors)
-
-        # Get the class label counts from the nearest neighbors of each sample
-        _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
+            _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
         scores = np.zeros(n_test, 1 + self.n_classes)
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
@@ -293,6 +298,7 @@ class LIDScore(TestStatistic):
             seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
         )
 
+        self.lid_estimates_train = None
         # Median LID estimate of the samples predicted into each class
         self.lid_median_pred = None
         # Median LID estimate of the samples labeled from each class
@@ -319,7 +325,7 @@ class LIDScore(TestStatistic):
         """
         super(LIDScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
-        # Build the KNN index for the given feature vectors
+        logger.info("Building a KNN index for nearest neighbor queries.")
         self.index_knn = KNNIndex(
             features, n_neighbors=self.n_neighbors,
             metric=self.metric, metric_kwargs=self.metric_kwargs,
@@ -330,10 +336,11 @@ class LIDScore(TestStatistic):
             seed_rng=self.seed_rng
         )
         # Indices and distances of the nearest neighbors of the points from `features`
-        nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+        _, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
 
-        # Get the LID estimates for all samples based on their nearest neighbors distances
-        lid_estimates = lid_mle_amsaleg(nn_distances)
+        logger.info("Calculating the local intrinsic dimension estimates from the k nearest neighbor distances "
+                    "of each sample.")
+        self.lid_estimates_train = lid_mle_amsaleg(nn_distances)
 
         self.lid_median_pred = np.ones(self.n_classes)
         self.lid_median_true = np.ones(self.n_classes)
@@ -342,7 +349,7 @@ class LIDScore(TestStatistic):
             # LID values of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
             if ind.shape[0]:
-                self.lid_median_pred[i] = np.median(lid_estimates[ind])
+                self.lid_median_pred[i] = np.median(self.lid_estimates_train[ind])
             else:
                 logger.warning("No samples are predicted into class '{}'. Setting the median LID "
                                "value to 1.".format(c))
@@ -350,7 +357,7 @@ class LIDScore(TestStatistic):
             # LID values of samples labeled as class `c`
             ind = np.where(labels == c)[0]
             if ind.shape[0]:
-                self.lid_median_true[i] = np.median(lid_estimates[ind])
+                self.lid_median_true[i] = np.median(self.lid_estimates_train[ind])
             else:
                 logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
 
@@ -374,14 +381,12 @@ class LIDScore(TestStatistic):
                  being the candidate true class for the test sample.
         """
         n_test = labels_pred_test.shape[0]
-        # Query the index of `self.n_neighbors` nearest neighbors of each test sample
+        # Query the index of `self.n_neighbors` nearest neighbors of each test sample and find the LID estimates
         if is_train:
-            nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+            lid_estimates = self.lid_estimates_train
         else:
-            nn_indices, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
-
-        # LID estimates of the test samples
-        lid_estimates = lid_mle_amsaleg(nn_distances)
+            _, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
+            lid_estimates = lid_mle_amsaleg(nn_distances)
 
         scores = np.zeros(n_test, 1 + self.n_classes)
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
@@ -403,3 +408,195 @@ class LIDScore(TestStatistic):
             scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
 
         return scores
+
+
+class LLEScore(TestStatistic):
+    """
+    Class that calculates the locally linear embedding (LLE) reconstruction error norm as the test statistic for
+    any layer embedding.
+
+    NOTE: For this method, do not apply dimension reduction to the layer embeddings. We want to estimate the LLE
+    reconstruction error in the original layer embedding space.
+    """
+    def __init__(self, **kwargs):
+        super(LLEScore, self).__init__(
+            neighborhood_constant=kwargs.get('neighborhood_constant', NEIGHBORHOOD_CONST),
+            n_neighbors=kwargs.get('n_neighbors', None),
+            metric=kwargs.get('metric', METRIC_DEF),
+            metric_kwargs=kwargs.get('metric_kwargs', None),
+            shared_nearest_neighbors=False,     # Intentionally set to False
+            approx_nearest_neighbors=kwargs.get('approx_nearest_neighbors', True),
+            n_jobs=kwargs.get('n_jobs', 1),
+            low_memory=kwargs.get('low_memory', False),
+            seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
+        )
+
+        self.mean_data = None
+        self.transform_pca = None
+        self.reg_eps = 0.001
+        # Norm of the LLE reconstruction errors for the training data
+        self.errors_lle_train = None
+        # Median reconstruction error of the samples predicted into each class
+        self.err_median_pred = None
+        # Median reconstruction error of the labeled samples from each class
+        self.err_median_true = None
+        # Scores for the training data
+        self.scores_train = None
+
+    def fit(self, features, labels, labels_pred, labels_unique=None,
+            min_dim_pca=1000, pca_cutoff=0.995, reg_eps=0.001):
+        """
+        Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
+
+        :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                         dimension respectively.
+        :param labels: numpy array of shape `(N, )` with the true labels per sample.
+        :param labels_pred: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
+                              be supplied as input during repeated calls to avoid having the find the unique
+                              labels each time.
+        :param min_dim_pca: (int) minimum dimension above which PCA pre-processing is applied.
+        :param pca_cutoff: float value in (0, 1] specifying the proportion of cumulative data variance to preserve
+                           in the projected (dimension-reduced) data.
+        :param reg_eps: small float value that multiplies the trace to regularize the Gram matrix, if it is
+                        close to singular.
+
+        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
+                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
+                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
+                 being the candidate true class for the sample.
+        """
+        super(LLEScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
+        self.reg_eps = reg_eps
+
+        if features.shape[1] > min_dim_pca:
+            logger.info("Applying PCA as first-level dimension reduction step.")
+            features, self.mean_data, self.transform_pca = pca_wrapper(
+                features, cutoff=pca_cutoff, seed_rng=self.seed_rng
+            )
+
+        # If `self.neighbors > features.shape[1]` (number of neighbors larger than the data dimension), then the
+        # Gram matrix that comes up while solving for the neighborhood weights becomes singular. To avoid this,
+        # we set `self.neighbors = features.shape[1]` or add a small nonzero value to the diagonal elements of the
+        # Gram matrix
+        d = features.shape[1]
+        if self.n_neighbors > d:
+            if d >= 10:
+                # Heuristic choice of dimension 10. Done to avoid setting the number of neighbors to be very small
+                logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
+                            "matrix while solving for neighborhood weights.".format(self.n_neighbors, d))
+                self.n_neighbors = d
+
+        logger.info("Building a KNN index for nearest neighbor queries.")
+        self.index_knn = KNNIndex(
+            features, n_neighbors=self.n_neighbors,
+            metric=self.metric, metric_kwargs=self.metric_kwargs,
+            shared_nearest_neighbors=self.shared_nearest_neighbors,
+            approx_nearest_neighbors=self.approx_nearest_neighbors,
+            n_jobs=self.n_jobs,
+            low_memory=self.low_memory,
+            seed_rng=self.seed_rng
+        )
+        # Indices and distances of the nearest neighbors of the points from `features`
+        nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+
+        logger.info("Calculating the optimal LLE reconstruction from the nearest neighbors of each sample.")
+        self.errors_lle_train = self._calc_reconstruction_errors(features, nn_indices)
+
+        self.err_median_pred = np.ones(self.n_classes)
+        self.err_median_true = np.ones(self.n_classes)
+        for c in self.labels_unique:
+            i = self.label_encoder([c])[0]
+            # Reconstruction error of samples predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            if ind.shape[0]:
+                self.err_median_pred[i] = np.clip(np.median(self.errors_lle_train[ind]), 1e-16, None)
+            else:
+                logger.warning("No samples are predicted into class '{}'. Setting the median reconstruction error "
+                               "to 1.".format(c))
+
+            # Reconstruction error of samples labeled as class `c`
+            ind = np.where(labels == c)[0]
+            if ind.shape[0]:
+                self.err_median_true[i] = np.clip(np.median(self.errors_lle_train[ind]), 1e-16, None)
+            else:
+                logger.warning("No labeled samples from class '{}'. Setting the median reconstruction error "
+                               "to 1.".format(c))
+
+        # Calculate the scores for each sample
+        self.scores_train = self.score(features, labels_pred, is_train=True)
+        return self.scores_train
+
+    def score(self, features_test, labels_pred_test, is_train=False):
+        """
+        Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
+        each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
+
+        :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                              dimension respectively.
+        :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+
+        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
+                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
+                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
+                 being the candidate true class for the test sample.
+        """
+        n_test = labels_pred_test.shape[0]
+        if is_train:
+            errors_lle = self.errors_lle_train
+        else:
+            # Apply a PCA transformation to the test features if required
+            if self.transform_pca:
+                features_test = np.dot(features_test - self.mean_data, self.transform_pca)
+
+            # Query the index of `self.n_neighbors` nearest neighbors of each test sample
+            nn_indices, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
+
+            # Find the optimal convex reconstruction of each point from its nearest neighbors and the norm of
+            # the reconstruction errors
+            errors_lle = self._calc_reconstruction_errors(features_test, nn_indices)
+
+        scores = np.zeros(n_test, 1 + self.n_classes)
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
+        cnt_par = 0
+        for c_hat in preds_unique:
+            i = self.label_encoder([c_hat])[0]
+            # Index of samples predicted into class `c_hat`
+            ind = np.where(labels_pred_test == c_hat)[0]
+            if ind.shape[0]:
+                # Reconstruction error scores normalized by the median value for the samples predicted into class `c`
+                scores[ind, 0] = errors_lle[ind] / self.err_median_pred[i]
+
+                cnt_par += ind.shape[0]
+                if cnt_par >= n_test:
+                    break
+
+        for i, c in enumerate(self.labels_unique):
+            # Reconstruction error scores normalized by the median value for the samples labeled as class `c`
+            scores[:, i + 1] = errors_lle / self.err_median_true[i]
+
+        return scores
+
+    def _calc_reconstruction_errors(self, features, nn_indices):
+        """
+        Calculate the norm of the reconstruction errors of the LLE embedding in the neighborhood of each point.
+
+        :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                         dimension respectively.
+        :param nn_indices: numpy array of shape `(N, k)` where `k` is the number of neighbors.
+        :return:
+            - array with the norm of the reconstruction errors. Has shape `(N, )`.
+        """
+        N = nn_indices.shape[0]
+        if self.n_jobs == 1:
+            w = [helper_reconstruction_error(features, nn_indices, self.reg_eps, i) for i in range(N)]
+        else:
+            helper_partial = partial(helper_reconstruction_error, features, nn_indices, self.reg_eps)
+            pool_obj = multiprocessing.Pool(processes=self.n_jobs)
+            w = []
+            _ = pool_obj.map_async(helper_partial, range(N), callback=w.extend)
+            pool_obj.close()
+            pool_obj.join()
+
+        return np.array(w)

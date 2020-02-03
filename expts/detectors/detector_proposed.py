@@ -18,7 +18,8 @@ from helpers.dimension_reduction_methods import (
 )
 from helpers.test_statistics_layers import (
     MultinomialScore,
-    LIDScore
+    LIDScore,
+    LLEScore
 )
 from helpers.density_model_layer_statistics import (
     train_log_normal_mixture,
@@ -179,8 +180,8 @@ class DetectorLayerStatistics:
                  seed_rng=SEED_DEFAULT):
         """
 
-        :param layer_statistic: Type of test statistic to calculate at the layers. Valid values are 'multinomial'
-                                and 'lid'.
+        :param layer_statistic: Type of test statistic to calculate at the layers. Valid values are 'multinomial',
+                                'lid', and 'lle'.
         :param use_top_ranked: Set to True in order to use only a few top ranked test statistics for detection.
         :param num_top_ranked: If `use_top_ranked` is set to True, this specifies the number of top-ranked test
                                statistics to use for detection. This number should be smaller than the number of
@@ -227,10 +228,11 @@ class DetectorLayerStatistics:
             raise ValueError("Invalid value '{}' for the input argument 'layer_statistic'.".
                              format(self.layer_statistic))
 
-        if self.layer_statistic == 'lid':
+        if self.layer_statistic in {'lid', 'lle'}:
             if not self.skip_dim_reduction:
-                logger.warning("Option 'skip_dim_reduction' is set to False for the LID test statistic. Setting it to "
-                               "True because it is preferred to skip dimension reduction for this test statistic.")
+                logger.warning("Option 'skip_dim_reduction' is set to False for the test statistic '{}'. Setting "
+                               "it to True because it is preferred to skip dimension reduction for this "
+                               "test statistic.".format(self.layer_statistic))
                 self.skip_dim_reduction = True
 
         # Load the dimension reduction models per-layer if required
@@ -278,6 +280,7 @@ class DetectorLayerStatistics:
         logger.info("Number of classes: {:d}.".format(self.n_classes))
         logger.info("Number of layer embeddings: {:d}.".format(self.n_layers))
         logger.info("Number of samples: {:d}.".format(self.n_samples))
+        logger.info("Test statistic calculated at each layer: {}.".format(self.layer_statistic))
         if labels_pred.shape[0] != self.n_samples:
             raise ValueError("Inputs 'labels' and 'labels_pred' do not have the same size.")
 
@@ -333,6 +336,17 @@ class DetectorLayerStatistics:
                 ts_obj = LIDScore(
                     neighborhood_constant=self.neighborhood_constant,
                     n_neighbors=self.n_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+            elif self.layer_statistic == 'lle':
+                ts_obj = LLEScore(
+                    neighborhood_constant=self.neighborhood_constant,
+                    n_neighbors=self.n_neighbors,
+                    metric=self.metric,
+                    metric_kwargs=self.metric_kwargs,
                     approx_nearest_neighbors=self.approx_nearest_neighbors,
                     n_jobs=self.n_jobs,
                     low_memory=self.low_memory,

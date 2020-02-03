@@ -502,8 +502,8 @@ class NeighborhoodPreservingProjection:
         # Gram matrix
         d = data.shape[1]
         if self.n_neighbors > d:
-            if d >= 25:
-                # Heuristic choice of dimension 25. Done to avoid setting the number of neighbors to be very small
+            if d >= 10:
+                # Heuristic choice of dimension 10. Done to avoid setting the number of neighbors to be very small
                 logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
                             "matrix while solving for neighborhood weights.".format(self.n_neighbors, d))
                 self.n_neighbors = d
@@ -634,10 +634,10 @@ def solve_lle_weights(x, neighbors, reg_eps=0.001):
     Solve for the optimal weights that reconstruct a point using its nearest neighbors. The weights are constrained
     to be non-negative and sum to 1. This is the first step of locally linear embedding (LLE).
 
-    :param x: numpy array of shape `(1, dim)`, where `dim` is the feature dimension.
+    :param x: numpy array of shape `(dim, )`, where `dim` is the feature dimension.
     :param neighbors: numpy array of shape `(k, dim)`, where `k` is the number of neighbors.
     :param reg_eps: value close to 0 that is used to regularize any singular matrix.
-    :return: numpy array with the optimal weights of shape `(k, 1)`.
+    :return: numpy array with the optimal weights of shape `(k, )`.
     """
     # Gram matrix of the neighborhood of the point
     Z = x - neighbors
@@ -656,6 +656,17 @@ def solve_lle_weights(x, neighbors, reg_eps=0.001):
 
 def helper_solve_lle(data, nn_indices, reg_eps, n):
     return solve_lle_weights(data[n, :], data[nn_indices[n, :], :], reg_eps=reg_eps)
+
+
+def helper_reconstruction_error(data, nn_indices, reg_eps, n):
+    # Euclidean norm of the error in the LLE reconstruction
+    x = data[n, :]
+    # nearest neighbors of `x`
+    y = data[nn_indices[n, :], :]
+    w = solve_lle_weights(x, y, reg_eps=reg_eps)
+    e = x - np.dot(w, y)
+
+    return np.sum(e ** 2) ** 0.5
 
 
 def transform_data_from_model(data, model_dict):
