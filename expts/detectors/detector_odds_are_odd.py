@@ -11,18 +11,21 @@ from detectors.tf_robustify import *
 import itertools as itt
 from sklearn.metrics import confusion_matrix
 
+
 def get_samples_as_ndarray(loader):
+    X = []
+    Y = []
     for batch_idx, (data, target) in enumerate(loader):
         data, target = data.cpu().numpy(), target.cpu().numpy()
         target = target.reshape((target.shape[0], 1))
         if batch_idx == 0:
             X, Y = data, target
         else:
-            X = np.vstack((X,data))
-            Y = np.vstack((Y,target))
+            X = np.vstack((X, data))
+            Y = np.vstack((Y, target))
 
     Y = Y.reshape((-1,))
-    return X,Y
+    return X, Y
 
 
 def get_wcls(model, model_type):
@@ -68,7 +71,7 @@ def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
         just_detect=False
         clip_min=0.
         clip_max=1.
-
+        
         #initializations
         cuda = cuda and th.cuda.is_available()
  
@@ -291,3 +294,4 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                 eval_det_pgd.append(det_pgd)
 
 
+        # TODO: return the detection scores or binary output after thresholding
