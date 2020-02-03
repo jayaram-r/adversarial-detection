@@ -18,7 +18,8 @@ from helpers.constants import (
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
     ATTACK_PROPORTION_DEF,
-    NORMALIZE_IMAGES
+    NORMALIZE_IMAGES,
+    TEST_STATS_SUPPORTED
 )
 from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
@@ -65,7 +66,7 @@ def main():
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds', 'dknn'],
                         default='proposed', help='detection method to run')
-    parser.add_argument('--test-statistic', '--ts', choices=['multinomial', 'lid', 'lle'], default='multinomial',
+    parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help='type of test statistic to calculate at the layers for the proposed method')
     parser.add_argument('--ood', action='store_true', default=False,
                         help='Perform OOD detection instead of adversarial (if applicable)')
