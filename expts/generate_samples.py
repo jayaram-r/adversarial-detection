@@ -24,17 +24,23 @@ from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint,
-    convert_to_list,
     convert_to_loader
 )
-from helpers.attacks import *
-from detectors.detector_odds_are_odd import *
+from helpers.attacks import foolbox_attack, foolbox_attack_helper
+from detectors.detector_odds_are_odd import (
+    get_samples_as_ndarray,
+    get_wcls,
+    return_data,
+    fit_odds_are_odd,
+    detect_odds_are_odd
+)
 from detectors.detector_lid_paper import (
     flip,
     get_noisy_samples,
     DetectorLID
 )   # ICLR 2018
 from detectors.detector_proposed import DetectorLayerStatistics
+from detectors.detector_deep_knn import DeepKNN
 
 
 # Proportion of attack samples from each method when a mixed attack strategy is used at test time.
@@ -82,8 +88,7 @@ def main():
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '2' and 'inf'")
-    
-    
+    parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -116,7 +121,7 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
         num_classes = 10
-        bounds=(-255,255)
+        bounds=(-255, 255)
 
     elif args.model_type == 'cifar10':
         transform_test = transforms.Compose(
@@ -128,7 +133,7 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255,255)
+        bounds=(-255, 255)
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -140,7 +145,7 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255,255)
+        bounds=(-255, 255)
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
@@ -178,15 +183,11 @@ def main():
         np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
         np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
 
-        #convert ndarray to list
-        data_te_list = convert_to_list(data_te)
-        labels_te_list = convert_to_list(labels_te)
-        
         #print prompt
         print("saved train and test fold for fold:", i)
 
         #convert list to loader
-        test_loader = convert_to_loader(data_te_list, labels_te_list)
+        test_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
 
         #use dataloader to create adv. examples; adv_inputs is an ndarray
         adv_inputs, adv_labels = foolbox_attack(model, 
@@ -196,7 +197,7 @@ def main():
                 num_classes=num_classes, 
                 p_norm=args.p_norm, 
                 adv_attack=args.adv_attack, 
-                labels = True)
+                labels_req=True)
         
         #save test fold's adv. examples
         np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), adv_inputs)
@@ -211,7 +212,7 @@ def main():
                 num_classes=num_classes, 
                 p_norm=args.p_norm, 
                 adv_attack=args.adv_attack, 
-                labels = True)
+                labels_req=True)
         
         #save train_fold's adv. examples
         np.save(os.path.join(adv_save_path, 'data_tr_adv.npy'), adv_inputs)
