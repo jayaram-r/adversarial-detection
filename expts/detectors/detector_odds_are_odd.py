@@ -10,19 +10,7 @@ import torchvision
 from detectors.tf_robustify import *
 import itertools as itt
 from sklearn.metrics import confusion_matrix
-
-def get_samples_as_ndarray(loader):
-    for batch_idx, (data, target) in enumerate(loader):
-        data, target = data.cpu().numpy(), target.cpu().numpy()
-        target = target.reshape((target.shape[0], 1))
-        if batch_idx == 0:
-            X, Y = data, target
-        else:
-            X = np.vstack((X,data))
-            Y = np.vstack((Y,target))
-
-    Y = Y.reshape((-1,))
-    return X,Y
+from helpers.utils import get_samples_as_ndarray, get_samples_as_ndarray
 
 
 def get_wcls(model, model_type):

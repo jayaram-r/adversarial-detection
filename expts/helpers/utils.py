@@ -19,13 +19,35 @@ def convert_to_list(array):
         output.append(array[i])
     return output
 
-def convert_to_loader(X, Y):
+def convert_to_loader(X, Y, batch_size = 1):
     tensor_x = torch.Tensor(X) # transform to torch tensor
     tensor_y = torch.Tensor(Y)
 
     dataset = data.TensorDataset(tensor_x,tensor_y) # create your datset
-    dataloader = data.DataLoader(dataset)
+    dataloader = data.DataLoader(dataset, batch_size=batch_size)
     return dataloader
+
+def get_samples_as_ndarray(loader):
+    for batch_idx, (data, target) in enumerate(loader):
+        data, target = data.cpu().numpy(), target.cpu().numpy()
+        target = target.reshape((target.shape[0], 1))
+        if batch_idx == 0:
+            X, Y = data, target
+        else:
+            X = np.vstack((X,data))
+            Y = np.vstack((Y,target))
+
+    Y = Y.reshape((-1,))
+    return X,Y
+
+def verify_data_loader(loader, batch_size=1):
+    X_1, Y_1 = get_samples_as_ndarray(loader)
+    X_1_list, Y_1_list = convert_to_list(X_1), convert_to_list(Y_1)
+    loader_new = convert_to_loader(X_1_list, Y_1_list, batch_size = batch_size)
+    X_2, Y_2 = get_samples_as_ndarray(loader_new)
+    X_equal = np.array_equal(X_1, X_2)
+    Y_equal = np.array_equal(Y_1, Y_2)
+    return X_equal, Y_equal
 
 def get_model_file(model_type, epoch=None):
     if epoch is None:

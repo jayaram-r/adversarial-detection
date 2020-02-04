@@ -18,23 +18,30 @@ from helpers.constants import (
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
     ATTACK_PROPORTION_DEF,
-    NORMALIZE_IMAGES
+    NORMALIZE_IMAGES,
+    TEST_STATS_SUPPORTED
 )
 from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint,
-    convert_to_list,
     convert_to_loader
 )
-from helpers.attacks import *
-from detectors.detector_odds_are_odd import *
+from helpers.attacks import foolbox_attack, foolbox_attack_helper
+from detectors.detector_odds_are_odd import (
+    get_samples_as_ndarray,
+    get_wcls,
+    return_data,
+    fit_odds_are_odd,
+    detect_odds_are_odd
+)
 from detectors.detector_lid_paper import (
     flip,
     get_noisy_samples,
     DetectorLID
 )   # ICLR 2018
-from detectors.detector_proposed import DetectorLayerStatistics
+from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
+from detectors.detector_deep_knn import DeepKNN
 
 
 # Proportion of attack samples from each method when a mixed attack strategy is used at test time.
@@ -58,7 +65,7 @@ def main():
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds', 'dknn'],
                         default='proposed', help='detection method to run')
-    parser.add_argument('--test-statistic', '--ts', choices=['multinomial', 'lid'], default='multinomial',
+    parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help='type of test statistic to calculate at the layers for the proposed method')
     parser.add_argument('--ood', action='store_true', default=False,
                         help='Perform OOD detection instead of adversarial (if applicable)')
@@ -82,8 +89,7 @@ def main():
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
     parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '2' and 'inf'")
-    
-    
+    parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -100,10 +106,11 @@ def main():
 
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
-        # Dimension reduction is not applied when the test statistic is LID
+        # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
+    model_dim_reduc = None
     if apply_dim_reduc:
         if not args.model_dim_reduc:
             model_dim_reduc = os.path.join(ROOT, 'outputs', args.model_type, 'models_dimension_reduction.pkl')
@@ -127,7 +134,7 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
         num_classes = 10
-        bounds=(-255,255)
+        bounds=(-255, 255)
 
     elif args.model_type == 'cifar10':
         transform_test = transforms.Compose(
@@ -139,7 +146,7 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255,255)
+        bounds=(-255, 255)
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -151,13 +158,13 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255,255)
+        bounds=(-255, 255)
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
 
-
+    '''
     #convert the data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
     
@@ -170,29 +177,49 @@ def main():
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
         labels_te = labels[ind_te]
-
-        #convert ndarray to list
-        data_te_list = convert_to_list(data_te)
-        labels_te_list = convert_to_list(labels_te)
         
-        #convert list to loader
-        test_loader = convert_to_loader(data_te_list, labels_te_list)
+        # Data loader for the test data split
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
 
-        #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels = foolbox_attack(model, device, test_loader, bounds, num_classes=num_classes, p_norm=args.p_norm, adv_attack=args.adv_attack, labels = True)
+        # use dataloader to create adv. examples; adv_inputs is an ndarray
+        adv_inputs, adv_labels = foolbox_attack(model, device, test_fold_loader, bounds, num_classes=num_classes, 
+                                                p_norm=args.p_norm, adv_attack=args.adv_attack, labels_req=True)
 
-        #convert ndarray to list
-        adv_inputs_list, adv_labels_list = convert_to_list(adv_inputs), convert_to_list(adv_labels)
+        # Data loader for the adversarial data
+        adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
+    '''
 
-        #convert list to loader
-        adv_loader = convert_to_loader(adv_inputs_list, adv_labels_list)
- 
+    for i in range(args.num_folds):
+        numpy_save_path = os.path.join(output_dir, "fold_{}".format(i))
+        
+        data_tr = np.load(os.path.join(numpy_save_path, 'data_tr.npy'))
+        labels_tr = np.load(os.path.join(numpy_save_path, 'labels_tr.npy'))
+        data_te = np.load(os.path.join(numpy_save_path, 'data_te.npy'))
+        labels_te = np.load(os.path.join(numpy_save_path, 'labels_te.npy'))
+
+        # Data loader for the test data split
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
+
+        #train adv. examples
+        adv_inputs = np.save(os.path.join(numpy_save_path, 'data_tr_adv.npy'))
+        adv_labels = np.save(os.path.join(numpy_save_path, 'labels_tr_adv.npy'))
+
+        # Data loader for the adversarial data
+        train_adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
+
+        #test adv. examples
+        adv_inputs = np.save(os.path.join(numpy_save_path, 'data_te_adv.npy'))
+        adv_labels = np.save(os.path.join(numpy_save_path, 'labels_te_adv.npy'))
+
+        # Data loader for the adversarial data
+        test_adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
+
         if args.detection_mechanism == 'odds':
             # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
             predictor = fit_odds_are_odd(train_inputs, model, args.model_type, num_classes, with_attack=True)
             next(predictor)
-            detect_odds_are_odd(predictor, test_loader, adv_loader, model)
+            detect_odds_are_odd(predictor, test_fold_loader, adv_loader, model)
 
         elif args.detection_mechanism == 'lid':
             # to do: jayaram will complete the procedure
