@@ -207,7 +207,7 @@ def main():
         param_path = "stepsize="+str(stepsize)+"confidence"+str(confidence)+"epsilon"+str(epsilon)
         param_path += "max_iterations"+str(max_iterations)+"iterations"+str(iterations)
         param_path += "max_epsilon"+str(max_epsilon)
-        adv_path = os.path.join(os.path.join(adv_same_path, param_path))
+        adv_path = os.path.join(os.path.join(adv_save_path, param_path))
         if os.path.isdir(adv_path) == False:
             os.makedirs(adv_path)
 
