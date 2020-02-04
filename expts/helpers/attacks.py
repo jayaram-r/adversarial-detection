@@ -2,9 +2,27 @@ import foolbox
 import torch
 import torchvision
 import numpy as np
+from numpy import linalg as LA
+
+def calc_norm(src, target, norm):
+    assert src.shape == target.shape
+    n_samples = src.shape[0]
+    total = 0
+    for i in range(n_samples):
+        #print(src[i].shape, target[i].shape)
+        val = src[i] - target[i]
+        val = val.flatten()
+        if norm == 'inf':
+            temp = LA.norm(val, np.inf)
+        elif norm == '0':
+            temp = LA.norm(val, 0)
+        elif norm == '2':
+            temp = LA.norm(val, 2)
+        total = total + temp
+    return total/n_samples
 
 
-def foolbox_attack_helper(attack_model, device, data_loader, adv_attack,
+def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
                           stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                           labels_req=False):
     # model.eval()
@@ -30,6 +48,12 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack,
 
         adv_examples = np.asarray([a.perturbed for a in adversarials])
         
+        norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
+        print("average", p_norm,"-norm difference:", norm_diff)
+        if norm_diff == 0:
+                print("currently processing:", batch_idx)
+                exit()
+
         if batch_idx == 0:
             total = adv_examples
         else:
@@ -37,6 +61,14 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack,
 
         if labels_req:
             adversarial_classes = np.asarray([a.adversarial_class for a in adversarials])
+            
+            mismatch = np.mean(adversarial_classes == target_numpy)
+            print("label mismatch b/w clean and adversarials:", mismatch)
+            if mismatch >= 0.5:
+                print("currently processing:", batch_idx)
+                exit()
+            
+            #print("label mismatch b/w clean and clean:", np.mean(target_numpy == target_numpy))
             adversarial_classes = adversarial_classes.reshape((-1,1))
             if batch_idx == 0:
                 total_labels = adversarial_classes
@@ -86,6 +118,7 @@ def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', ad
             device,
             loader,
             adv_attack,
+            p_norm=p_norm,
             stepsize=stepsize,
             confidence=confidence,
             epsilon=epsilon,
