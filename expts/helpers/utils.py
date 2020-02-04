@@ -10,22 +10,23 @@ from sklearn.metrics import (
     average_precision_score
 )
 from helpers.constants import ROOT
-from torch.utils import data
+from torch.utils.data import TensorDataset, DataLoader
+
 
 def convert_to_list(array):
-    n_samples = array.shape[0]
-    output = []
-    for i in range(n_samples):
-        output.append(array[i])
-    return output
+    #array is a numpy ndarray
+    return [r for r in array]
 
-def convert_to_loader(X, Y, batch_size = 1):
-    tensor_x = torch.Tensor(X) # transform to torch tensor
-    tensor_y = torch.Tensor(Y)
 
-    dataset = data.TensorDataset(tensor_x,tensor_y) # create your datset
-    dataloader = data.DataLoader(dataset, batch_size=batch_size)
-    return dataloader
+def convert_to_loader(x, y, batch_size=1):
+    # transform to torch tensor; using `as_tensor` avoids creating a copy
+    tensor_x = torch.as_tensor(x)
+    tensor_y = torch.as_tensor(y)
+
+    # create your dataset and data loader
+    dataset = TensorDataset(tensor_x, tensor_y)
+    return DataLoader(dataset, batch_size=batch_size)
+
 
 def get_samples_as_ndarray(loader):
     for batch_idx, (data, target) in enumerate(loader):

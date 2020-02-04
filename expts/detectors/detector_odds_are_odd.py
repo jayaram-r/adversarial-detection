@@ -12,7 +12,6 @@ import itertools as itt
 from sklearn.metrics import confusion_matrix
 from helpers.utils import get_samples_as_ndarray, get_samples_as_ndarray
 
-
 def get_wcls(model, model_type):
     if model_type == 'mnist':
         w_cls = model.fc2.weight
@@ -56,7 +55,7 @@ def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
         just_detect=False
         clip_min=0.
         clip_max=1.
-
+        
         #initializations
         cuda = cuda and th.cuda.is_available()
  
@@ -279,3 +278,4 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                 eval_det_pgd.append(det_pgd)
 
 
+        # TODO: return the detection scores or binary output after thresholding

@@ -6,6 +6,7 @@ import numpy as np
 
 def foolbox_attack_helper(attack_model, device, data_loader, adv_attack,
                           stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
+                          confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                           labels_req=False):
     # model.eval()
     total = []
@@ -25,6 +26,12 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack,
         elif adv_attack == 'CW':
             adversarials = attack_model(data_numpy, target_numpy, confidence=confidence,
                     max_iterations=iterations, unpack=False)
+
+        adv_examples = np.asarray([a.perturbed for a in adversarials])
+                                        iterations=iterations, unpack=False)
+        elif adv_attack == 'CW':
+            adversarials = attack_model(data_numpy, target_numpy, confidence=confidence,
+                                        max_iterations=iterations, unpack=False)
 
         adv_examples = np.asarray([a.perturbed for a in adversarials])
         if batch_idx == 0:
@@ -51,6 +58,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack,
 
 def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM',
                    stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
+                   confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                    labels_req=False):
         if p_norm == '2':
             distance = foolbox.distances.MSE
@@ -89,6 +97,6 @@ def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', ad
             iterations=iterations,
             max_epsilon=max_epsilon,
             labels_req=labels_req
-        )
         return adversarials, adversarial_labels
+        return adversarials
         # adversarials = attack_model(images, labels)
