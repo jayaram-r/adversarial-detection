@@ -20,8 +20,10 @@ def convert_to_list(array):
 
 def convert_to_loader(x, y, batch_size=1):
     # transform to torch tensor; using `as_tensor` avoids creating a copy
-    tensor_x = torch.as_tensor(x)
-    tensor_y = torch.as_tensor(y)
+    #tensor_x = torch.as_tensor(x)
+    tensor_x = torch.tensor(x)
+    #tensor_y = torch.as_tensor(y)
+    tensor_y = torch.tensor(y)
 
     # create your dataset and data loader
     dataset = TensorDataset(tensor_x, tensor_y)
