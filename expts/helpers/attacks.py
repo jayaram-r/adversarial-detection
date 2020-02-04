@@ -102,6 +102,7 @@ def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', ad
         fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
 
         print("{} is the attack choice".format(adv_attack))
+        print("{} is the distance choice.".format(distance))
         # to do: add the parameters for (a) num iterations, and (b) epsilon
         if adv_attack == 'FGSM':
             attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) # distance=foolbox.distances.Linf)

@@ -73,11 +73,11 @@ def main():
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
-    parser.add_argument('--confidence', type=float, default=0, help='confidence needed by CW')
+    parser.add_argument('--confidence', type=int, default=0, help='confidence needed by CW')
     parser.add_argument('--epsilon', type=float, default=0.3, help='epsilon value')
-    parser.add_argument('--max-iterations', type=float, default=1000, help='max num. of iterations')
-    parser.add_argument('--iterations', type=float, default=40, help='num. of iterations')
-    parser.add_argument('--max-epsilon', type=float, default=1, help='max. value of epsilon')
+    parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
+    parser.add_argument('--iterations', type=int, default=40, help='num. of iterations')
+    parser.add_argument('--max-epsilon', type=int, default=1, help='max. value of epsilon')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
 
@@ -213,6 +213,14 @@ def main():
         max_iterations=args.max_iterations
         iterations=args.iterations
         max_epsilon=args.max_epsilon
+
+        print("parameter choices")
+        print("stepsize:", stepsize, type(stepsize))
+        print("confidence:", confidence, type(confidence))
+        print("max_iterations:", max_iterations, type(max_iterations))
+        print("iterations:", iterations, type(iterations))
+        print("max_epsilon:", max_epsilon, type(max_epsilon))
+        print("epsilon:", epsilon, type(epsilon))
 
         #create path based on attack configs
         param_path = "stepsize_"+str(stepsize)+"confidence_"+str(confidence)+"epsilon_"+str(epsilon)
