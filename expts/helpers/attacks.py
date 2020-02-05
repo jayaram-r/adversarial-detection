@@ -74,7 +74,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_at
                 log_file.write("no failure occured; just bad examples \n")
             log_file.write("\n")
             log_file.close()
-            #continue
+            continue
 
         if batch_idx == 0:
             total = adv_examples
