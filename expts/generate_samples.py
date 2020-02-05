@@ -69,7 +69,7 @@ def main():
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
-    parser.add_argument('--batch-size', type=int, default=32, help='batch size of evaluation')
+    parser.add_argument('--batch-size', type=int, default=128, help='batch size of evaluation')
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
@@ -151,8 +151,12 @@ def main():
     batch_size = args.batch_size
 
     #verify if the data loader is the same as the ndarrays it generates
-    print(verify_data_loader(test_loader, batch_size = batch_size)) #(True, True)
-    
+    verification = verify_data_loader(test_loader, batch_size = batch_size) #(True, True)
+   
+    if verification[0] != True and verification[1] != True:
+        print("data loader verification failed")
+        exit()
+
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
    
