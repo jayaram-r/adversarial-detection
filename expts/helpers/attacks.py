@@ -57,7 +57,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         adv_examples = np.asarray([a.perturbed for a in adversarials if isinstance(a.perturbed, np.ndarray) and a.perturbed.shape == inp_shape])
         
         #store indices of those adv. examples where there is a shape mismatch
-        failure_list = [str((batch_idx * loader_batch_size) + i) for i, a in enumerate(adversarials) if not isinstance(a.pertubed, np.ndarray) or a.perturbed.shape != inp_shape]
+        failure_list = [str((batch_idx * loader_batch_size) + i) for i, a in enumerate(adversarials) if not isinstance(a.perturbed, np.ndarray) or a.perturbed.shape != inp_shape]
         
         #convert the indices list above to a string, to be entered to the log
         failure_string = ','.join(failure_list) + '\n'
