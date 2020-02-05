@@ -40,7 +40,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
-        inp_shape = target_numpy.shape()[1:]
+        inp_shape = target_numpy.shape[1:]
         adversarials = None
         if adv_attack == 'FGSM':
             adversarials = attack_model(data_numpy, target_numpy, max_epsilon=max_epsilon, unpack=False)
@@ -54,18 +54,13 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                     max_iterations=max_iterations, unpack=False)
 
         #only store those adv. examples with same shape as input
-        adv_examples = np.asarray([a.perturbed for a in adversarials if a.shape == inp_shape])
+        adv_examples = np.asarray([a.perturbed for a in adversarials if isinstance(a.perturbed, np.ndarray) and a.perturbed.shape == inp_shape])
         
         #store indices of those adv. examples where there is a shape mismatch
-        failure_list = [(batch_idx * loader_batch_size) + i for i, a in enumerate(adversarials) if a.shape != inp_shape]
+        failure_list = [str((batch_idx * loader_batch_size) + i) for i, a in enumerate(adversarials) if not isinstance(a.pertubed, np.ndarray) or a.perturbed.shape != inp_shape]
         
         #convert the indices list above to a string, to be entered to the log
-        failure_string = ""
-        for i, element in enumerate(failure_list):
-            if i != len(failure_list) - 1:
-                failure_string += str(element)+","
-            else:
-                failure_string += str(element)+"\n"
+        failure_string = ','.join(failure_list) + '\n'
 
         norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
         print("average", p_norm,"-norm difference:", norm_diff)
