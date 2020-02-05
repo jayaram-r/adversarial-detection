@@ -40,7 +40,9 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
-        inp_shape = target_numpy.shape[1:]
+        temp = data_numpy.shape
+        inp_shape = (temp[1], temp[2], temp[3])
+        
         adversarials = None
         if adv_attack == 'FGSM':
             adversarials = attack_model(data_numpy, target_numpy, max_epsilon=max_epsilon, unpack=False)
@@ -66,15 +68,15 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         print("average", p_norm,"-norm difference:", norm_diff)
 
         #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated adv. examples are poor
-        if norm_diff < 1e-8:
+        if norm_diff < 1e-8 or len(failure_list) != 0:
             log_file = open(ROOT+"/logs/attack_status.txt", "a")
             log_file.write(param_string + "\n")
             log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape) + "\n") 
             log_file.write("currently processing batch:" + str(batch_idx) + "\n")
-            if len(failure_string) != 0:
+            if len(failure_list) != 0:
                 log_file.write("indices of loader where failure occured: " + failure_string)
-            else:
-                log_file.write("no failure occured; just bad examples \n")
+            elif norm_diff < 1e-8:
+                log_file.write("no failure occured; bad examples \n")
             log_file.write("\n")
             log_file.close()
             continue
@@ -101,7 +103,6 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                 log_file.close()
                 continue
             
-            #print("label mismatch b/w clean and clean:", np.mean(target_numpy == target_numpy))
             adversarial_classes = adversarial_classes.reshape((-1,1))
             if batch_idx == 0:
                 total_labels = adversarial_classes
@@ -110,6 +111,8 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
 
         print("Finished processing batch id:", batch_idx)
 
+    if type(total_labels) != np.ndarray:
+        total_labels = np.asarray(total_labels)
     total_labels = total_labels.reshape((-1,))
     if not labels_req:
         return total, _
@@ -122,7 +125,7 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
                    labels_req=False):
         
         if p_norm == '2':
-            distance = foolbox.distances.MSE
+            distance = foolbox.distances.MeanSquaredDistance
         elif p_norm == 'inf':
             distance = foolbox.distances.Linf
         elif p_norm == '0':
@@ -134,15 +137,19 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
         model.eval()
         fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
 
-        print("{} is the attack choice".format(adv_attack))
         print("{} is the distance choice.".format(distance))
-        # to do: add the parameters for (a) num iterations, and (b) epsilon
         if adv_attack == 'FGSM':
+            print("{} is the attack choice".format(adv_attack))
             attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) # distance=foolbox.distances.Linf)
-        elif adv_attack == 'PGD':
+            print(attack_model)
+        elif adv_attack == 'PGD' and p_norm == 'inf':
+            print("{} is the attack choice".format(adv_attack))
             attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
+            print(attack_model)
         elif adv_attack == 'CW' and p_norm == '2':
+            print("{} is the attack choice".format(adv_attack))
             attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
+            print(attack_model)
         else:
             raise ValueError("'{}' is not a valid adversarial attack".format(adv_attack))
 
