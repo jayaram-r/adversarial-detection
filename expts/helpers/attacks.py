@@ -24,14 +24,15 @@ def calc_norm(src, target, norm):
     return total/n_samples
 
 
-def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_attack, dataset, fold_num, p_norm,
+def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader_batch_size, adv_attack, dataset, fold_num, p_norm,
                           stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                           labels_req=False):
     # model.eval()
-    log_file = open(ROOT+"/logs/attack_status.txt", "a")
+    #parameter string to be written into logs
     param_string = "dataset: "+dataset+" fold_num: "+str(fold_num)+" loader_type: "+loader_type
     param_string += " adv_attack: "+adv_attack+" stepsize: "+str(stepsize)+" confidence: "+str(confidence)+" epsilon: "+str(epsilon)
     param_string += " max_iterations: "+str(max_iterations)+" iterations: "+str(iterations)+" max_epsilon: "+str(max_epsilon)
+    
     total = []
     total_labels = []
     failure_list = []
@@ -52,9 +53,13 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_at
             adversarials = attack_model(data_numpy, target_numpy, confidence=confidence,
                     max_iterations=max_iterations, unpack=False)
 
+        #only store those adv. examples with same shape as input
         adv_examples = np.asarray([a.perturbed for a in adversarials if a.shape == inp_shape])
         
-        failure_list = [(batch_idx * 128) + i for i, a in enumerate(adversarials) if a.shape != inp_shape]
+        #store indices of those adv. examples where there is a shape mismatch
+        failure_list = [(batch_idx * loader_batch_size) + i for i, a in enumerate(adversarials) if a.shape != inp_shape]
+        
+        #convert the indices list above to a string, to be entered to the log
         failure_string = ""
         for i, element in enumerate(failure_list):
             if i != len(failure_list) - 1:
@@ -64,7 +69,10 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_at
 
         norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
         print("average", p_norm,"-norm difference:", norm_diff)
+
+        #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated adv. examples are poor
         if norm_diff < 1e-8:
+            log_file = open(ROOT+"/logs/attack_status.txt", "a")
             log_file.write(param_string + "\n")
             log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape) + "\n") 
             log_file.write("currently processing batch:" + str(batch_idx) + "\n")
@@ -84,15 +92,18 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_at
         if labels_req:
             adversarial_classes = np.asarray([a.adversarial_class for a in adversarials])
             
+            #if the labels of adv. examples is the same as those of the src. labels, then the mismatch = 1
             mismatch = np.mean(adversarial_classes == target_numpy)
             print("label mismatch b/w clean and adversarials:", mismatch)
+
+            #write to log
             if mismatch >= 0.5:
+                log_file = open(ROOT+"/logs/attack_status.txt", "a")
                 log_file.write(param_string + "\n")
                 log_file.write("label mismatch occured, with mismatch = "+str(mismatch)+"\n")
                 log_file.write("currently processing batch: " + str(batch_idx) + "\n")
                 log_file.write("\n")
                 log_file.close()
-                #exit()
                 continue
             
             #print("label mismatch b/w clean and clean:", np.mean(target_numpy == target_numpy))
@@ -111,7 +122,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_at
         return total, total_labels
 
 
-def foolbox_attack(model, device, loader, loader_type, bounds, num_classes=10, dataset='cifar10', fold_num=1, p_norm='2', adv_attack='FGSM',
+def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds, num_classes=10, dataset='cifar10', fold_num=1, p_norm='2', adv_attack='FGSM',
                    stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                    labels_req=False):
         
@@ -146,6 +157,7 @@ def foolbox_attack(model, device, loader, loader_type, bounds, num_classes=10, d
             device,
             loader,
             loader_type,
+            loader_batch_size,
             adv_attack,
             dataset,
             fold_num,
