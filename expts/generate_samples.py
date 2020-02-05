@@ -228,8 +228,8 @@ def main():
 
         #create path based on attack configs
         param_path = "stepsize_"+str(stepsize)+"confidence_"+str(confidence)+"epsilon_"+str(epsilon)
-        param_path += "max_iterations_"+str(max_iterations)+"iterations_"+str(iterations)
-        param_path += "max_epsilon_"+str(max_epsilon)
+        param_path += "maxiterations_"+str(max_iterations)+"iterations_"+str(iterations)
+        param_path += "maxepsilon_"+str(max_epsilon)+"pnorm_"+str(args.p_norm)
         adv_path = os.path.join(os.path.join(adv_save_path, param_path))
         if os.path.isdir(adv_path) == False:
             os.makedirs(adv_path)

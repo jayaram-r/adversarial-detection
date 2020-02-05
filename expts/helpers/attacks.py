@@ -3,6 +3,7 @@ import torch
 import torchvision
 import numpy as np
 from numpy import linalg as LA
+from helpers.constants import ROOT
 
 def calc_norm(src, target, norm):
     assert src.shape == target.shape
@@ -26,6 +27,9 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
                           stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                           labels_req=False):
     # model.eval()
+    log_file = open(ROOT+"/logs/attack_status.txt", "a")
+    param_string = "adv_attack:"+adv_attack+"step_size:"+str(step_size)+"confidence:"+str(confidence)+"epsilon:"+str(epsilon)
+    param_string += "max_iterations:"+str(max_iterations)+"iterations:"+str(iterations)+"max_epsilon:"+str(max_epsilon)
     total = []
     total_labels = []
     for batch_idx, (data, target) in enumerate(data_loader):
@@ -51,7 +55,9 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
         norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
         print("average", p_norm,"-norm difference:", norm_diff)
         if norm_diff == 0:
-                print("currently processing:", batch_idx)
+                log_file.write(param_string + "\n")
+                log_file.write("currently processing:", batch_idx, "\n")
+                log_file.close()
                 exit()
 
         if batch_idx == 0:
@@ -65,7 +71,9 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
             mismatch = np.mean(adversarial_classes == target_numpy)
             print("label mismatch b/w clean and adversarials:", mismatch)
             if mismatch >= 0.5:
-                print("currently processing:", batch_idx)
+                log_file.write(param_string + "\n")
+                log_file.write("currently processing:", batch_idx, "\n")
+                log_file.close()
                 exit()
             
             #print("label mismatch b/w clean and clean:", np.mean(target_numpy == target_numpy))
