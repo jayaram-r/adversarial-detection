@@ -6,7 +6,8 @@ from numpy import linalg as LA
 from helpers.constants import ROOT
 
 def calc_norm(src, target, norm):
-    assert src.shape == target.shape
+    if src.shape != target.shape:
+        return 0
     n_samples = src.shape[0]
     total = 0
     for i in range(n_samples):
@@ -23,20 +24,22 @@ def calc_norm(src, target, norm):
     return total/n_samples
 
 
-def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
+def foolbox_attack_helper(attack_model, device, data_loader, loader_type, adv_attack, dataset, fold_num, p_norm,
                           stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                           labels_req=False):
     # model.eval()
     log_file = open(ROOT+"/logs/attack_status.txt", "a")
-    param_string = "adv_attack:"+adv_attack+"step_size:"+str(step_size)+"confidence:"+str(confidence)+"epsilon:"+str(epsilon)
-    param_string += "max_iterations:"+str(max_iterations)+"iterations:"+str(iterations)+"max_epsilon:"+str(max_epsilon)
+    param_string = "dataset: "+dataset+" fold_num: "+str(fold_num)+" loader_type: "+loader_type
+    param_string += " adv_attack: "+adv_attack+" stepsize: "+str(stepsize)+" confidence: "+str(confidence)+" epsilon: "+str(epsilon)
+    param_string += " max_iterations: "+str(max_iterations)+" iterations: "+str(iterations)+" max_epsilon: "+str(max_epsilon)
     total = []
     total_labels = []
+    failure_list = []
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
-
+        inp_shape = target_numpy.shape()[1:]
         adversarials = None
         if adv_attack == 'FGSM':
             adversarials = attack_model(data_numpy, target_numpy, max_epsilon=max_epsilon, unpack=False)
@@ -49,16 +52,29 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
             adversarials = attack_model(data_numpy, target_numpy, confidence=confidence,
                     max_iterations=max_iterations, unpack=False)
 
-
-        adv_examples = np.asarray([a.perturbed for a in adversarials])
+        adv_examples = np.asarray([a.perturbed for a in adversarials if a.shape == inp_shape])
         
+        failure_list = [(batch_idx * 128) + i for i, a in enumerate(adversarials) if a.shape != inp_shape]
+        failure_string = ""
+        for i, element in enumerate(failure_list):
+            if i != len(failure_list) - 1:
+                failure_string += str(element)+","
+            else:
+                failure_string += str(element)+"\n"
+
         norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
         print("average", p_norm,"-norm difference:", norm_diff)
-        if norm_diff == 0:
-                log_file.write(param_string + "\n")
-                log_file.write("currently processing:", batch_idx, "\n")
-                log_file.close()
-                exit()
+        if norm_diff < 1e-8:
+            log_file.write(param_string + "\n")
+            log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape) + "\n") 
+            log_file.write("currently processing batch:" + str(batch_idx) + "\n")
+            if len(failure_string) != 0:
+                log_file.write("indices of loader where failure occured: " + failure_string)
+            else:
+                log_file.write("no failure occured; just bad examples \n")
+            log_file.write("\n")
+            log_file.close()
+            #continue
 
         if batch_idx == 0:
             total = adv_examples
@@ -72,9 +88,12 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
             print("label mismatch b/w clean and adversarials:", mismatch)
             if mismatch >= 0.5:
                 log_file.write(param_string + "\n")
-                log_file.write("currently processing:", batch_idx, "\n")
+                log_file.write("label mismatch occured, with mismatch = "+str(mismatch)+"\n")
+                log_file.write("currently processing batch: " + str(batch_idx) + "\n")
+                log_file.write("\n")
                 log_file.close()
-                exit()
+                #exit()
+                continue
             
             #print("label mismatch b/w clean and clean:", np.mean(target_numpy == target_numpy))
             adversarial_classes = adversarial_classes.reshape((-1,1))
@@ -92,7 +111,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, adv_attack, p_norm,
         return total, total_labels
 
 
-def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', adv_attack='FGSM',
+def foolbox_attack(model, device, loader, loader_type, bounds, num_classes=10, dataset='cifar10', fold_num=1, p_norm='2', adv_attack='FGSM',
                    stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
                    labels_req=False):
         
@@ -126,7 +145,10 @@ def foolbox_attack(model, device, loader, bounds, num_classes=10, p_norm='2', ad
             attack_model,
             device,
             loader,
+            loader_type,
             adv_attack,
+            dataset,
+            fold_num,
             p_norm=p_norm,
             stepsize=stepsize,
             confidence=confidence,
