@@ -75,14 +75,14 @@ def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
             loss_fn.cuda()
             loss_fn_adv.cuda()
 
-        def net_forward(x, layer_by_layer=False, from_layer=0):
-            if layer_by_layer == True:
+        def net_forward(x, layer_by_layer=False):
+            if layer_by_layer:
                 return model.layer_wise_odds_are_odd(x)
             else:
                 return model(x)
 
         def latent_and_logits_fn(x):
-            lat, log = net_forward(x, True)[-2:] 
+            lat, log = net_forward(x, layer_by_layer=True)
             lat = lat.reshape(lat.shape[0], -1)
             return lat, log
 
@@ -179,14 +179,14 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         #all_eval_important_single_pixels = []
         #all_eval_losses_per_pixel = []
 
-        def net_forward(x, layer_by_layer=False, from_layer=0):
-            if layer_by_layer == True:
+        def net_forward(x, layer_by_layer=False):
+            if layer_by_layer:
                 return model.layer_wise_odds_are_odd(x)
             else:
                 return model(x)
 
         def latent_and_logits_fn(x):
-            lat, log = net_forward(x, True)[-2:]
+            lat, log = net_forward(x, layer_by_layer=True)
             lat = lat.reshape(lat.shape[0], -1)
             return lat, log
 
@@ -263,7 +263,6 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                 x_pand = x_pgd + th.empty_like(x_pgd).uniform_(-eps_rand, eps_rand)
                 loss_pand, preds_pand = get_loss_and_preds(x_pand, y)
 
-
                 eval_loss_pand.append((loss_pand.data).cpu().numpy())
                 eval_acc_pand.append((th.eq(preds_pand, y).float()).cpu().numpy())
                 eval_preds_pand.extend(preds_pand)
@@ -279,4 +278,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                 eval_det_pgd.append(det_pgd)
 
 
-        # TODO: return the detection scores or binary output after thresholding
+        eval_det_clean = np.concatenate(eval_det_clean, axis=0)
+        eval_det_pgd = np.concatenate(eval_det_pgd, axis=0)
+        # Are these binary valued arrays?
+        return eval_det_clean, eval_det_pgd

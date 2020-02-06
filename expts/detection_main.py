@@ -258,12 +258,18 @@ def main():
             raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
                              "labels.")
 
+        # Detection labels (0 denoting clean and 1 adversarial)
+        labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
+                                       np.ones(labels_pred_te_adv.shape[0], dtype=np.int)])
         if args.detection_method == 'odds':
             # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
             predictor = fit_odds_are_odd(train_inputs, model, args.model_type, num_classes, with_attack=True)
             next(predictor)
-            detect_odds_are_odd(predictor, test_fold_loader, adv_test_fold_loader, model)
+            detections_clean, detections_attack = detect_odds_are_odd(predictor, test_fold_loader,
+                                                                      adv_test_fold_loader, model)
+            scores_adv = np.concatenate([detections_clean, detections_attack])
+            # Unlike the other methods, these are not continuous valued scores
 
         elif args.detection_method == 'lid':
             # TODO: generate noisy data from the clean training fold data. Setting this to `None` will inform
@@ -276,9 +282,8 @@ def main():
                 seed_rng=args.seed
             )
             # Fit the detector on clean, noisy, and adversarial data from the training fold
-            model_det, _, _, _ = model_det.fit(layer_embeddings_tr, layer_embeddings_tr_noisy,
-                                               layer_embeddings_tr_adv)
-
+            ret = model_det.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
+                                layer_embeddings_noisy=layer_embeddings_tr_noisy)
             # Scores on clean data from the test fold
             scores_adv1 = model_det.score(layer_embeddings_te)
 
@@ -286,9 +291,6 @@ def main():
             scores_adv2 = model_det.score(layer_embeddings_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            # Detection labels (0 denoting clean and 1 adversarial)
-            labels_detec = np.concatenate([np.zeros(scores_adv1.shape[0], dtype=np.int),
-                                           np.ones(scores_adv2.shape[0], dtype=np.int)])
 
         elif args.detection_method == 'proposed':
             det_model = DetectorLayerStatistics(
@@ -309,9 +311,6 @@ def main():
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
             scores_ood = np.concatenate([scores_ood1, scores_ood2])
-            # Detection labels (0 denoting clean and 1 adversarial)
-            labels_detec = np.concatenate([np.zeros(scores_adv1.shape[0], dtype=np.int),
-                                           np.ones(scores_adv2.shape[0], dtype=np.int)])
 
         elif args.detection_method == 'dknn':
             det_model = DeepKNN(
@@ -331,9 +330,6 @@ def main():
             scores_adv2, labels_pred_dknn2 = det_model.score(layer_embeddings_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            # Detection labels (0 denoting clean and 1 adversarial)
-            labels_detec = np.concatenate([np.zeros(scores_adv1.shape[0], dtype=np.int),
-                                           np.ones(scores_adv2.shape[0], dtype=np.int)])
 
         # Performance metrics
         print("\nDetection performance metrics on fold {:d}:".format(i + 1))

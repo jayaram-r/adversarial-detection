@@ -151,7 +151,7 @@ class DetectorLID:
         self.index_knn = None
         self.model_logistic = None
 
-    def fit(self, layer_embeddings_normal, layer_embeddings_noisy, layer_embeddings_adversarial):
+    def fit(self, layer_embeddings_normal, layer_embeddings_adversarial, layer_embeddings_noisy=None):
         """
         Extract the LID feature vector for normal, noisy, and adversarial samples and train a logistic classifier
         to separate adversarial samples from (normal + noisy). Cross-validation is used to select the hyper-parameter
@@ -161,12 +161,14 @@ class DetectorLID:
                                         Length of the list is equal to the number of layers. The numpy array at
                                         index `i` has shape `(n, d_i)`, where `n` is the number of samples and `d_i`
                                         is the dimension of the embeddings at layer `i`.
-        :param layer_embeddings_noisy: Same format as `layer_embeddings_normal`, but corresponding to noisy data.
-                                       Can be set to `None` to exclude noisy data from training.
         :param layer_embeddings_adversarial: Same format as `layer_embeddings_normal`, but corresponding to
                                              adversarial data.
-
-        :return: (self, scores_normal, scores_noisy, scores_adversarial), where
+        :param layer_embeddings_noisy: Same format as `layer_embeddings_normal`, but corresponding to noisy data.
+                                       Can be set to `None` to exclude noisy data from training.
+        :return:
+            (self, scores_normal, scores_adversarial) if layer_embeddings_noise is None
+            (self, scores_normal, scores_adversarial, scores_noisy) otherwise.
+            -------------------------------------------------------
             - self: trained instance of the class.
             - scores_normal: numpy array with the scores (decision function of the logistic classifier) for normal
                              samples. 1d array with the same number of samples as `layer_embeddings_normal`.
@@ -260,7 +262,6 @@ class DetectorLID:
         ind_perm = np.random.permutation(labels.shape[0])
         features_lid = features_lid[ind_perm, :]
         labels = labels[ind_perm]
-
         logger.info("Training a binary logistic classifier with {:d} samples and {:d} LID features.".
                     format(*features_lid.shape))
         logger.info("Using {:d}-fold cross-validation with area under ROC curve (AUC) as the metric to select "
@@ -278,14 +279,12 @@ class DetectorLID:
 
         # Larger values of this score correspond to a higher probability of predicting class 1 (adversarial)
         scores_normal = self.model_logistic.decision_function(features_lid_normal)
+        scores_adversarial = self.model_logistic.decision_function(features_lid_adversarial)
         if layer_embeddings_noisy:
             scores_noisy = self.model_logistic.decision_function(features_lid_noisy)
+            return self, scores_normal, scores_adversarial, scores_noisy
         else:
-            scores_noisy = np.array([], dtype=np.float)
-
-        scores_adversarial = self.model_logistic.decision_function(features_lid_adversarial)
-
-        return self, scores_normal, scores_noisy, scores_adversarial
+            return self, scores_normal, scores_adversarial
 
     def score(self, layer_embeddings):
         """
