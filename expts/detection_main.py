@@ -25,7 +25,12 @@ from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint,
-    convert_to_loader
+    convert_to_loader,
+    load_numpy_data,
+    get_path_dr_models,
+    get_clean_data_path,
+    get_adversarial_data_path,
+    get_output_path
 )
 from helpers.attacks import foolbox_attack, foolbox_attack_helper
 from detectors.detector_odds_are_odd import (
@@ -75,7 +80,6 @@ def main():
                         help='Path to the saved dimension reduction model file')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
     parser.add_argument('--detection-mechanism', '-dm', default='odds', help='the detection mechanism to use')
-    parser.add_argument('--ckpt', default=False, help='to use checkpoint or not')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
     parser.add_argument('--attack-proportion', '--ap', type=float, default=ATTACK_PROPORTION_DEF,
@@ -87,8 +91,8 @@ def main():
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
-    parser.add_argument('--p-norm', '-p', choices=['2', 'inf'], default='inf',
-                        help="p norm for the adversarial attack; options are '2' and 'inf'")
+    parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
+                        help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
     args = parser.parse_args()
 
@@ -97,7 +101,7 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     if not args.output_dir:
-        output_dir = os.path.join(ROOT, 'outputs', args.model_type)
+        output_dir = get_output_path(args.model_type)
     else:
         output_dir = args.output_dir
 
@@ -113,8 +117,8 @@ def main():
     model_dim_reduc = None
     if apply_dim_reduc:
         if not args.model_dim_reduc:
-            model_dim_reduc = os.path.join(ROOT, 'outputs', args.model_type, 'models_dimension_reduction.pkl')
-
+            # Default path the dimension reduction model file
+            model_dim_reduc = get_path_dr_models(args.model_type)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -134,7 +138,7 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
         num_classes = 10
-        bounds=(-255, 255)
+        bounds = (-255, 255)
 
     elif args.model_type == 'cifar10':
         transform_test = transforms.Compose(
@@ -146,7 +150,7 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255, 255)
+        bounds = (-255, 255)
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -158,61 +162,34 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=(-255, 255)
+        bounds = (-255, 255)
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-
-    '''
-    #convert the data loader to 2 ndarrays
-    data, labels = get_samples_as_ndarray(test_loader)
-    
-    # Stratified cross-validation split
-    skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
-    
-    #repeat for each fold in the split
-    for ind_tr, ind_te in skf.split(data, labels): 
-        data_tr = data[ind_tr, :]
-        labels_tr = labels[ind_tr]
-        data_te = data[ind_te, :]
-        labels_te = labels[ind_te]
-        
-        # Data loader for the test data split
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
-
-        # use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels = foolbox_attack(model, device, test_fold_loader, bounds, num_classes=num_classes, 
-                                                p_norm=args.p_norm, adv_attack=args.adv_attack, labels_req=True)
-
-        # Data loader for the adversarial data
-        adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
-    '''
-
+    # Cross-validation folds
     for i in range(args.num_folds):
-        numpy_save_path = os.path.join(output_dir, "fold_{}".format(i))
-        
-        data_tr = np.load(os.path.join(numpy_save_path, 'data_tr.npy'))
-        labels_tr = np.load(os.path.join(numpy_save_path, 'labels_tr.npy'))
-        data_te = np.load(os.path.join(numpy_save_path, 'data_te.npy'))
-        labels_te = np.load(os.path.join(numpy_save_path, 'labels_te.npy'))
+        # Load the saved clean numpy data from this fold
+        numpy_save_path = get_clean_data_path(args.model_type, i + 1)
+        data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path, adversarial=False)
 
-        # Data loader for the test data split
+        # Data loader for the train fold
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.test_batch_size)
+
+        # Data loader for the test fold
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
 
-        #train adv. examples
-        adv_inputs = np.save(os.path.join(numpy_save_path, 'data_tr_adv.npy'))
-        adv_labels = np.save(os.path.join(numpy_save_path, 'labels_tr_adv.npy'))
+        # Load the saved adversarial numpy data from this fold
+        # TODO: `attack_param_list` needs to be defined
+        numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_param_list)
+        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_numpy_data(numpy_save_path, adversarial=True)
 
-        # Data loader for the adversarial data
-        train_adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
+        # Adversarial data loader for the train fold
+        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.test_batch_size)
 
-        #test adv. examples
-        adv_inputs = np.save(os.path.join(numpy_save_path, 'data_te_adv.npy'))
-        adv_labels = np.save(os.path.join(numpy_save_path, 'labels_te_adv.npy'))
+        # Adversarial data loader for the test fold
+        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.test_batch_size)
 
-        # Data loader for the adversarial data
-        test_adv_loader = convert_to_loader(adv_inputs, adv_labels, batch_size=args.test_batch_size)
 
         if args.detection_mechanism == 'odds':
             # call functions from detectors/detector_odds_are_odd.py
@@ -231,6 +208,7 @@ def main():
             continue
         elif args.detection_mechanism == 'dknn':
             continue
+
 
 if __name__ == '__main__':
     main()

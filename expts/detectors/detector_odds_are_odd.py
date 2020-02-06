@@ -10,7 +10,8 @@ import torchvision
 from detectors.tf_robustify import *
 import itertools as itt
 from sklearn.metrics import confusion_matrix
-from helpers.utils import get_samples_as_ndarray, get_samples_as_ndarray
+from helpers.utils import get_samples_as_ndarray
+
 
 def get_wcls(model, model_type):
     if model_type == 'mnist':

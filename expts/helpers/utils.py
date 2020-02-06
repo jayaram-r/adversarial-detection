@@ -31,6 +31,8 @@ def convert_to_loader(x, y, batch_size=1):
 
 
 def get_samples_as_ndarray(loader):
+    X = []
+    Y = []
     for batch_idx, (data, target) in enumerate(loader):
         data, target = data.cpu().numpy(), target.cpu().numpy()
         target = target.reshape((target.shape[0], 1))
@@ -43,14 +45,30 @@ def get_samples_as_ndarray(loader):
     Y = Y.reshape((-1,))
     return X,Y
 
+
 def verify_data_loader(loader, batch_size=1):
     X_1, Y_1 = get_samples_as_ndarray(loader)
-    X_1_list, Y_1_list = convert_to_list(X_1), convert_to_list(Y_1)
-    loader_new = convert_to_loader(X_1_list, Y_1_list, batch_size = batch_size)
+    loader_new = convert_to_loader(X_1, Y_1, batch_size=batch_size)
     X_2, Y_2 = get_samples_as_ndarray(loader_new)
-    X_equal = np.array_equal(X_1, X_2)
-    Y_equal = np.array_equal(Y_1, Y_2)
-    return X_equal, Y_equal
+
+    return np.array_equal(X_1, X_2) and np.array_equal(Y_1, Y_2)
+
+
+def load_numpy_data(path, adversarial=False):
+    print("Loading saved numpy data from the path:", path)
+    if not adversarial:
+        data_tr = np.load(os.path.join(path, "data_tr.npy"))
+        labels_tr = np.load(os.path.join(path, "labels_tr.npy"))
+        data_te = np.load(os.path.join(path, "data_te.npy"))
+        labels_te = np.load(os.path.join(path, "labels_te.npy"))
+    else:
+        data_tr = np.load(os.path.join(path, "data_tr_adv.npy"))
+        labels_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
+        data_te = np.load(os.path.join(path, "data_te_adv.npy"))
+        labels_te = np.load(os.path.join(path, "labels_te_adv.npy"))
+
+    return data_tr, labels_tr, data_te, labels_te
+
 
 def get_model_file(model_type, epoch=None):
     if epoch is None:
@@ -72,6 +90,28 @@ def load_model_checkpoint(model, model_type, epoch=None):
 def save_model_checkpoint(model, model_type, epoch=None):
     model_path = get_model_file(model_type, epoch=epoch)
     torch.save(model.state_dict(), model_path)
+
+
+def get_path_dr_models(model_type):
+    # Default path to the dimensionality reduction model files
+    return os.path.join(
+        ROOT, 'models', 'models_dimension_reduction', model_type, 'models_dimension_reduction.pkl'
+    )
+
+
+def get_clean_data_path(model_type, fold):
+    return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold))
+
+
+def get_adversarial_data_path(model_type, fold, attack_type, attack_param_list):
+    # Example `attack_param_list = [('stepsize', '0.05'), ('confidence', '0'), ('epsilon', '0.0039')]`
+    base = ''.join(['{}_{}'.format(a, b) for a, b in attack_param_list])
+    return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold), attack_type, base)
+
+
+def get_output_path(model_type):
+    # Default output path
+    return os.path.join(ROOT, 'outputs', model_type)
 
 
 def metrics_detection(scores, labels, pos_label=1, max_fpr=0.01, verbose=True):
