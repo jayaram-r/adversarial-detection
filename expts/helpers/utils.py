@@ -137,6 +137,7 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=0.01, verbose=True):
     :param verbose: Set to True to print the performance metrics.
     :return:
     """
+    # 0.1%, 0.5%, 1%, 5%, and 10%
     fpr_thresh = [0.001, 0.005, 0.01, 0.05, 0.1]
     au_roc = roc_auc_score(labels, scores)
     au_roc_partial = roc_auc_score(labels, scores, max_fpr=max_fpr)
