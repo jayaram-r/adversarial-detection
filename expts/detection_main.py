@@ -338,6 +338,13 @@ def main():
         auc_scores[i], pauc_scores[i, :], avg_precision_scores[i], tpr_scores[i, :], fpr_scores[i, :] = \
             metrics_detection(scores_adv, labels_detec)
 
+    # Average performance over the test folds
+    auc_avg = np.mean(auc_scores)
+    avg_precision_avg = np.mean(avg_precision_scores)
+    pauc_avg = np.mean(pauc_scores, axis=0)
+    tpr_avg = np.mean(tpr_scores, axis=0)
+    fpr_avg = np.mean(fpr_scores, axis=0)
+
     # Save the performance metrics to a file
 
 

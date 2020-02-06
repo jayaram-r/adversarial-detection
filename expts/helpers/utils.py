@@ -175,6 +175,9 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
     return au_roc, au_roc_partial, avg_prec, tpr, fpr
 
 
+# def metrics_varying_positive_class_proportion():
+
+
 def get_num_jobs(n_jobs):
     """
     Number of processes or jobs to use for multiprocessing.
