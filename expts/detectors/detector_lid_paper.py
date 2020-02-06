@@ -161,27 +161,34 @@ class DetectorLID:
                                         Length of the list is equal to the number of layers. The numpy array at
                                         index `i` has shape `(n, d_i)`, where `n` is the number of samples and `d_i`
                                         is the dimension of the embeddings at layer `i`.
-        :param layer_embeddings_noisy: same format as `layer_embeddings_normal`, but corresponding to noisy data.
-        :param layer_embeddings_adversarial: same format as `layer_embeddings_normal`, but corresponding to
+        :param layer_embeddings_noisy: Same format as `layer_embeddings_normal`, but corresponding to noisy data.
+                                       Can be set to `None` to exclude noisy data from training.
+        :param layer_embeddings_adversarial: Same format as `layer_embeddings_normal`, but corresponding to
                                              adversarial data.
 
         :return: (self, scores_normal, scores_noisy, scores_adversarial), where
             - self: trained instance of the class.
             - scores_normal: numpy array with the scores (decision function of the logistic classifier) for normal
                              samples. 1d array with the same number of samples as `layer_embeddings_normal`.
-            - scores_noisy: scores corresponding to `layer_embeddings_noisy`.
+            - scores_noisy: scores corresponding to `layer_embeddings_noisy` if noisy training data is provided.
             - scores_adversarial: scores corresponding to `layer_embeddings_adversarial`.
         """
         self.n_layers = len(layer_embeddings_normal)
         logger.info("Number of layer embeddings: {:d}.".format(self.n_layers))
-        if (len(layer_embeddings_noisy) != self.n_layers) or (len(layer_embeddings_adversarial) != self.n_layers):
+        if layer_embeddings_noisy is None:
+            logger.info("Noisy training data not provided.")
+            cond1 = False
+        else:
+            cond1 = (len(layer_embeddings_noisy) != self.n_layers)
+
+        if cond1 or (len(layer_embeddings_adversarial) != self.n_layers):
             raise ValueError("The layer embeddings for noisy and attack samples must have the same length as that "
                              "of normal samples")
 
         # Number of samples in each of the categories
         self.n_samples = [
             layer_embeddings_normal[0].shape[0],
-            layer_embeddings_noisy[0].shape[0],
+            layer_embeddings_noisy[0].shape[0] if layer_embeddings_noisy else 0,
             layer_embeddings_adversarial[0].shape[0]
         ]
         # Number of nearest neighbors
@@ -194,8 +201,9 @@ class DetectorLID:
         if not all([layer_embeddings_normal[i].shape[0] == self.n_samples[0] for i in range(self.n_layers)]):
             raise ValueError("Input 'layer_embeddings_normal' does not have the expected format")
 
-        if not all([layer_embeddings_noisy[i].shape[0] == self.n_samples[1] for i in range(self.n_layers)]):
-            raise ValueError("Input 'layer_embeddings_noisy' does not have the expected format")
+        if layer_embeddings_noisy:
+            if not all([layer_embeddings_noisy[i].shape[0] == self.n_samples[1] for i in range(self.n_layers)]):
+                raise ValueError("Input 'layer_embeddings_noisy' does not have the expected format")
 
         if not all([layer_embeddings_adversarial[i].shape[0] == self.n_samples[2] for i in range(self.n_layers)]):
             raise ValueError("Input 'layer_embeddings_adversarial' does not have the expected format")
@@ -222,11 +230,12 @@ class DetectorLID:
             # LID estimates of the normal feature embeddings from this layer
             features_lid_normal[:, i] = lid_mle_amsaleg(nn_distances)
 
-            logger.info("Calculating LID estimates for the feature embeddings of noisy samples.")
-            # Nearest neighbors of the noisy feature embeddings from this layer
-            nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings_noisy[i], k=self.n_neighbors)
-            # LID estimates of the noisy feature embeddings from this layer
-            features_lid_noisy[:, i] = lid_mle_amsaleg(nn_distances)
+            if layer_embeddings_noisy:
+                logger.info("Calculating LID estimates for the feature embeddings of noisy samples.")
+                # Nearest neighbors of the noisy feature embeddings from this layer
+                nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings_noisy[i], k=self.n_neighbors)
+                # LID estimates of the noisy feature embeddings from this layer
+                features_lid_noisy[:, i] = lid_mle_amsaleg(nn_distances)
 
             logger.info("Calculating LID estimates for the feature embeddings of adversarial samples.")
             # Nearest neighbors of the adversarial feature embeddings from this layer
@@ -234,12 +243,19 @@ class DetectorLID:
             # LID estimates of the adversarial feature embeddings from this layer
             features_lid_adversarial[:, i] = lid_mle_amsaleg(nn_distances)
 
-        # Feature vector and labels for the binary logistic classifier
-        features_lid = np.concatenate([features_lid_normal, features_lid_noisy, features_lid_adversarial], axis=0)
+        # Feature vector and labels for the binary logistic classifier.
         # Normal and noisy samples are given labels 0 and adversarial samples are given label 1
-        labels = np.concatenate([np.zeros(features_lid_normal.shape[0], dtype=np.int),
-                                 np.zeros(features_lid_noisy.shape[0], dtype=np.int),
-                                 np.ones(features_lid_adversarial.shape[0], dtype=np.int)])
+        if layer_embeddings_noisy:
+            features_lid = np.concatenate([features_lid_normal, features_lid_noisy, features_lid_adversarial],
+                                          axis=0)
+            labels = np.concatenate([np.zeros(features_lid_normal.shape[0], dtype=np.int),
+                                     np.zeros(features_lid_noisy.shape[0], dtype=np.int),
+                                     np.ones(features_lid_adversarial.shape[0], dtype=np.int)])
+        else:
+            features_lid = np.concatenate([features_lid_normal, features_lid_adversarial], axis=0)
+            labels = np.concatenate([np.zeros(features_lid_normal.shape[0], dtype=np.int),
+                                     np.ones(features_lid_adversarial.shape[0], dtype=np.int)])
+
         # Randomly shuffle the samples to avoid determinism
         ind_perm = np.random.permutation(labels.shape[0])
         features_lid = features_lid[ind_perm, :]
@@ -262,7 +278,11 @@ class DetectorLID:
 
         # Larger values of this score correspond to a higher probability of predicting class 1 (adversarial)
         scores_normal = self.model_logistic.decision_function(features_lid_normal)
-        scores_noisy = self.model_logistic.decision_function(features_lid_noisy)
+        if layer_embeddings_noisy:
+            scores_noisy = self.model_logistic.decision_function(features_lid_noisy)
+        else:
+            scores_noisy = np.array([], dtype=np.float)
+
         scores_adversarial = self.model_logistic.decision_function(features_lid_adversarial)
 
         return self, scores_normal, scores_noisy, scores_adversarial
