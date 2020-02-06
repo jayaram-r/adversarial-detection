@@ -19,7 +19,9 @@ from helpers.constants import (
     CROSS_VAL_SIZE,
     ATTACK_PROPORTION_DEF,
     NORMALIZE_IMAGES,
-    TEST_STATS_SUPPORTED
+    TEST_STATS_SUPPORTED,
+    FPR_MAX_PAUC,
+    FPR_THRESH
 )
 from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
@@ -189,9 +191,9 @@ def main():
     # Cross-validation
     auc_scores = np.zeros(args.num_folds)
     avg_precision_scores = np.zeros(args.num_folds)
-    pauc_5perc_scores = np.zeros(args.num_folds)
-    tpr_scores = np.zeros((args.num_folds, 5))
-    fpr_scores = np.zeros((args.num_folds, 5))
+    pauc_scores = np.zeros((args.num_folds, len(FPR_MAX_PAUC)))
+    tpr_scores = np.zeros((args.num_folds, len(FPR_THRESH)))
+    fpr_scores = np.zeros_like(tpr_scores)
     for i in range(args.num_folds):
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
@@ -333,8 +335,10 @@ def main():
 
         # Performance metrics
         print("\nDetection performance metrics on fold {:d}:".format(i + 1))
-        auc_scores[i], pauc_5perc_scores[i], avg_precision_scores[i], tpr_scores[i, :], fpr_scores[i, :] = \
-            metrics_detection(scores_adv, labels_detec, max_fpr=0.05)
+        auc_scores[i], pauc_scores[i, :], avg_precision_scores[i], tpr_scores[i, :], fpr_scores[i, :] = \
+            metrics_detection(scores_adv, labels_detec)
+
+    # Save the performance metrics to a file
 
 
 if __name__ == '__main__':

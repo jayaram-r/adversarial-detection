@@ -9,7 +9,11 @@ from sklearn.metrics import (
     roc_auc_score,
     average_precision_score
 )
-from helpers.constants import ROOT
+from helpers.constants import (
+    ROOT,
+    FPR_MAX_PAUC,
+    FPR_THRESH
+)
 from torch.utils.data import TensorDataset, DataLoader
 
 
@@ -124,7 +128,7 @@ def get_output_path(model_type):
     return os.path.join(ROOT, 'outputs', model_type)
 
 
-def metrics_detection(scores, labels, pos_label=1, max_fpr=0.01, verbose=True):
+def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose=True):
     """
     Wrapper function that calculates a bunch of performance metrics for anomaly detection.
 
@@ -132,30 +136,36 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=0.01, verbose=True):
                    point being anomalous.
     :param labels: numpy array of labels indicating whether a point is nominal (value 0) or anomalous (value 1).
     :param pos_label: value corresponding to the anomalous class in `labels`.
-    :param max_fpr: float value in `(0, 1)`. The partial area under the ROC curve is calculated for
-                    FPR <= this value.
+    :param max_fpr: float or an iterable of float values in `(0, 1)`. The partial area under the ROC curve is
+                    calculated for each FPR value in `max_fpr`.
     :param verbose: Set to True to print the performance metrics.
     :return:
     """
-    # 0.1%, 0.5%, 1%, 5%, and 10%
-    fpr_thresh = [0.001, 0.005, 0.01, 0.05, 0.1]
     au_roc = roc_auc_score(labels, scores)
-    au_roc_partial = roc_auc_score(labels, scores, max_fpr=max_fpr)
     avg_prec = average_precision_score(labels, scores)
+    if hasattr(max_fpr, '__iter__'):
+        au_roc_partial = np.array([roc_auc_score(labels, scores, max_fpr=v) for v in max_fpr])
+    else:
+        au_roc_partial = roc_auc_score(labels, scores, max_fpr=max_fpr)
 
     if verbose:
         print("Area under the ROC curve = {:.6f}".format(au_roc))
-        print("Partial area under the ROC curve (FPR <= {:.2f}) = {:.6f}".format(max_fpr, au_roc_partial))
         print("Average precision = {:.6f}".format(avg_prec))
+        print("Partial area under the ROC curve (pauc):")
+        if hasattr(au_roc_partial, '__iter__'):
+            for a, b in zip(max_fpr, au_roc_partial):
+                print("pauc below fpr {:.4f} = {:.6f}".format(a, b))
+        else:
+            print("pauc below fpr {:.4f} = {:.6f}".format(max_fpr, au_roc_partial))
 
     # ROC curve and TPR at a few low FPR values
     fpr_arr, tpr_arr, thresh = roc_curve(labels, scores, pos_label=pos_label)
-    tpr = np.zeros(len(fpr_thresh))
+    tpr = np.zeros(len(FPR_THRESH))
     fpr = np.zeros_like(tpr)
     if verbose:
         print("\nTPR, FPR")
 
-    for i, a in enumerate(fpr_thresh):
+    for i, a in enumerate(FPR_THRESH):
         mask = fpr_arr >= a
         tpr[i] = tpr_arr[mask][0]
         fpr[i] = fpr_arr[mask][0]
