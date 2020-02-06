@@ -2,6 +2,7 @@ import foolbox
 import torch
 import torchvision
 import numpy as np
+import os
 from numpy import linalg as LA
 from helpers.constants import ROOT
 
@@ -32,16 +33,15 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
     param_string = "dataset: "+dataset+" fold_num: "+str(fold_num)+" loader_type: "+loader_type
     param_string += " adv_attack: "+adv_attack+" stepsize: "+str(stepsize)+" confidence: "+str(confidence)+" epsilon: "+str(epsilon)
     param_string += " max_iterations: "+str(max_iterations)+" iterations: "+str(iterations)+" max_epsilon: "+str(max_epsilon)
-    
+
+    log_filename = os.path.join(ROOT, 'logs', 'attack_status.txt')
     total = []
     total_labels = []
-    failure_list = []
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
-        temp = data_numpy.shape
-        inp_shape = (temp[1], temp[2], temp[3])
+        inp_shape = data_numpy.shape[1:]
         
         adversarials = None
         if adv_attack == 'FGSM':
@@ -56,27 +56,28 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                     max_iterations=max_iterations, unpack=False)
 
         #only store those adv. examples with same shape as input
-        adv_examples = np.asarray([a.perturbed for a in adversarials if isinstance(a.perturbed, np.ndarray) and a.perturbed.shape == inp_shape])
+        mask_valid = np.array([isinstance(a.perturbed, np.ndarray) and (a.perturbed.shape == inp_shape)
+                               for a in adversarials], dtype=np.bool)
+        adv_examples = np.asarray([a.perturbed for i, a in enumerate(adversarials) if mask_valid[i]])
         
         #store indices of those adv. examples where there is a shape mismatch
-        failure_list = [str((batch_idx * loader_batch_size) + i) for i, a in enumerate(adversarials) if not isinstance(a.perturbed, np.ndarray) or a.perturbed.shape != inp_shape]
-        
-        #convert the indices list above to a string, to be entered to the log
-        failure_string = ','.join(failure_list) + '\n'
+        failure_list = [str(batch_idx * loader_batch_size + i) for i, a in enumerate(adversarials)
+                        if not mask_valid[i]]
 
         norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
         print("average", p_norm,"-norm difference:", norm_diff)
 
         #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated adv. examples are poor
-        if norm_diff < 1e-8 or len(failure_list) != 0:
-            log_file = open(ROOT+"/logs/attack_status.txt", "a")
+        if norm_diff < 1e-8 or bool(failure_list):
+            log_file = open(log_filename, "a")
             log_file.write(param_string + "\n")
-            log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape) + "\n") 
+            log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape) + "\n")
             log_file.write("currently processing batch:" + str(batch_idx) + "\n")
-            if len(failure_list) != 0:
-                log_file.write("indices of loader where failure occured: " + failure_string)
+            if failure_list:
+                log_file.write("indices of loader where failure occured: " + ','.join(failure_list) + '\n')
             elif norm_diff < 1e-8:
                 log_file.write("no failure occured; bad examples \n")
+
             log_file.write("\n")
             log_file.close()
             continue
@@ -87,37 +88,33 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
             total = np.vstack((total, adv_examples))
 
         if labels_req:
-            adversarial_classes = np.asarray([a.adversarial_class for a in adversarials])
-            
+            adversarial_classes = np.asarray([a.adversarial_class for i, a in enumerate(adversarials)
+                                              if mask_valid[i]])
             #if the labels of adv. examples is the same as those of the src. labels, then the mismatch = 1
             mismatch = np.mean(adversarial_classes == target_numpy)
             print("label mismatch b/w clean and adversarials:", mismatch)
 
             #write to log
             if mismatch >= 0.5:
-                log_file = open(ROOT+"/logs/attack_status.txt", "a")
+                log_file = open(log_filename, "a")
                 log_file.write(param_string + "\n")
                 log_file.write("label mismatch occured, with mismatch = "+str(mismatch)+"\n")
                 log_file.write("currently processing batch: " + str(batch_idx) + "\n")
                 log_file.write("\n")
                 log_file.close()
                 continue
-            
-            adversarial_classes = adversarial_classes.reshape((-1,1))
+
             if batch_idx == 0:
-                total_labels = adversarial_classes
+                total_labels = adversarial_classes[:, np.newaxis]
             else:
-                total_labels = np.vstack((total_labels, adversarial_classes))
+                total_labels = np.vstack((total_labels, adversarial_classes[:, np.newaxis]))
 
         print("Finished processing batch id:", batch_idx)
 
-    if type(total_labels) != np.ndarray:
-        total_labels = np.asarray(total_labels)
-    total_labels = total_labels.reshape((-1,))
     if not labels_req:
-        return total, _
+        return total, np.array([])
     else:
-        return total, total_labels
+        return total, total_labels.ravel()
 
 
 def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds, num_classes=10, dataset='cifar10', fold_num=1, p_norm='2', adv_attack='FGSM',
