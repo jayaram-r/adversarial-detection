@@ -6,33 +6,39 @@ import os
 from numpy import linalg as LA
 from helpers.constants import ROOT
 
+
 def calc_norm(src, target, norm):
     if src.shape != target.shape:
         return 0
+
     n_samples = src.shape[0]
-    total = 0
+    total = 0.
     for i in range(n_samples):
         #print(src[i].shape, target[i].shape)
-        val = src[i] - target[i]
-        val = val.flatten()
+        val = (src[i] - target[i]).flatten()
+        temp = 0.
         if norm == 'inf':
             temp = LA.norm(val, np.inf)
         elif norm == '0':
             temp = LA.norm(val, 0)
         elif norm == '2':
             temp = LA.norm(val, 2)
-        total = total + temp
-    return total/n_samples
+
+        total += temp
+
+    return total / n_samples
 
 
-def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader_batch_size, adv_attack, dataset, fold_num, p_norm,
-                          stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
-                          labels_req=False):
+def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader_batch_size, adv_attack, dataset,
+                          fold_num, p_norm, stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000,
+                          iterations=40, max_epsilon=1, labels_req=False):
     # model.eval()
-    #parameter string to be written into logs
-    param_string = "dataset: "+dataset+" fold_num: "+str(fold_num)+" loader_type: "+loader_type
-    param_string += " adv_attack: "+adv_attack+" stepsize: "+str(stepsize)+" confidence: "+str(confidence)+" epsilon: "+str(epsilon)
-    param_string += " max_iterations: "+str(max_iterations)+" iterations: "+str(iterations)+" max_epsilon: "+str(max_epsilon)
+    # parameter string to be written into logs
+    param_string = "dataset: " +dataset + " fold_num: " + str(fold_num) + " loader_type: " + loader_type
+    param_string += (" adv_attack: " + adv_attack + " stepsize: " + str(stepsize) + " confidence: " + str(confidence)
+                     + " epsilon: "+str(epsilon))
+    param_string += (" max_iterations: " + str(max_iterations) + " iterations: " + str(iterations) + " max_epsilon: "
+                     + str(max_epsilon))
 
     log_filename = os.path.join(ROOT, 'logs', 'attack_status.txt')
     total = []
@@ -67,11 +73,13 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
         print("average", p_norm,"-norm difference:", norm_diff)
 
-        #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated adv. examples are poor
+        #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated
+        # adv. examples are poor
         if norm_diff < 1e-8 or bool(failure_list):
             log_file = open(log_filename, "a")
             log_file.write(param_string + "\n")
-            log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape) + "\n")
+            log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape)
+                           + "\n")
             log_file.write("currently processing batch:" + str(batch_idx) + "\n")
             if failure_list:
                 log_file.write("indices of loader where failure occured: " + ','.join(failure_list) + '\n')
@@ -117,57 +125,55 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         return total, total_labels.ravel()
 
 
-def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds, num_classes=10, dataset='cifar10', fold_num=1, p_norm='2', adv_attack='FGSM',
-                   stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000, iterations=40, max_epsilon=1,
-                   labels_req=False):
-        
-        if p_norm == '2':
-            distance = foolbox.distances.MeanSquaredDistance
-        elif p_norm == 'inf':
-            distance = foolbox.distances.Linf
-        elif p_norm == '0':
-            distance = foolbox.distances.L0
-        else:
-            raise ValueError("'{}' is not a valid or supported p-norm type".format(args.p_norm))
+def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds, num_classes=10, dataset='cifar10',
+                   fold_num=1, p_norm='2', adv_attack='FGSM', stepsize=0.001, confidence=0, epsilon=0.3,
+                   max_iterations=1000, iterations=40, max_epsilon=1, labels_req=False):
 
-        model.to(device)
-        model.eval()
-        fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
+    if p_norm == '2':
+        distance = foolbox.distances.MeanSquaredDistance
+    elif p_norm == 'inf':
+        distance = foolbox.distances.Linf
+    elif p_norm == '0':
+        distance = foolbox.distances.L0
+    else:
+        raise ValueError("'{}' is not a valid or supported p-norm type".format(args.p_norm))
 
-        print("{} is the distance choice.".format(distance))
-        if adv_attack == 'FGSM':
-            print("{} is the attack choice".format(adv_attack))
-            attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) # distance=foolbox.distances.Linf)
-            print(attack_model)
-        elif adv_attack == 'PGD' and p_norm == 'inf':
-            print("{} is the attack choice".format(adv_attack))
-            attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
-            print(attack_model)
-        elif adv_attack == 'CW' and p_norm == '2':
-            print("{} is the attack choice".format(adv_attack))
-            attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
-            print(attack_model)
-        else:
-            raise ValueError("'{}' is not a valid adversarial attack".format(adv_attack))
+    model.to(device)
+    model.eval()
+    fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
 
-        # attack_model.as_generator(epsilon=0.2)
-        adversarials, adversarial_labels = foolbox_attack_helper(
-            attack_model,
-            device,
-            loader,
-            loader_type,
-            loader_batch_size,
-            adv_attack,
-            dataset,
-            fold_num,
-            p_norm=p_norm,
-            stepsize=stepsize,
-            confidence=confidence,
-            epsilon=epsilon,
-            max_iterations=max_iterations,
-            iterations=iterations,
-            max_epsilon=max_epsilon,
-            labels_req=labels_req)
-        
-        return adversarials, adversarial_labels
-        # adversarials = attack_model(images, labels)
+    print("{} is the distance choice.".format(distance))
+    if adv_attack == 'FGSM':
+        print("{} is the attack choice".format(adv_attack))
+        attack_model = foolbox.attacks.FGSM(fmodel, distance=distance) # distance=foolbox.distances.Linf)
+        print(attack_model)
+    elif adv_attack == 'PGD' and p_norm == 'inf':
+        print("{} is the attack choice".format(adv_attack))
+        attack_model = foolbox.attacks.RandomStartProjectedGradientDescentAttack(fmodel, distance=distance)
+        print(attack_model)
+    elif adv_attack == 'CW' and p_norm == '2':
+        print("{} is the attack choice".format(adv_attack))
+        attack_model = foolbox.attacks.CarliniWagnerL2Attack(fmodel, distance=distance)
+        print(attack_model)
+    else:
+        raise ValueError("'{}' is not a supported adversarial attack".format(adv_attack))
+
+    adversarials, adversarial_labels = foolbox_attack_helper(
+        attack_model,
+        device,
+        loader,
+        loader_type,
+        loader_batch_size,
+        adv_attack,
+        dataset,
+        fold_num,
+        p_norm=p_norm,
+        stepsize=stepsize,
+        confidence=confidence,
+        epsilon=epsilon,
+        max_iterations=max_iterations,
+        iterations=iterations,
+        max_epsilon=max_epsilon,
+        labels_req=labels_req)
+
+    return adversarials, adversarial_labels
