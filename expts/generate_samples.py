@@ -1,5 +1,5 @@
 """
-Main script for running the adversarial and OOD detection experiments.
+Main script for generating adversarial data from the cross-validation folds and saving them to numpy files.
 """
 from __future__ import absolute_import, division, print_function
 import sys
@@ -17,43 +17,18 @@ from helpers.constants import (
     ROOT,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
-    ATTACK_PROPORTION_DEF,
-    NORMALIZE_IMAGES,
-    TEST_STATS_SUPPORTED
+    NORMALIZE_IMAGES
 )
-from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
-    save_model_checkpoint,
-    convert_to_list,
     convert_to_loader,
-    verify_data_loader
+    load_numpy_data,
+    get_clean_data_path,
+    get_adversarial_data_path,
+    get_data_bounds
 )
-from helpers.attacks import foolbox_attack, foolbox_attack_helper
-from detectors.detector_odds_are_odd import (
-    get_samples_as_ndarray,
-    get_wcls,
-    return_data,
-    fit_odds_are_odd,
-    detect_odds_are_odd
-)
-from detectors.detector_lid_paper import (
-    flip,
-    get_noisy_samples,
-    DetectorLID
-)   # ICLR 2018
-from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
-from detectors.detector_deep_knn import DeepKNN
-
-
-# Proportion of attack samples from each method when a mixed attack strategy is used at test time.
-# The proportions should sum to 1. Note that this is a proportion of the subset of attack samples and not a
-# proportion of all the test samples.
-MIXED_ATTACK_PROPORTIONS = {
-    'FGSM': 0.1,
-    'PGD': 0.4,
-    'CW': 0.5
-}
+from helpers.attacks import foolbox_attack
+from detectors.detector_odds_are_odd import get_samples_as_ndarray
 
 
 def main():
@@ -80,12 +55,12 @@ def main():
     parser.add_argument('--max-epsilon', type=int, default=1, help='max. value of epsilon')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
-
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-   
-    bounds_master = (-255,255)
+
+    # Expected range of data values
+    bounds = (-255, 255)
 
     if not args.output_dir:
         output_dir = os.path.join(ROOT, 'numpy_data', args.model_type)
@@ -115,19 +90,17 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
         num_classes = 10
-        bounds=bounds_master
 
     elif args.model_type == 'cifar10':
-        transform_test = transforms.Compose(
+        transform = transforms.Compose(
             [transforms.ToTensor(),
              transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
-        testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
+        testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
         test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=bounds_master
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -139,84 +112,66 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        bounds=bounds_master
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-    #convert the data loader to 2 ndarrays
+    #convert the test data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
-   
-    #obtain batch_size
-    batch_size = args.batch_size
+
+    # Get the range of values in the data array
+    bounds = get_data_bounds(data)
+    print("Range of data values: ({:.4f}, {:.4f})\n".format(*bounds))
 
     #verify if the data loader is the same as the ndarrays it generates
-    verification = verify_data_loader(test_loader, batch_size = batch_size) #(True, True)
-   
-    if verification[0] != True and verification[1] != True:
+    if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
         print("data loader verification failed")
         exit()
 
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
-   
-    #fold number
+
+    #repeat for each fold in the cross-validation split
     i = 1
-
-    #helper function to load .npy files from location
-    def load_folds(path):
-        print("loading folds from path:", path)
-        data_te = np.load(os.path.join(path, "data_te.npy"))
-        data_tr = np.load(os.path.join(path, "data_tr.npy"))
-        labels_te = np.load(os.path.join(path, "labels_te.npy"))
-        labels_tr = np.load(os.path.join(path, "labels_tr.npy"))
-        return data_tr, labels_tr, data_te, labels_te
-
-    #repeat for each fold in the split
-    for ind_tr, ind_te in skf.split(data, labels): 
+    for ind_tr, ind_te in skf.split(data, labels):
         data_tr = data[ind_tr, :]
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
         labels_te = labels[ind_te]
         
         #make dir based on fold to save data
-        numpy_save_path = os.path.join(output_dir, "fold_"+str(i))
-        if os.path.isdir(numpy_save_path) == False:
+        numpy_save_path = os.path.join(output_dir, "fold_" + str(i))
+        if not os.path.isdir(numpy_save_path):
             os.makedirs(numpy_save_path)
         else:
-            #if the fold exists already, load the data stored in that particular fold directory
-            data_tr, labels_tr, data_te, labels_te = load_folds(numpy_save_path)
+            # CHECK: why is this done, given that the data from this fold is already available?
+            # If the fold exists already, load the data stored in that particular fold directory
+            data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path, adversarial=False)
 
-        adv_save_path = os.path.join(os.path.join(output_dir, "fold_"+str(i)), args.adv_attack)
-        if os.path.isdir(adv_save_path) == False:
-            os.makedirs(adv_save_path) 
-        
-        #save train fold to numpy_save_path
+        # save train fold to numpy_save_path
         np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
         np.save(os.path.join(numpy_save_path, 'labels_tr.npy'), labels_tr)
-        
-        #save test fold to numpy_save_path
+        # save test fold to numpy_save_path
         np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
         np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
+        # print prompt
+        print("saved train and test data from fold:", i)
 
-        #print prompt
-        print("saved train and test fold for fold:", i)
+        # data loader for the training and test data split
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size)
 
-        #convert ndarray to list
-        data_tr_list, labels_tr_list = convert_to_list(data_tr), convert_to_list(labels_tr)
-        data_te_list, labels_te_list = convert_to_list(data_te), convert_to_list(labels_te)
-
-        #convert list to loader
-        test_loader = convert_to_loader(data_te_list, labels_te_list, batch_size=args.batch_size)
-        train_loader = convert_to_loader(data_tr_list, labels_tr_list, batch_size=args.batch_size)
+        adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
+        if not os.path.isdir(adv_save_path):
+            os.makedirs(adv_save_path)
 
         #setting adv. attack parameters
-        stepsize=args.stepsize
-        confidence=args.confidence
-        epsilon=args.epsilon
-        max_iterations=args.max_iterations
-        iterations=args.iterations
-        max_epsilon=args.max_epsilon
+        stepsize = args.stepsize
+        confidence = args.confidence
+        epsilon = args.epsilon
+        max_iterations = args.max_iterations
+        iterations = args.iterations
+        max_epsilon = args.max_epsilon
 
         print("parameter choices")
         print("stepsize:", stepsize, type(stepsize))
@@ -227,18 +182,19 @@ def main():
         print("epsilon:", epsilon, type(epsilon))
 
         #create path based on attack configs
-        param_path = "stepsize_"+str(stepsize)+"confidence_"+str(confidence)+"epsilon_"+str(epsilon)
-        param_path += "maxiterations_"+str(max_iterations)+"iterations_"+str(iterations)
-        param_path += "maxepsilon_"+str(max_epsilon)+"pnorm_"+str(args.p_norm)
-        adv_path = os.path.join(os.path.join(adv_save_path, param_path))
-        if os.path.isdir(adv_path) == False:
+        params_list = [('stepsize', stepsize), ('confidence', confidence), ('epsilon', epsilon),
+                       ('maxiterations', max_iterations), ('iterations', iterations), ('maxepsilon', max_epsilon),
+                       ('pnorm', args.p_norm)]
+        param_path = ''.join(['{}_{}'.format(a, str(b)) for a, b in params_list])
+        adv_path = os.path.join(adv_save_path, param_path)
+        if not os.path.isdir(adv_path):
             os.makedirs(adv_path)
 
         #use dataloader to create adv. examples; adv_inputs is an ndarray
         adv_inputs, adv_labels = foolbox_attack(model, 
                 device, 
-                test_loader, 
-                loader_type = "test",
+                test_fold_loader,
+                loader_type="test",
                 loader_batch_size=args.batch_size,
                 bounds=bounds, 
                 num_classes=num_classes, 
@@ -257,14 +213,13 @@ def main():
         #save test fold's adv. examples
         np.save(os.path.join(adv_path, 'data_te_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_te_adv.npy'), adv_labels)
-
-        print("saved adv. examples generated by test fold for fold:",i)
+        print("saved adv. examples generated from the test data for fold:", i)
        
         #use dataloader to create adv. examples; adv_inputs is an ndarray
         adv_inputs, adv_labels = foolbox_attack(model, 
                 device, 
-                train_loader, 
-                loader_type = "train",
+                train_fold_loader,
+                loader_type="train",
                 loader_batch_size=args.batch_size,
                 bounds=bounds, 
                 num_classes=num_classes, 
@@ -283,10 +238,10 @@ def main():
         #save train_fold's adv. examples
         np.save(os.path.join(adv_path, 'data_tr_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_tr_adv.npy'), adv_labels)
-
-        print("saved adv. examples generated by train fold for fold:",i)
+        print("saved adv. examples generated from the train data for fold:", i)
 
         i = i + 1
+
 
 if __name__ == '__main__':
     main()
