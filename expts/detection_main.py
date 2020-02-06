@@ -223,9 +223,16 @@ def main():
             raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
                              "labels.")
 
-        # Load the saved adversarial numpy data from this fold
+        # Load the saved adversarial numpy data generated from this training and test fold
         numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_numpy_data(numpy_save_path, adversarial=True)
+
+        num_adv_tr = labels_tr_adv.shape[0]
+        num_adv_te = labels_te_adv.shape[0]
+        print("\nNumber of adversarial samples generated from the train fold = {:d}.".format(num_adv_tr))
+        print("Number of adversarial samples generated from the test fold = {:d}.".format(num_adv_te))
+        print("Percentage of adversarial samples in the test fold = {:.4f}.".
+              format((100. * num_adv_te) / labels_te.shape[0]))
 
         # Adversarial data loader for the train fold
         adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.test_batch_size)
