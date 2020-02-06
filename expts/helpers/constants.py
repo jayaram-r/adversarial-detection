@@ -48,5 +48,9 @@ NUM_TOP_RANKED = 3
 # List of layerwise test statistics supported by the proposed method
 TEST_STATS_SUPPORTED = ['multinomial', 'lid', 'lle']
 
-# Target false positive rates for setting thresholds. Default is set to equally spaced values from 1% to 10%
-FPR_TARGETS_DEF = numpy.linspace(0.01, 0.1, num=10)
+# Maximum FPR values for calculating partial AUC
+FPR_MAX_PAUC = [0.01, 0.05, 0.1, 0.2]
+
+# FPR threshold values for calculating TPR values.
+# 0.1%, 0.5%, 1%, 5%, and 10%
+FPR_THRESH = [0.001, 0.005, 0.01, 0.05, 0.1]

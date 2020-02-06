@@ -126,7 +126,7 @@ class TestStatistic(ABC):
                           This is used to remove points from their own set of nearest neighbors.
         :return:
         """
-        pass
+        raise NotImplementedError
 
 
 class MultinomialScore(TestStatistic):
