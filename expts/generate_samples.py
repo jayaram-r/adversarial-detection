@@ -143,10 +143,6 @@ def main():
         numpy_save_path = os.path.join(output_dir, "fold_" + str(i))
         if not os.path.isdir(numpy_save_path):
             os.makedirs(numpy_save_path)
-        else:
-            # CHECK: why is this done, given that the data from this fold is already available?
-            # If the fold exists already, load the data stored in that particular fold directory
-            data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path, adversarial=False)
 
         # save train fold to numpy_save_path
         np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
