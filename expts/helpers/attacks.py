@@ -41,8 +41,8 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                      + str(max_epsilon))
 
     log_filename = os.path.join(ROOT, 'logs', 'attack_status.txt')
-    total = []
-    total_labels = []
+    total = np.array([])
+    total_labels = np.array([])
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
@@ -141,8 +141,6 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
     model.to(device)
     model.eval()
     fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
-    bounds = fmodel.bounds()
-
 
     print("{} is the distance choice.".format(distance))
     if adv_attack == 'FGSM':

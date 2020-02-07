@@ -122,7 +122,7 @@ def main():
 
     # Get the range of values in the data array
     bounds = get_data_bounds(data)
-    print("Range of data values: ({:.10f}, {:.10f})\n".format(*bounds))
+    print("Range of data values: ({:.4f}, {:.4f})\n".format(*bounds))
 
     #verify if the data loader is the same as the ndarrays it generates
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
