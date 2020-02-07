@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import os
+import copy
 from multiprocessing import cpu_count
 from helpers.generate_data import MFA_model
 from sklearn.metrics import (
@@ -175,7 +176,142 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
     return au_roc, au_roc_partial, avg_prec, tpr, fpr
 
 
-# def metrics_varying_positive_class_proportion():
+def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
+                                              num_random_samples=100, verbose=True):
+    """
+    Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
+    For each proportion, the estimates are calculated from different random samples, and the median and confidence
+    interval values are reported.
+
+    :param scores: numpy array with the detection scores.
+    :param labels: numpy array with the binary detection labels.
+    :param pos_label: postive class label; set to 1 by default.
+    :param num_prop: number of positive proportion values to evaluate.
+    :param num_random_samples: number of random samples to use for estimating the median and confidence interval.
+    :param verbose: set to False to suppress the print statements.
+
+    :return: a dict with the proportion of positive samples and all the performance metrics.
+    """
+    n_samp = float(labels.shape[0])
+    ind_pos = np.where(labels == pos_label)[0]
+    ind_neg = np.where(labels != pos_label)[0]
+    # Maximum and minimum number of positive samples
+    n_pos_max = ind_pos.shape[0]
+    n_pos_min = int(max(1, np.ceil(0.005 * n_samp)))      # 0.5% of the number of samples
+
+    n_pos_range = np.unique(np.linspace(n_pos_min, n_pos_max, num=num_prop, dtype=np.int))
+    num_prop = n_pos_range.shape[0]
+
+    # dict with the positive proportion and the corresponding performance metrics. The mean, and lower and upper
+    # confidence interval values are calculated for each performance metric
+    results = {
+        'proportion': [],
+        'auc': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'avg_precision': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'pauc': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'tpr': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'fpr': {'median': [], 'CI_lower': [], 'CI_upper': []}
+    }
+
+    ##################### A small utility function
+    def _append_percentiles(x, y):
+        if len(x.shape) == 2:
+            p = np.percentile(x, [2.5, 50, 97.5], axis=0)
+            a = p[0, :]
+            b = p[1, :]
+            c = p[2, :]
+        else:
+            a, b, c = np.percentile(x, [2.5, 50, 97.5])
+
+        y['CI_lower'].append(a)
+        y['median'].append(b)
+        y['CI_upper'].append(c)
+
+        return a, b, c
+    #####################
+
+    num_pauc = len(FPR_MAX_PAUC)
+    num_tpr = len(FPR_THRESH)
+    scores_neg = scores[ind_neg]
+    labels_neg = labels[ind_neg]
+    if verbose:
+        print("Median value of performance metrics as the proportion of positive samples is varied.")
+
+    # Varying the number of positive samples
+    for n_pos in n_pos_range:
+        sample_indices = None
+        if n_pos == 1:
+            if n_pos_max > num_random_samples:
+                temp = np.random.permutation(ind_pos)[:num_random_samples]
+                sample_indices = temp[:, np.newaxis]
+                t = num_random_samples
+            else:
+                sample_indices = ind_pos[:, np.newaxis]
+                t = n_pos_max
+
+        elif n_pos >= (n_pos_max - 1):
+            # Include all the positive indices in 1 sample
+            n_pos = n_pos_max
+            t = 1
+            sample_indices = ind_pos[np.newaxis, :]
+        else:
+            t = num_random_samples
+
+        p = n_pos / n_samp
+        if verbose:
+            print("\nNumber of positive samples = {:d}. Percentage = {:.4f}".format(n_pos, 100 * p))
+
+        results['proportion'].append(p)
+        # Repeating over randomly selected `n_pos` positive samples
+        auc_curr = np.zeros(t)
+        pauc_curr = np.zeros((t, num_pauc))
+        ap_curr = np.zeros(t)
+        tpr_curr = np.zeros((t, num_tpr))
+        fpr_curr = np.zeros((t, num_tpr))
+        for j in range(t):
+            if sample_indices is None:
+                ind_curr = np.random.permutation(ind_pos)[:n_pos]
+            else:
+                ind_curr = sample_indices[j, :]
+
+            scores_curr = np.concatenate([scores[ind_curr], scores_neg])
+            labels_curr = np.concatenate([labels[ind_curr], labels_neg])
+            # Calculate performance metrics for this trial
+            ret = metrics_detection(scores_curr, labels_curr, pos_label=pos_label, verbose=False)
+            auc_curr[j] = ret[0]
+            pauc_curr[j, :] = ret[1]
+            ap_curr[j] = ret[2]
+            tpr_curr[j, :] = ret[3]
+            fpr_curr[j, :] = ret[4]
+
+        # median, 2.5 and 97.5 percentile of each performance metric
+        ret = _append_percentiles(auc_curr, results['auc'])
+        if verbose:
+            print("Area under the ROC curve = {:.6f}".format(ret[1]))
+
+        ret = _append_percentiles(ap_curr, results['avg_precision'])
+        if verbose:
+            print("Average precision = {:.6f}".format(ret[1]))
+
+        ret = _append_percentiles(pauc_curr, results['pauc'])
+        if verbose:
+            print("Partial area under the ROC curve (pauc):")
+            for a, b in zip(FPR_MAX_PAUC, ret[1]):
+                print("pauc below fpr {:.4f} = {:.6f}".format(a, b))
+
+        ret1 = _append_percentiles(tpr_curr, results['tpr'])
+        ret2 = _append_percentiles(fpr_curr, results['fpr'])
+        if verbose:
+            print("\nTPR, FPR")
+            for a, b in zip(ret1[1], ret2[1]):
+                print("{:.6f}, {:.6f}".format(a, b))
+
+            print("\n")
+
+        if n_pos == n_pos_max:
+            break
+
+    return results
 
 
 def get_num_jobs(n_jobs):
