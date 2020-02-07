@@ -141,6 +141,8 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
     model.to(device)
     model.eval()
     fmodel = foolbox.models.PyTorchModel(model, bounds=bounds, num_classes=num_classes)
+    bounds = fmodel.bounds()
+
 
     print("{} is the distance choice.".format(distance))
     if adv_attack == 'FGSM':

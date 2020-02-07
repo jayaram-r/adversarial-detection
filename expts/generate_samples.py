@@ -25,7 +25,8 @@ from helpers.utils import (
     load_numpy_data,
     get_clean_data_path,
     get_adversarial_data_path,
-    get_data_bounds
+    get_data_bounds,
+    verify_data_loader
 )
 from helpers.attacks import foolbox_attack
 from detectors.detector_odds_are_odd import get_samples_as_ndarray
@@ -60,7 +61,7 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
     # Expected range of data values
-    bounds = (-255, 255)
+    #bounds = (-255, 255) #not used anywhere
 
     if not args.output_dir:
         output_dir = os.path.join(ROOT, 'numpy_data', args.model_type)
@@ -121,7 +122,7 @@ def main():
 
     # Get the range of values in the data array
     bounds = get_data_bounds(data)
-    print("Range of data values: ({:.4f}, {:.4f})\n".format(*bounds))
+    print("Range of data values: ({:.10f}, {:.10f})\n".format(*bounds))
 
     #verify if the data loader is the same as the ndarrays it generates
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
