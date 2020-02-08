@@ -9,6 +9,7 @@ from helpers.constants import ROOT
 
 def calc_norm(src, target, norm):
     if src.shape != target.shape:
+        print("ERROR: shape mismatch in the inputs.")
         return 0
 
     n_samples = src.shape[0]
@@ -31,7 +32,7 @@ def calc_norm(src, target, norm):
 
 def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader_batch_size, adv_attack, dataset,
                           fold_num, p_norm, stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000,
-                          iterations=40, max_epsilon=1, labels_req=False):
+                          iterations=40, max_epsilon=1, labels_req=False, min_norm_diff=1e-8):
     # model.eval()
     # parameter string to be written into logs
     param_string = "dataset: " +dataset + " fold_num: " + str(fold_num) + " loader_type: " + loader_type
@@ -49,7 +50,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         target_numpy = target.data.cpu().numpy()
         inp_shape = data_numpy.shape[1:]
         
-        adversarials = None
+        adversarials = []
         if adv_attack == 'FGSM':
             adversarials = attack_model(data_numpy, target_numpy, max_epsilon=max_epsilon, unpack=False)
         
@@ -64,51 +65,64 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         #only store those adv. examples with same shape as input
         mask_valid = np.array([isinstance(a.perturbed, np.ndarray) and (a.perturbed.shape == inp_shape)
                                for a in adversarials], dtype=np.bool)
+        num_adversarials = mask_valid.shape[0]
+        if num_adversarials == 0:
+            print("\nNo adversarial samples generated from batch {:d}.".format(batch_idx))
+            log_file = open(log_filename, "a")
+            log_file.write("No adversarial samples generated from batch {:d}.\n\n".format(batch_idx))
+            log_file.close()
+            continue
+
+        # valid adversarial samples
+        num_valid = mask_valid[mask_valid].shape[0]
         adv_examples = np.asarray([a.perturbed for i, a in enumerate(adversarials) if mask_valid[i]])
         
         #store indices of those adv. examples where there is a shape mismatch
         failure_list = [str(batch_idx * loader_batch_size + i) for i, a in enumerate(adversarials)
                         if not mask_valid[i]]
 
-        norm_diff = calc_norm(adv_examples, data_numpy, p_norm)
-        print("average", p_norm,"-norm difference:", norm_diff)
+        norm_diff = calc_norm(adv_examples, data_numpy[mask_valid, :], p_norm)
+        print("average", p_norm, "-norm difference:", norm_diff)
 
         #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated
         # adv. examples are poor
-        if norm_diff < 1e-8 or bool(failure_list):
+        skip = False
+        if norm_diff < min_norm_diff or bool(failure_list):
             log_file = open(log_filename, "a")
             log_file.write(param_string + "\n")
-            log_file.write("adv_examples.shape:" + str(adv_examples.shape)+" source.shape:" + str(data_numpy.shape)
+            log_file.write("adv_examples.shape:" + str(adv_examples.shape) + " source.shape:" + str(data_numpy.shape)
                            + "\n")
             log_file.write("currently processing batch:" + str(batch_idx) + "\n")
             if failure_list:
-                log_file.write("indices of loader where failure occured: " + ','.join(failure_list) + '\n')
-            elif norm_diff < 1e-8:
-                log_file.write("no failure occured; bad examples \n")
+                log_file.write("Indices of loader where failure occured: " + ','.join(failure_list) + '\n')
+                if num_valid == 0:
+                    skip = True
+                    log_file.write("No valid adversarial samples generated. Skipping this batch.\n")
+
+            if norm_diff < min_norm_diff:
+                skip = True
+                log_file.write("Average norm difference between the adversarial and original samples is very low. "
+                               "Skipping this batch.\n")
 
             log_file.write("\n")
             log_file.close()
-            continue
-
-        if batch_idx == 0:
-            total = adv_examples
-        else:
-            total = np.vstack((total, adv_examples))
+            if skip:
+                continue
 
         if labels_req:
             adversarial_classes = np.asarray([a.adversarial_class for i, a in enumerate(adversarials)
                                               if mask_valid[i]])
-            #if the labels of adv. examples is the same as those of the src. labels, then the mismatch = 1
-            mismatch = np.mean(adversarial_classes == target_numpy)
-            print("label mismatch b/w clean and adversarials:", mismatch)
+            #if the labels of adv. examples is the same as those of the src. labels, then the mismatch = 0
+            mismatch = np.mean(adversarial_classes != target_numpy[mask_valid])
+            print("label mismatch b/w clean and adversarials:", mismatch)   # should be close to 1 ideally
 
             #write to log
-            if mismatch >= 0.5:
+            if mismatch < 0.5:
                 log_file = open(log_filename, "a")
                 log_file.write(param_string + "\n")
-                log_file.write("label mismatch occured, with mismatch = "+str(mismatch)+"\n")
                 log_file.write("currently processing batch: " + str(batch_idx) + "\n")
-                log_file.write("\n")
+                log_file.write("Skipping this batch because less than 50% of the adversarial samples have a label "
+                               "mismatch with the clean samples. Label mismatch = " + str(mismatch) + "\n\n")
                 log_file.close()
                 continue
 
@@ -116,6 +130,12 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                 total_labels = adversarial_classes[:, np.newaxis]
             else:
                 total_labels = np.vstack((total_labels, adversarial_classes[:, np.newaxis]))
+
+        # Include the current batch of adversarial samples only if the corresponding labels have been included
+        if batch_idx == 0:
+            total = adv_examples
+        else:
+            total = np.vstack((total, adv_examples))
 
         print("Finished processing batch id:", batch_idx)
 
