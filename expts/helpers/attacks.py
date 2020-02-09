@@ -184,7 +184,7 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
     else:
         raise ValueError("'{}' is not a supported adversarial attack".format(adv_attack))
 
-    adversarials, adversarial_labels, data_clean, labels_clean = foolbox_attack_helper(
+    data_adver, labels_adver, data_clean, labels_clean = foolbox_attack_helper(
         attack_model,
         device,
         loader,
@@ -201,4 +201,4 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
         iterations=iterations,
         max_epsilon=max_epsilon
     )
-    return adversarials, adversarial_labels, data_clean, labels_clean
+    return data_adver, labels_adver, data_clean, labels_clean
