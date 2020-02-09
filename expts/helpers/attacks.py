@@ -34,7 +34,7 @@ def calc_norm(src, target, norm):
 
 def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader_batch_size, adv_attack, dataset,
                           fold_num, p_norm, stepsize=0.001, confidence=0, epsilon=0.3, max_iterations=1000,
-                          iterations=40, max_epsilon=1, labels_req=False, min_norm_diff=1e-8):
+                          iterations=40, max_epsilon=1, min_norm_diff=1e-8):
     # model.eval()
     # parameter string to be written into logs
     param_string = "dataset: " + dataset + " fold_num: " + str(fold_num) + " loader_type: " + loader_type
@@ -44,8 +44,10 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                      + str(max_epsilon))
 
     log_filename = os.path.join(ROOT, 'logs', 'attack_status.txt')
-    total = np.array([])
-    total_labels = np.array([])
+    data_adver = np.array([])
+    targets_adver = np.array([])
+    data_clean = np.array([])
+    targets_clean = np.array([])
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
@@ -77,14 +79,19 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
             log_file.close()
             continue
 
-        # valid adversarial samples
+        # valid adversarial samples and labels
         num_valid = mask_valid[mask_valid].shape[0]
         adv_examples = np.asarray([a.perturbed for i, a in enumerate(adversarials) if mask_valid[i]])
+        adversarial_classes = np.asarray([a.adversarial_class for i, a in enumerate(adversarials)
+                                          if mask_valid[i]])
+        # clean samples corresponding to the valid adversarial samples
+        data_numpy_valid = data_numpy[mask_valid, :]
+        target_numpy_valid = target_numpy[mask_valid]
         
         #store indices of those adv. examples where there is a shape mismatch
         failure_list = [str(batch_idx * loader_batch_size + i) for i, a in enumerate(adversarials)
                         if not mask_valid[i]]
-        norm_diff = calc_norm(adv_examples, data_numpy[mask_valid, :], p_norm)
+        norm_diff = calc_norm(adv_examples, data_numpy_valid, p_norm)
         print("average", p_norm, "-norm difference:", norm_diff)
 
         #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated
@@ -112,47 +119,41 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
             if skip:
                 continue
 
-        if labels_req:
-            adversarial_classes = np.asarray([a.adversarial_class for i, a in enumerate(adversarials)
-                                              if mask_valid[i]])
-            #if the labels of adv. examples is the same as those of the src. labels, then the mismatch = 0
-            mismatch = np.mean(adversarial_classes != target_numpy[mask_valid])
-            print("label mismatch b/w clean and adversarials:", mismatch)   # should be close to 1 ideally
+        #if the labels of adv. examples is the same as those of the src. labels, then the mismatch = 0
+        mismatch = np.mean(adversarial_classes != target_numpy_valid)
+        print("label mismatch b/w clean and adversarials:", mismatch)   # should be close to 1 ideally
+        #write to log
+        if mismatch < 0.5:
+            log_file = open(log_filename, "a")
+            log_file.write(param_string + "\n")
+            log_file.write("currently processing batch: " + str(batch_idx) + "\n")
+            log_file.write("Skipping this batch because less than 50% of the adversarial samples have a label "
+                           "mismatch with the clean samples. Label mismatch = " + str(mismatch) + "\n\n")
+            log_file.close()
+            continue
 
-            #write to log
-            if mismatch < 0.5:
-                log_file = open(log_filename, "a")
-                log_file.write(param_string + "\n")
-                log_file.write("currently processing batch: " + str(batch_idx) + "\n")
-                log_file.write("Skipping this batch because less than 50% of the adversarial samples have a label "
-                               "mismatch with the clean samples. Label mismatch = " + str(mismatch) + "\n\n")
-                log_file.close()
-                continue
-
-            if batch_idx == 0:
-                total_labels = adversarial_classes[:, np.newaxis]
-            else:
-                total_labels = np.vstack((total_labels, adversarial_classes[:, np.newaxis]))
-
-        # Include the current batch of adversarial samples only if the corresponding labels have been included
+        # Accumulate the results from this batch
         if batch_idx == 0:
-            total = adv_examples
+            data_adver = adv_examples
+            targets_adver = adversarial_classes[:, np.newaxis]
+            data_clean = data_numpy_valid
+            targets_clean = target_numpy_valid[:, np.newaxis]
         else:
-            total = np.vstack((total, adv_examples))
+            data_adver = np.vstack((data_adver, adv_examples))
+            targets_adver = np.vstack((targets_adver, adversarial_classes[:, np.newaxis]))
+            data_clean = np.vstack((data_clean, data_numpy_valid))
+            targets_clean = np.vstack((targets_clean, target_numpy_valid[:, np.newaxis]))
 
         print("Finished processing batch id:", batch_idx)
 
-    if not labels_req:
-        return total, np.array([])
-    else:
-        assert total.shape[0] == total_labels.shape[0], ("Number of samples (rows) are not equal in the adversarial "
-                                                         "data and label arrays.")
-        return total, total_labels.ravel()
+    assert (data_adver.shape[0] == targets_adver.shape[0] == data_clean.shape[0] == targets_clean.shape[0],
+            "Number of samples (rows) are not equal in the returned data and label arrays.")
+    return data_adver, targets_adver.ravel(), data_clean, targets_clean.ravel()
 
 
 def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds, num_classes=10, dataset='cifar10',
                    fold_num=1, p_norm='2', adv_attack='FGSM', stepsize=0.001, confidence=0, epsilon=0.3,
-                   max_iterations=1000, iterations=40, max_epsilon=1, labels_req=False):
+                   max_iterations=1000, iterations=40, max_epsilon=1):
 
     if p_norm == '2':
         distance = foolbox.distances.MeanSquaredDistance
@@ -183,7 +184,7 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
     else:
         raise ValueError("'{}' is not a supported adversarial attack".format(adv_attack))
 
-    adversarials, adversarial_labels = foolbox_attack_helper(
+    adversarials, adversarial_labels, data_clean, labels_clean = foolbox_attack_helper(
         attack_model,
         device,
         loader,
@@ -198,7 +199,6 @@ def foolbox_attack(model, device, loader, loader_type, loader_batch_size, bounds
         epsilon=epsilon,
         max_iterations=max_iterations,
         iterations=iterations,
-        max_epsilon=max_epsilon,
-        labels_req=labels_req)
-
-    return adversarials, adversarial_labels
+        max_epsilon=max_epsilon
+    )
+    return adversarials, adversarial_labels, data_clean, labels_clean
