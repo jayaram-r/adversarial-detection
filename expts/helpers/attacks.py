@@ -10,24 +10,26 @@ from helpers.constants import ROOT
 def calc_norm(src, target, norm):
     if src.shape != target.shape:
         print("ERROR: shape mismatch in the inputs.")
-        return 0
+        return 0.
 
     n_samples = src.shape[0]
-    total = 0.
-    for i in range(n_samples):
-        #print(src[i].shape, target[i].shape)
-        val = (src[i] - target[i]).flatten()
-        temp = 0.
-        if norm == 'inf':
-            temp = LA.norm(val, np.inf)
-        elif norm == '0':
-            temp = LA.norm(val, 0)
-        elif norm == '2':
-            temp = LA.norm(val, 2)
+    if n_samples == 0:
+        return 0.
 
-        total += temp
+    # Flatten all but the first dimension and take the vector norm of each row in `diff`
+    diff = src.reshape(n_samples, -1) - target.reshape(n_samples, -1)
+    if norm == 'inf':
+        temp = LA.norm(diff, ord=np.inf, axis=1)
+    elif norm == '0':
+        temp = LA.norm(diff, ord=0, axis=1)
+    elif norm == '1':
+        temp = LA.norm(diff, ord=1, axis=1)
+    elif norm == '2':
+        temp = LA.norm(diff, ord=2, axis=1)
+    else:
+        raise ValueError("Invalid or unsupported norm type.")
 
-    return total / n_samples
+    return np.mean(temp)
 
 
 def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader_batch_size, adv_attack, dataset,
@@ -35,7 +37,7 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
                           iterations=40, max_epsilon=1, labels_req=False, min_norm_diff=1e-8):
     # model.eval()
     # parameter string to be written into logs
-    param_string = "dataset: " +dataset + " fold_num: " + str(fold_num) + " loader_type: " + loader_type
+    param_string = "dataset: " + dataset + " fold_num: " + str(fold_num) + " loader_type: " + loader_type
     param_string += (" adv_attack: " + adv_attack + " stepsize: " + str(stepsize) + " confidence: " + str(confidence)
                      + " epsilon: "+str(epsilon))
     param_string += (" max_iterations: " + str(max_iterations) + " iterations: " + str(iterations) + " max_epsilon: "
@@ -56,11 +58,13 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         
         elif adv_attack == 'PGD':
             adversarials = attack_model(data_numpy, target_numpy, epsilon=epsilon, stepsize=stepsize,
-                    binary_search=False, iterations=iterations, unpack=False)
+                                        binary_search=False, iterations=iterations, unpack=False)
         
         elif adv_attack == 'CW':
             adversarials = attack_model(data_numpy, target_numpy, confidence=confidence,
-                    max_iterations=max_iterations, unpack=False)
+                                        max_iterations=max_iterations, unpack=False)
+        else:
+            raise ValueError("'{}' is not a supported adversarial attack".format(adv_attack))
 
         #only store those adv. examples with same shape as input
         mask_valid = np.array([isinstance(a.perturbed, np.ndarray) and (a.perturbed.shape == inp_shape)
@@ -80,7 +84,6 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         #store indices of those adv. examples where there is a shape mismatch
         failure_list = [str(batch_idx * loader_batch_size + i) for i, a in enumerate(adversarials)
                         if not mask_valid[i]]
-
         norm_diff = calc_norm(adv_examples, data_numpy[mask_valid, :], p_norm)
         print("average", p_norm, "-norm difference:", norm_diff)
 
@@ -142,6 +145,8 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
     if not labels_req:
         return total, np.array([])
     else:
+        assert total.shape[0] == total_labels.shape[0], ("Number of samples (rows) are not equal in the adversarial "
+                                                         "data and label arrays.")
         return total, total_labels.ravel()
 
 
