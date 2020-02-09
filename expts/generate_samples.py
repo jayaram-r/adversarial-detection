@@ -188,7 +188,8 @@ def main():
             os.makedirs(adv_path)
 
         #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels = foolbox_attack(model, 
+        adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
+                model,
                 device, 
                 test_fold_loader,
                 loader_type="test",
@@ -204,16 +205,18 @@ def main():
                 epsilon=epsilon,
                 max_iterations=max_iterations,
                 iterations=iterations,
-                max_epsilon=max_epsilon,
-                labels_req=True)
-        
+                max_epsilon=max_epsilon
+        )
         #save test fold's adv. examples
         np.save(os.path.join(adv_path, 'data_te_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_te_adv.npy'), adv_labels)
+        np.save(os.path.join(adv_path, 'data_te_clean.npy'), clean_inputs)
+        np.save(os.path.join(adv_path, 'labels_te_clean.npy'), clean_labels)
         print("saved adv. examples generated from the test data for fold:", i)
        
         #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels = foolbox_attack(model, 
+        adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
+                model,
                 device, 
                 train_fold_loader,
                 loader_type="train",
@@ -229,12 +232,13 @@ def main():
                 epsilon=epsilon,
                 max_iterations=max_iterations,
                 iterations=iterations,
-                max_epsilon=max_epsilon,
-                labels_req=True)
-        
+                max_epsilon=max_epsilon
+        )
         #save train_fold's adv. examples
         np.save(os.path.join(adv_path, 'data_tr_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_tr_adv.npy'), adv_labels)
+        np.save(os.path.join(adv_path, 'data_tr_clean.npy'), clean_inputs)
+        np.save(os.path.join(adv_path, 'labels_tr_clean.npy'), clean_labels)
         print("saved adv. examples generated from the train data for fold:", i)
 
         i = i + 1

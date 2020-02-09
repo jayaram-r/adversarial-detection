@@ -77,9 +77,9 @@ def load_numpy_data(path, adversarial=False):
 def get_data_bounds(data):
     bounds = [np.min(data), np.max(data)]
     # Value slightly smaller than the minimum
-    bounds[0] = 0.99 * bounds[0] if (bounds[0] >= 0) else 1.01 * bounds[0]
+    bounds[0] = 0.95 * bounds[0] if (bounds[0] >= 0) else 1.05 * bounds[0]
     # Value slightly larger than the maximum
-    bounds[1] = 1.01 * bounds[1] if (bounds[1] >= 0) else 0.99 * bounds[1]
+    bounds[1] = 1.05 * bounds[1] if (bounds[1] >= 0) else 0.95 * bounds[1]
 
     return tuple(bounds)
 
