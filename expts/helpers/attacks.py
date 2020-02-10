@@ -48,11 +48,14 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
     targets_adver = np.array([])
     data_clean = np.array([])
     targets_clean = np.array([])
+    init_batch = True
+    n_samples_tot = 0
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
         inp_shape = data_numpy.shape[1:]
+        n_samples_tot += target_numpy.shape[0]
         
         adversarials = []
         if adv_attack == 'FGSM':
@@ -133,11 +136,12 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
             continue
 
         # Accumulate the results from this batch
-        if batch_idx == 0:
+        if init_batch:
             data_adver = adv_examples
             targets_adver = adversarial_classes[:, np.newaxis]
             data_clean = data_numpy_valid
             targets_clean = target_numpy_valid[:, np.newaxis]
+            init_batch = False
         else:
             data_adver = np.vstack((data_adver, adv_examples))
             targets_adver = np.vstack((targets_adver, adversarial_classes[:, np.newaxis]))
@@ -146,8 +150,10 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
 
         print("Finished processing batch id:", batch_idx)
 
-    assert (data_adver.shape[0] == targets_adver.shape[0] == data_clean.shape[0] == targets_clean.shape[0],
-            "Number of samples (rows) are not equal in the returned data and label arrays.")
+    print("Generated {:d} adversarial samples from a total of {:d} clean samples.".format(targets_adver.shape[0],
+                                                                                          n_samples_tot))
+    assert (data_adver.shape[0] == targets_adver.shape[0] == data_clean.shape[0] == targets_clean.shape[0]), \
+        "Number of samples (rows) are not equal in the returned data and label arrays."
     return data_adver, targets_adver.ravel(), data_clean, targets_clean.ravel()
 
 
