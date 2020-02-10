@@ -8,13 +8,12 @@ from helpers.constants import ROOT
 
 
 def calc_norm(src, target, norm):
-    if src.shape != target.shape:
-        print("ERROR: shape mismatch in the inputs.")
-        return 0.
-
     n_samples = src.shape[0]
     if n_samples == 0:
         return 0.
+
+    if src.shape != target.shape:
+        raise Valuerror("Shape mismatch in the inputs")
 
     # Flatten all but the first dimension and take the vector norm of each row in `diff`
     diff = src.reshape(n_samples, -1) - target.reshape(n_samples, -1)
@@ -48,11 +47,14 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
     targets_adver = np.array([])
     data_clean = np.array([])
     targets_clean = np.array([])
+    init_batch = True
+    n_samples_tot = 0
     for batch_idx, (data, target) in enumerate(data_loader):
         data, target = data.to(device), target.to(device)
         data_numpy = data.data.cpu().numpy()
         target_numpy = target.data.cpu().numpy()
         inp_shape = data_numpy.shape[1:]
+        n_samples_tot += target_numpy.shape[0]
         
         adversarials = []
         if adv_attack == 'FGSM':
@@ -92,7 +94,8 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
         failure_list = [str(batch_idx * loader_batch_size + i) for i, a in enumerate(adversarials)
                         if not mask_valid[i]]
         norm_diff = calc_norm(adv_examples, data_numpy_valid, p_norm)
-        print("average", p_norm, "-norm difference:", norm_diff)
+        if num_valid > 0:
+            print("average", p_norm, "-norm difference:", norm_diff)
 
         #if the norm is poor: (a) the shapes of the adv. examples and src. images don't match, or (b) the generated
         # adv. examples are poor
@@ -105,14 +108,16 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
             log_file.write("currently processing batch:" + str(batch_idx) + "\n")
             if failure_list:
                 log_file.write("Indices of loader where failure occured: " + ','.join(failure_list) + '\n')
-                if num_valid == 0:
-                    skip = True
-                    log_file.write("No valid adversarial samples generated. Skipping this batch.\n")
+
+            if num_valid == 0:
+                skip = True
+                log_file.write("No valid adversarial samples generated. Skipping this batch.\n")
 
             if norm_diff < min_norm_diff:
                 skip = True
-                log_file.write("Average norm difference between the adversarial and original samples is very low. "
-                               "Skipping this batch.\n")
+                if num_valid > 0:
+                    log_file.write("Average norm difference between the adversarial and original samples is very "
+                                   "low. Skipping this batch.\n")
 
             log_file.write("\n")
             log_file.close()
@@ -133,11 +138,12 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
             continue
 
         # Accumulate the results from this batch
-        if batch_idx == 0:
+        if init_batch:
             data_adver = adv_examples
             targets_adver = adversarial_classes[:, np.newaxis]
             data_clean = data_numpy_valid
             targets_clean = target_numpy_valid[:, np.newaxis]
+            init_batch = False
         else:
             data_adver = np.vstack((data_adver, adv_examples))
             targets_adver = np.vstack((targets_adver, adversarial_classes[:, np.newaxis]))
@@ -146,8 +152,10 @@ def foolbox_attack_helper(attack_model, device, data_loader, loader_type, loader
 
         print("Finished processing batch id:", batch_idx)
 
-    assert (data_adver.shape[0] == targets_adver.shape[0] == data_clean.shape[0] == targets_clean.shape[0],
-            "Number of samples (rows) are not equal in the returned data and label arrays.")
+    print("Generated {:d} adversarial samples from a total of {:d} clean samples.".format(targets_adver.shape[0],
+                                                                                          n_samples_tot))
+    assert (data_adver.shape[0] == targets_adver.shape[0] == data_clean.shape[0] == targets_clean.shape[0]), \
+        "Number of samples (rows) are not equal in the returned data and label arrays."
     return data_adver, targets_adver.ravel(), data_clean, targets_clean.ravel()
 
 
