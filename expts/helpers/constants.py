@@ -54,3 +54,5 @@ FPR_MAX_PAUC = [0.01, 0.05, 0.1, 0.2]
 # FPR threshold values for calculating TPR values.
 # 0.1%, 0.5%, 1%, 5%, and 10%
 FPR_THRESH = [0.001, 0.005, 0.01, 0.05, 0.1]
+
+COLORS = ['r', 'b', 'g', 'y', 'orange', 'm', 'lawngreen', 'gold', 'c', 'hotpink']

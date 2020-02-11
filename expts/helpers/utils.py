@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import os
+import pickle
 from multiprocessing import cpu_count
 from helpers.generate_data import MFA_model
 from sklearn.metrics import (
@@ -11,10 +12,15 @@ from sklearn.metrics import (
 )
 from helpers.constants import (
     ROOT,
+    SEED_DEFAULT,
     FPR_MAX_PAUC,
-    FPR_THRESH
+    FPR_THRESH,
+    COLORS
 )
 from torch.utils.data import TensorDataset, DataLoader
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 
 def convert_to_list(array):
@@ -74,12 +80,12 @@ def load_numpy_data(path, adversarial=False):
     return data_tr, labels_tr, data_te, labels_te
 
 
-def get_data_bounds(data):
+def get_data_bounds(data, alpha=0.95):
     bounds = [np.min(data), np.max(data)]
     # Value slightly smaller than the minimum
-    bounds[0] = 0.95 * bounds[0] if (bounds[0] >= 0) else 1.05 * bounds[0]
+    bounds[0] = (alpha * bounds[0]) if bounds[0] >= 0 else (bounds[0] / alpha)
     # Value slightly larger than the maximum
-    bounds[1] = 1.05 * bounds[1] if (bounds[1] >= 0) else 0.95 * bounds[1]
+    bounds[1] = (bounds[1] / alpha) if bounds[1] >= 0 else (alpha * bounds[1])
 
     return tuple(bounds)
 
@@ -175,7 +181,259 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
     return au_roc, au_roc_partial, avg_prec, tpr, fpr
 
 
-# def metrics_varying_positive_class_proportion():
+def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
+                                              num_random_samples=100, n_jobs=1, seed=SEED_DEFAULT, output_file=None):
+    """
+    Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
+    For each proportion, the estimates are calculated from different random samples, and the median and confidence
+    interval values of each performance metric are reported.
+
+    :param scores: numpy array with the detection scores.
+    :param labels: numpy array with the binary detection labels.
+    :param pos_label: postive class label; set to 1 by default.
+    :param num_prop: number of positive proportion values to evaluate.
+    :param num_random_samples: number of random samples to use for estimating the median and confidence interval.
+    :param n_jobs: number of cpu cores or processes to use in parallel.
+    :param seed: seed for the random number generator.
+    :param output_file: (optional) path to an output file where the metrics dict is written to using the
+                        Pickle protocol.
+
+    :return: a dict with the proportion of positive samples and all the performance metrics.
+    """
+    np.random.seed(seed)
+    n_folds = len(scores)
+    n_samp = []
+    ind_pos = []
+    n_pos_max = []
+    ind_neg = []
+    scores_neg = []
+    labels_neg = []
+    for i in range(n_folds):
+        n_samp.append(float(labels[i].shape[0]))
+        # index of positive labels
+        temp = np.where(labels[i] == pos_label)[0]
+        ind_pos.append(temp)
+        n_pos_max.append(temp.shape[0])
+        # index of negative labels
+        temp = np.where(labels[i] != pos_label)[0]
+        ind_neg.append(temp)
+        scores_neg.append(scores[i][temp])
+        labels_neg.append(labels[i][temp])
+
+    # Minimum proportion of positive samples. Ensuring that there is at least 1 positive sample
+    p_min = max([max(1., np.ceil(0.005 * n_samp[i])) / n_samp[i] for i in range(n_folds)])
+    # Maximum proportion of positive samples considering all the folds
+    p_max = min([n_pos_max[i] / n_samp[i] for i in range(n_folds)])
+    # Range of proportion of positive samples
+    prop_range = np.unique(np.linspace(p_min, p_max, num=num_prop))
+
+    # dict with the positive proportion and the corresponding performance metrics. The mean, and lower and upper
+    # confidence interval values are calculated for each performance metric
+    results = {
+        'proportion': prop_range.tolist(),
+        'auc': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'avg_prec': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'pauc': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'tpr': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'fpr': {'median': [], 'CI_lower': [], 'CI_upper': []}
+    }
+    metric_names = results.keys()
+    metric_names.remove('proportion')
+
+    ##################### A small utility function
+    def _append_percentiles(x, y):
+        if len(x.shape) == 2:
+            p = np.percentile(x, [2.5, 50, 97.5], axis=0)
+            a = p[0, :]
+            b = p[1, :]
+            c = p[2, :]
+        else:
+            a, b, c = np.percentile(x, [2.5, 50, 97.5])
+
+        y['CI_lower'].append(a)
+        y['median'].append(b)
+        y['CI_upper'].append(c)
+
+        return a, b, c
+    #####################
+
+    num_pauc = len(FPR_MAX_PAUC)
+    num_tpr = len(FPR_THRESH)
+    # Varying the proportion of positive samples
+    for p in prop_range:
+        print("\nCalculating performance metrics for target positive proportion: {:.4f}".format(p))
+
+        metrics_dict = {k: [] for k in metric_names}
+        # Cross-validation folds
+        for i in range(n_folds):
+            # number of positive samples from this fold
+            n_pos = min(int(np.ceil(p * n_samp[i])), n_pos_max[i])
+            sample_indices = None
+            if n_pos == 1:
+                if n_pos_max[i] > num_random_samples:
+                    temp = np.random.permutation(ind_pos[i])[:num_random_samples]
+                    sample_indices = temp[:, np.newaxis]
+                    t = num_random_samples
+                else:
+                    sample_indices = ind_pos[i][:, np.newaxis]
+                    t = n_pos_max[i]
+
+            elif n_pos >= (n_pos_max[i] - 1):
+                # Include all the positive indices in 1 sample
+                n_pos = n_pos_max[i]
+                t = 1
+                sample_indices = ind_pos[i][np.newaxis, :]
+            else:
+                t = num_random_samples
+
+            print("Fold {:d}. Number of positive samples = {:d}. Target proportion = {:.4f}. Actual proportion"
+                  " = {:.4f}".format(i + 1, n_pos, p, n_pos / n_samp[i]))
+            # Repeating over `t` randomly selected positive subsets
+            auc_curr = np.zeros(t)
+            pauc_curr = np.zeros((t, num_pauc))
+            ap_curr = np.zeros(t)
+            tpr_curr = np.zeros((t, num_tpr))
+            fpr_curr = np.zeros((t, num_tpr))
+            for j in range(t):
+                if sample_indices is None:
+                    ind_curr = np.random.permutation(ind_pos[i])[:n_pos]
+                else:
+                    ind_curr = sample_indices[j, :]
+
+                scores_curr = np.concatenate([scores[i][ind_curr], scores_neg[i]])
+                labels_curr = np.concatenate([labels[i][ind_curr], labels_neg[i]])
+                # Calculate performance metrics for this trial
+                ret = metrics_detection(scores_curr, labels_curr, pos_label=pos_label, verbose=False)
+                auc_curr[j] = ret[0]
+                pauc_curr[j, :] = ret[1]
+                ap_curr[j] = ret[2]
+                tpr_curr[j, :] = ret[3]
+                fpr_curr[j, :] = ret[4]
+
+            metrics_dict['auc'].append(auc_curr)
+            metrics_dict['pauc'].append(pauc_curr)
+            metrics_dict['avg_prec'].append(ap_curr)
+            metrics_dict['tpr'].append(tpr_curr)
+            metrics_dict['fpr'].append(fpr_curr)
+
+        # Concatenate the performance metrics from the different folds.
+        # Then calculate the median, 2.5 and 97.5 percentile of each performance metric
+        arr = np.concatenate(metrics_dict['auc'], axis=0)
+        ret = _append_percentiles(arr, results['auc'])
+        print("Area under the ROC curve = {:.6f}".format(ret[1]))
+
+        arr = np.concatenate(metrics_dict['avg_prec'], axis=0)
+        ret = _append_percentiles(arr, results['avg_prec'])
+        print("Average precision = {:.6f}".format(ret[1]))
+
+        arr = np.concatenate(metrics_dict['pauc'], axis=0)
+        ret = _append_percentiles(arr, results['pauc'])
+        for a, b in zip(FPR_MAX_PAUC, ret[1]):
+            print("Partial-AUC below fpr {:.4f} = {:.6f}".format(a, b))
+
+        arr = np.concatenate(metrics_dict['tpr'], axis=0)
+        ret1 = _append_percentiles(arr, results['tpr'])
+        arr = np.concatenate(metrics_dict['fpr'], axis=0)
+        ret2 = _append_percentiles(arr, results['fpr'])
+        print("TPR\tFPR")
+        for a, b in zip(ret1[1], ret2[1]):
+            print("{:.6f}\t{:.6f}".format(a, b))
+
+    # Save the results to a pickle file if required
+    if output_file:
+        with open(output_file, 'wb') as fp:
+            pickle.dump(results, fp)
+
+    return results
+
+
+def plot_helper(plot_dict, methods, plot_file):
+    fig = plt.figure()
+    j = 0
+    x_vals = []
+    y_vals = []
+    for m in methods:
+        d = plot_dict[m]
+        plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker='.', label=m)
+        x_vals.extend(d['x_vals'])
+        y_vals.extend(d['y_vals'])
+        j += 1
+
+    x_bounds = get_data_bounds(x_vals, alpha=0.99)
+    y_bounds = get_data_bounds(y_vals, alpha=0.99)
+    plt.xlim([x_bounds[0], x_bounds[1]])
+    plt.ylim([y_bounds[0], y_bounds[1]])
+    plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=6))
+    plt.yticks(np.linspace(y_bounds[0], y_bounds[1], num=6))
+
+    plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
+    plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
+    plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
+    plt.legend(loc='best')
+    plt.plot()
+    fig.savefig(plot_file, dpi=600, bbox_inches='tight')
+
+
+def plot_performance_comparison(results_dict, output_dir):
+    """
+    Plot the performance comparison for different detection methods.
+
+    :param results_dict: dict mapping each method name to its metrics dict (obtained from the function
+                         `metrics_varying_positive_class_proportion`).
+    :param output_dir: path to the output directory where the plots are to be saved.
+    :return: None
+    """
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
+
+    x_label = 'percentage of positive samples'
+    methods = sorted(results_dict.keys())
+    # AUC plots
+    plot_dict = dict()
+    plot_dict['x_label'] = x_label
+    plot_dict['y_label'] = 'AUC'
+    plot_dict['title'] = 'Area under the ROC curve'
+    for m in methods:
+        d = results_dict[m]
+        plot_dict[m] = {
+            'x_vals': 100 * d['proportion'],
+            'y_vals': d['auc']['median']
+        }
+
+    plot_file = os.path.join(output_dir, '{}_comparison.png'.format('auc'))
+    plot_helper(plot_dict, methods, plot_file)
+
+    # Average precision plots
+    plot_dict = dict()
+    plot_dict['x_label'] = x_label
+    plot_dict['y_label'] = 'Avg. precision'
+    plot_dict['title'] = 'Average precision or area under the PR curve'
+    for m in methods:
+        d = results_dict[m]
+        plot_dict[m] = {
+            'x_vals': 100 * d['proportion'],
+            'y_vals': d['avg_prec']['median']
+        }
+
+    plot_file = os.path.join(output_dir, '{}_comparison.png'.format('avg_prec'))
+    plot_helper(plot_dict, methods, plot_file)
+
+    # Partial AUC for different max-FPR values
+    for j, f in enumerate(FPR_MAX_PAUC):
+        plot_dict = dict()
+        plot_dict['x_label'] = x_label
+        plot_dict['y_label'] = 'p-AUC'
+        plot_dict['title'] = "Partial area under the ROC curve (FPR <= {:.4f})".format(f)
+        for m in methods:
+            d = results_dict[m]
+            y_vals = [v[j] for v in d['pauc']['median']]
+            plot_dict[m] = {
+                'x_vals': 100 * d['proportion'],
+                'y_vals': y_vals
+            }
+
+        plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
+        plot_helper(plot_dict, methods, plot_file)
 
 
 def get_num_jobs(n_jobs):
