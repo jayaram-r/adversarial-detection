@@ -191,8 +191,8 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     For each proportion, the estimates are calculated from different random samples, and the median and confidence
     interval values of each performance metric are reported.
 
-    :param scores: numpy array with the detection scores.
-    :param labels: numpy array with the binary detection labels.
+    :param scores: list of 1D numpy arrays with the detection scores from the test folds of cross-validation.
+    :param labels: list of 1D numpy array with the binary detection labels from the test folds of cross-validation.
     :param pos_label: postive class label; set to 1 by default.
     :param num_prop: number of positive proportion values to evaluate.
     :param num_random_samples: number of random samples to use for estimating the median and confidence interval.

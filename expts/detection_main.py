@@ -8,22 +8,22 @@ import os
 import numpy as np
 import torch
 from torchvision import datasets, transforms
-from sklearn.model_selection import StratifiedKFold
 from nets.mnist import *
 # from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
 from helpers.constants import (
     ROOT,
+    DATA_PATH,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
     ATTACK_PROPORTION_DEF,
     NORMALIZE_IMAGES,
     TEST_STATS_SUPPORTED,
     FPR_MAX_PAUC,
-    FPR_THRESH
+    FPR_THRESH,
+    METHOD_NAME_MAP
 )
-from detectors.tf_robustify import collect_statistics
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint,
@@ -33,9 +33,8 @@ from helpers.utils import (
     get_clean_data_path,
     get_adversarial_data_path,
     get_output_path,
-    metrics_detection
+    metrics_varying_positive_class_proportion
 )
-from helpers.attacks import foolbox_attack
 from detectors.detector_odds_are_odd import (
     get_samples_as_ndarray,
     get_wcls,
@@ -108,9 +107,12 @@ def main():
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-    
     use_cuda = not args.no_cuda and torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
 
+    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+
+    # Output directory
     if not args.output_dir:
         output_dir = get_output_path(args.model_type)
     else:
@@ -119,11 +121,16 @@ def main():
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
+    # Dimensionality reduction model
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
+
+        method_name = METHOD_NAME_MAP.get('', '{}_{}'.format(args.detection_method, args.test_statistic))
+    else:
+        method_name = METHOD_NAME_MAP[args.detection_method]
 
     model_dim_reduc = None
     if apply_dim_reduc:
@@ -131,12 +138,8 @@ def main():
             # Default path the dimension reduction model file
             model_dim_reduc = get_path_dr_models(args.model_type)
 
-    device = torch.device("cuda" if use_cuda else "cpu")
-
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-
-    data_path = os.path.join(ROOT, 'data')
-
+    # Data loader and pre-trained DNN model corresponding to the dataset
+    data_path = DATA_PATH
     if args.model_type == 'mnist':
         transform = transforms.Compose(
             [transforms.ToTensor(),
@@ -146,10 +149,9 @@ def main():
             datasets.MNIST(data_path, train=False, download=True, transform=transform),
             batch_size=args.test_batch_size, shuffle=True, **kwargs
         )
+        num_classes = 10
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        num_classes = 10
-        # bounds = (-255, 255)
 
     elif args.model_type == 'cifar10':
         transform_test = transforms.Compose(
@@ -161,7 +163,6 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        # bounds = (-255, 255)
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -173,7 +174,6 @@ def main():
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        # bounds = (-255, 255)
 
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
@@ -187,13 +187,9 @@ def main():
         ('maxepsilon', ATTACK_PARAMS['maxepsilon']),
         ('pnorm', args.p_norm)
     ]
-
     # Cross-validation
-    auc_scores = np.zeros(args.num_folds)
-    avg_precision_scores = np.zeros(args.num_folds)
-    pauc_scores = np.zeros((args.num_folds, len(FPR_MAX_PAUC)))
-    tpr_scores = np.zeros((args.num_folds, len(FPR_THRESH)))
-    fpr_scores = np.zeros_like(tpr_scores)
+    scores_folds = []
+    labels_folds = []
     for i in range(args.num_folds):
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
@@ -333,19 +329,17 @@ def main():
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
-        # Performance metrics
-        print("\nDetection performance metrics on fold {:d}:".format(i + 1))
-        auc_scores[i], pauc_scores[i, :], avg_precision_scores[i], tpr_scores[i, :], fpr_scores[i, :] = \
-            metrics_detection(scores_adv, labels_detec)
+        else:
+            raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 
-    # Average performance over the test folds
-    auc_avg = np.mean(auc_scores)
-    avg_precision_avg = np.mean(avg_precision_scores)
-    pauc_avg = np.mean(pauc_scores, axis=0)
-    tpr_avg = np.mean(tpr_scores, axis=0)
-    fpr_avg = np.mean(fpr_scores, axis=0)
+        scores_folds.append(scores_adv)
+        labels_folds.append(labels_detec)
 
-    # Save the performance metrics to a file
+    print("\nCalculating performance metrics for different proportion of attack samples:")
+    fname = os.path.join(args.output_dir, 'detection_metrics_{}.pkl'.format(method_name))
+    results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, n_jobs=args.n_jobs,
+                                                             output_file=fname)
+    print("Performance metrics saved to the file: {}".format(fname))
 
 
 if __name__ == '__main__':

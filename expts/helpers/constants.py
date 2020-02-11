@@ -48,6 +48,9 @@ NUM_TOP_RANKED = 3
 # List of layerwise test statistics supported by the proposed method
 TEST_STATS_SUPPORTED = ['multinomial', 'lid', 'lle']
 
+# Method names to use for plots and results
+METHOD_NAME_MAP = {'lid': 'LID_ICLR', 'odds': 'odds_are_odd_ICML', 'dknn': 'Deep-KNN'}
+
 # Maximum FPR values for calculating partial AUC
 FPR_MAX_PAUC = [0.01, 0.05, 0.1, 0.2]
 
