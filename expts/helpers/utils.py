@@ -181,6 +181,9 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
     return au_roc, au_roc_partial, avg_prec, tpr, fpr
 
 
+# TODO: Can we stratify by attack labels in order to subsample while preserving the same proportion of different
+#  attack methods as in the full sample?
+# TODO: Parallelize the calculation of metrics over the random samples.
 def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
                                               num_random_samples=100, n_jobs=1, seed=SEED_DEFAULT, output_file=None):
     """
@@ -349,15 +352,13 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
 
 def plot_helper(plot_dict, methods, plot_file):
     fig = plt.figure()
-    j = 0
     x_vals = []
     y_vals = []
-    for m in methods:
+    for j, m in enumerate(methods):
         d = plot_dict[m]
         plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker='.', label=m)
         x_vals.extend(d['x_vals'])
         y_vals.extend(d['y_vals'])
-        j += 1
 
     x_bounds = get_data_bounds(x_vals, alpha=0.99)
     y_bounds = get_data_bounds(y_vals, alpha=0.99)
@@ -434,6 +435,8 @@ def plot_performance_comparison(results_dict, output_dir):
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
         plot_helper(plot_dict, methods, plot_file)
+
+    # TODO: compare the TPR and FPR values, if needed
 
 
 def get_num_jobs(n_jobs):
