@@ -208,23 +208,22 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     n_samp = []
     ind_pos = []
     n_pos_max = []
-    ind_neg = []
     scores_neg = []
     labels_neg = []
     for i in range(n_folds):
         n_samp.append(float(labels[i].shape[0]))
         # index of positive labels
-        temp = np.where(labels[i] == pos_label)[0]
+        mask = (labels[i] == pos_label)
+        temp = np.where(mask)[0]
         ind_pos.append(temp)
         n_pos_max.append(temp.shape[0])
         # index of negative labels
-        temp = np.where(labels[i] != pos_label)[0]
-        ind_neg.append(temp)
+        temp = np.where(~mask)[0]
         scores_neg.append(scores[i][temp])
         labels_neg.append(labels[i][temp])
 
-    # Minimum proportion of positive samples. Ensuring that there is at least 1 positive sample
-    p_min = max([max(1., np.ceil(0.005 * n_samp[i])) / n_samp[i] for i in range(n_folds)])
+    # Minimum proportion of positive samples. Ensuring that there are at least 5 positive samples
+    p_min = max([max(5., np.ceil(0.005 * n_samp[i])) / n_samp[i] for i in range(n_folds)])
     # Maximum proportion of positive samples considering all the folds
     p_max = min([n_pos_max[i] / n_samp[i] for i in range(n_folds)])
     # Range of proportion of positive samples
@@ -240,7 +239,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
         'tpr': {'median': [], 'CI_lower': [], 'CI_upper': []},
         'fpr': {'median': [], 'CI_lower': [], 'CI_upper': []}
     }
-    metric_names = results.keys()
+    metric_names = list(results.keys())
     metric_names.remove('proportion')
 
     ##################### A small utility function
@@ -264,7 +263,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     num_tpr = len(FPR_THRESH)
     # Varying the proportion of positive samples
     for p in prop_range:
-        print("\nCalculating performance metrics for target positive proportion: {:.4f}".format(p))
+        print("\nPerformance metrics for target positive proportion: {:.4f}".format(p))
 
         metrics_dict = {k: [] for k in metric_names}
         # Cross-validation folds
@@ -289,7 +288,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
             else:
                 t = num_random_samples
 
-            print("Fold {:d}. Number of positive samples = {:d}. Target proportion = {:.4f}. Actual proportion"
+            print("Fold {:d}: Number of positive samples = {:d}. Target proportion = {:.4f}. Actual proportion"
                   " = {:.4f}".format(i + 1, n_pos, p, n_pos / n_samp[i]))
             # Repeating over `t` randomly selected positive subsets
             auc_curr = np.zeros(t)
@@ -338,9 +337,9 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
         ret1 = _append_percentiles(arr, results['tpr'])
         arr = np.concatenate(metrics_dict['fpr'], axis=0)
         ret2 = _append_percentiles(arr, results['fpr'])
-        print("TPR\tFPR")
-        for a, b in zip(ret1[1], ret2[1]):
-            print("{:.6f}\t{:.6f}".format(a, b))
+        print("TPR\tFPR_target\tFPR_actual")
+        for a, b, c in zip(ret1[1], FPR_THRESH, ret2[1]):
+            print("{:.6f}\t{:.6f}\t{:.6f}".format(a, b, c))
 
     # Save the results to a pickle file if required
     if output_file:
@@ -350,7 +349,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     return results
 
 
-def plot_helper(plot_dict, methods, plot_file):
+def plot_helper(plot_dict, methods, plot_file, min_yrange=None):
     fig = plt.figure()
     x_vals = []
     y_vals = []
@@ -362,6 +361,11 @@ def plot_helper(plot_dict, methods, plot_file):
 
     x_bounds = get_data_bounds(x_vals, alpha=0.99)
     y_bounds = get_data_bounds(y_vals, alpha=0.99)
+    if min_yrange:
+        # Ensure that the range of y-axis is not smaller than `min_yrange`
+        v = min(y_bounds[1] - min_yrange, y_bounds[0])
+        y_bounds = (v, y_bounds[1])
+
     plt.xlim([x_bounds[0], x_bounds[1]])
     plt.ylim([y_bounds[0], y_bounds[1]])
     plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=6))
@@ -371,7 +375,7 @@ def plot_helper(plot_dict, methods, plot_file):
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
     plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
     plt.legend(loc='best')
-    fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=True)
+    fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
 
 
@@ -387,54 +391,54 @@ def plot_performance_comparison(results_dict, output_dir):
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    x_label = 'percentage of positive samples'
+    x_label = '% of positive samples'
     methods = sorted(results_dict.keys())
     # AUC plots
     plot_dict = dict()
     plot_dict['x_label'] = x_label
     plot_dict['y_label'] = 'AUC'
-    plot_dict['title'] = 'Area under the ROC curve'
+    plot_dict['title'] = 'Area under ROC curve'
     for m in methods:
         d = results_dict[m]
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': 100 * np.array(d['proportion']),
             'y_vals': d['auc']['median']
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('auc'))
-    plot_helper(plot_dict, methods, plot_file)
+    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
 
     # Average precision plots
     plot_dict = dict()
     plot_dict['x_label'] = x_label
     plot_dict['y_label'] = 'Avg. precision'
-    plot_dict['title'] = 'Average precision or area under the PR curve'
+    plot_dict['title'] = 'Average precision or area under PR curve'
     for m in methods:
         d = results_dict[m]
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': 100 * np.array(d['proportion']),
             'y_vals': d['avg_prec']['median']
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('avg_prec'))
-    plot_helper(plot_dict, methods, plot_file)
+    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
 
     # Partial AUC for different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
         plot_dict = dict()
         plot_dict['x_label'] = x_label
         plot_dict['y_label'] = 'p-AUC'
-        plot_dict['title'] = "Partial area under the ROC curve (FPR <= {:.4f})".format(f)
+        plot_dict['title'] = "Partial area under ROC curve (FPR <= {:.4f})".format(f)
         for m in methods:
             d = results_dict[m]
             y_vals = [v[j] for v in d['pauc']['median']]
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': 100 * np.array(d['proportion']),
                 'y_vals': y_vals
             }
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
-        plot_helper(plot_dict, methods, plot_file)
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
 
     # TODO: compare the TPR and FPR values, if needed
 
