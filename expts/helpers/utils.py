@@ -371,8 +371,8 @@ def plot_helper(plot_dict, methods, plot_file):
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
     plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
     plt.legend(loc='best')
-    plt.plot()
-    fig.savefig(plot_file, dpi=600, bbox_inches='tight')
+    fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=True)
+    plt.close(fig)
 
 
 def plot_performance_comparison(results_dict, output_dir):

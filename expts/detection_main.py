@@ -92,9 +92,6 @@ def main():
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
-    parser.add_argument('--attack-proportion', '--ap', type=float, default=ATTACK_PROPORTION_DEF,
-                        help='Proportion of attack samples in the test set (default: {:.2f})'.
-                        format(ATTACK_PROPORTION_DEF))
     parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
                         help='Use option to enable a mixed attack strategy with multiple methods in '
                              'different proportions')
@@ -109,8 +106,7 @@ def main():
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
-
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+    kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     # Output directory
     if not args.output_dir:
@@ -147,7 +143,7 @@ def main():
         )
         test_loader = torch.utils.data.DataLoader(
             datasets.MNIST(data_path, train=False, download=True, transform=transform),
-            batch_size=args.test_batch_size, shuffle=True, **kwargs
+            batch_size=args.test_batch_size, shuffle=True, **kwargs_loader
         )
         num_classes = 10
         model = MNIST().to(device)
@@ -159,7 +155,8 @@ def main():
              transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True,
+                                                  **kwargs_loader)
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
@@ -170,7 +167,8 @@ def main():
              transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
         testset = datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True,
+                                                  **kwargs_loader)
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
