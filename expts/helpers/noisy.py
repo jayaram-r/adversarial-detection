@@ -29,7 +29,7 @@ def get_noisy(model, device, test_loader, criterion=None):
             for batch_idx, (data, target) in enumerate(test_loader):
                 # print(data.shape, target.shape, type(data), type(target))
                 shape = tuple(list(data.shape))
-                rand = torch.normal(mean=0., std=std_dev, size=shape))
+                rand = torch.normal(mean=0., std=std_dev, size=shape)
                 data = data + rand
                 data, target = data.to(device), target.to(device)
                 output = model(data)
@@ -64,7 +64,7 @@ def create_noise_samples(loader, std_dev):
     Y = []
     for batch_dix, (data, target) in enumerate(loader):
         shape = tuple(list(data.shape))
-        rand = torch.normal(mean=0., std=std_dev, size=shape))
+        rand = torch.normal(mean=0., std=std_dev, size=shape)
         data = data + rand
         data, target = data.cpu().numpy(), target.cpu().numpy()
         if batch_idx == 0:
