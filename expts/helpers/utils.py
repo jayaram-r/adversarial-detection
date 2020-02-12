@@ -232,7 +232,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     # dict with the positive proportion and the corresponding performance metrics. The mean, and lower and upper
     # confidence interval values are calculated for each performance metric
     results = {
-        'proportion': prop_range.tolist(),
+        'proportion': prop_range,
         'auc': {'median': [], 'CI_lower': [], 'CI_upper': []},
         'avg_prec': {'median': [], 'CI_lower': [], 'CI_upper': []},
         'pauc': {'median': [], 'CI_lower': [], 'CI_upper': []},
@@ -337,9 +337,9 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
         ret1 = _append_percentiles(arr, results['tpr'])
         arr = np.concatenate(metrics_dict['fpr'], axis=0)
         ret2 = _append_percentiles(arr, results['fpr'])
-        print("TPR\tFPR_target\tFPR_actual")
+        print("TPR\tFPR_target\tFPR_actual\tTPR_scaled")
         for a, b, c in zip(ret1[1], FPR_THRESH, ret2[1]):
-            print("{:.6f}\t{:.6f}\t{:.6f}".format(a, b, c))
+            print("{:.6f}\t{:.6f}\t{:.6f}\t{:.6f}".format(a, b, c, a / max(1, c / b)))
 
     # Save the results to a pickle file if required
     if output_file:
@@ -355,9 +355,19 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None):
     y_vals = []
     for j, m in enumerate(methods):
         d = plot_dict[m]
-        plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker='.', label=m)
+        if 'y_err' not in d:
+            plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker='.', label=m)
+        else:
+            plt.errorbar(d['x_vals'], d['y_vals'], yerr=d['y_err'],
+                         fmt='', elinewidth=1, capsize=4,
+                         linestyle='--', color=COLORS[j], marker='.', label=m)
+
         x_vals.extend(d['x_vals'])
         y_vals.extend(d['y_vals'])
+        if 'y_low' in d:
+            y_vals.extend(d['y_low'])
+        if 'y_up' in d:
+            y_vals.extend(d['y_up'])
 
     x_bounds = get_data_bounds(x_vals, alpha=0.99)
     y_bounds = get_data_bounds(y_vals, alpha=0.99)
@@ -400,9 +410,15 @@ def plot_performance_comparison(results_dict, output_dir):
     plot_dict['title'] = 'Area under ROC curve'
     for m in methods:
         d = results_dict[m]
+        y_med = np.array(d['auc']['median'])
+        y_low = np.array(d['auc']['CI_lower'])
+        y_up = np.array(d['auc']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * np.array(d['proportion']),
-            'y_vals': d['auc']['median']
+            'x_vals': 100 * d['proportion'],
+            'y_vals': y_med,
+            'y_low': y_low,
+            'y_up': y_up,
+            'y_err': [y_med - y_low, y_up - y_med]
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('auc'))
@@ -415,15 +431,21 @@ def plot_performance_comparison(results_dict, output_dir):
     plot_dict['title'] = 'Average precision or area under PR curve'
     for m in methods:
         d = results_dict[m]
+        y_med = np.array(d['avg_prec']['median'])
+        y_low = np.array(d['avg_prec']['CI_lower'])
+        y_up = np.array(d['avg_prec']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * np.array(d['proportion']),
-            'y_vals': d['avg_prec']['median']
+            'x_vals': 100 * d['proportion'],
+            'y_vals': y_med,
+            'y_low': y_low,
+            'y_up': y_up,
+            'y_err': [y_med - y_low, y_up - y_med]
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('avg_prec'))
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
 
-    # Partial AUC for different max-FPR values
+    # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
         plot_dict = dict()
         plot_dict['x_label'] = x_label
@@ -431,16 +453,39 @@ def plot_performance_comparison(results_dict, output_dir):
         plot_dict['title'] = "Partial area under ROC curve (FPR <= {:.4f})".format(f)
         for m in methods:
             d = results_dict[m]
-            y_vals = [v[j] for v in d['pauc']['median']]
+            y_med = np.array([v[j] for v in d['pauc']['median']])
+            y_low = np.array([v[j] for v in d['pauc']['CI_lower']])
+            y_up = np.array([v[j] for v in d['pauc']['CI_upper']])
             plot_dict[m] = {
-                'x_vals': 100 * np.array(d['proportion']),
-                'y_vals': y_vals
+                'x_vals': 100 * d['proportion'],
+                'y_vals': y_med,
+                'y_low': y_low,
+                'y_up': y_up,
+                'y_err': [y_med - y_low, y_up - y_med]
             }
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
 
-    # TODO: compare the TPR and FPR values, if needed
+    # Scaled TPR for different target FPR values
+    for j, f in enumerate(FPR_THRESH):
+        plot_dict = dict()
+        plot_dict['x_label'] = x_label
+        plot_dict['y_label'] = 'Scaled TPR'
+        plot_dict['title'] = "TPR / max(1, FPR / alpha) for alpha = {:.4f}".format(f)
+        for m in methods:
+            d = results_dict[m]
+            tpr_arr = np.array([v[j] for v in d['tpr']['median']])
+            # Excess FPR above the target value `f`
+            fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
+            y_vals = tpr_arr / fpr_arr
+            plot_dict[m] = {
+                'x_vals': 100 * d['proportion'],
+                'y_vals': y_vals
+            }
+
+        plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('tpr', j + 1))
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
 
 
 def get_num_jobs(n_jobs):
