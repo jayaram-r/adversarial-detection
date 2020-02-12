@@ -28,6 +28,10 @@ from helpers.utils import (
     get_data_bounds,
     verify_data_loader
 )
+from helpers.noisy import (
+    get_noisy,
+    create_noise_samples
+)
 from helpers.attacks import foolbox_attack
 from detectors.detector_odds_are_odd import get_samples_as_ndarray
 
@@ -54,6 +58,7 @@ def main():
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
     parser.add_argument('--iterations', type=int, default=40, help='num. of iterations')
     parser.add_argument('--max-epsilon', type=int, default=1, help='max. value of epsilon')
+    parser.add_argument('--obtain-noise-params', type=bool, default=False, help='procedure to obtain noise params + samples')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     args = parser.parse_args()
@@ -102,6 +107,7 @@ def main():
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
+        criterion = nn.CrossEntropyLoss()
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -132,6 +138,27 @@ def main():
     # Stratified cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
 
+    if args.obtain_noise_params:
+        
+        #find noise parameters
+        std_deviation = get_noisy(model, device, test_loader, criterion)
+        
+        #create noisy samples
+        if std_deviation != None:
+            data, labels = create_noise_samples(test_loader, std_deviation)
+        else:
+            print("no good noise threshold (std. dev) found. exiting!")
+            exit()
+
+        #save obtained data and labels
+        noise_save_path = os.path.join(output_dir, "noise")
+        if not os.path.isdir(noise_save_path):
+            os.makedirs(noise_save_path)
+        np.save(os.path.join(noise_save_path, 'noisy_data.npy'), data)
+        np.save(os.path.join(noise_save_path, 'labels.npy'), labels)
+        print("saved noisy samples created with std dev:", std_deviation)
+        exit()
+
     #repeat for each fold in the cross-validation split
     i = 1
     for ind_tr, ind_te in skf.split(data, labels):
@@ -145,14 +172,30 @@ def main():
         if not os.path.isdir(numpy_save_path):
             os.makedirs(numpy_save_path)
 
-        # save train fold to numpy_save_path
-        np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
-        np.save(os.path.join(numpy_save_path, 'labels_tr.npy'), labels_tr)
-        # save test fold to numpy_save_path
-        np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
-        np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
+        # save train fold to numpy_save_path or load if it exists already
+        if os.path.isfile(os.path.join(numpy_save_path, 'data_tr.npy')) == False:
+            np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
+        else:
+            data_tr = np.load(os.path.join(path, "data_tr.npy"))
+
+        if os.path.isfile(os.path.join(numpy_save_path, 'labels_tr.npy')) == False:
+            np.save(os.path.join(numpy_save_path, 'labels_tr.npy'), labels_tr)
+        else:
+            labels_tr.npy = np.load(os.path.join(path, "labels_tr.npy"))
+        
+        #save test fold to numpy_save_path or load if it exists already
+        if os.path.isfile(os.path.join(numpy_save_path, 'data_te.npy')) == False:
+            np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
+        else:
+            data_te = np.load(os.path.join(path, "data_te.npy"))
+
+        if os.path.isfile(os.path.join(numpy_save_path, 'labels_te.npy')) == False:
+            np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
+        else:
+            labels_te = np.load(os.path.join(path, "labels_te.npy"))
+        
         # print prompt
-        print("saved train and test data from fold:", i)
+        #print("saved train and test data from fold:", i)
 
         # data loader for the training and test data split
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
@@ -161,6 +204,7 @@ def main():
         adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
         if not os.path.isdir(adv_save_path):
             os.makedirs(adv_save_path)
+
 
         #setting adv. attack parameters
         stepsize = args.stepsize
@@ -180,34 +224,36 @@ def main():
 
         #create path based on attack configs
         params_list = [('stepsize', stepsize), ('confidence', confidence), ('epsilon', epsilon),
-                       ('maxiterations', max_iterations), ('iterations', iterations), ('maxepsilon', max_epsilon),
-                       ('pnorm', args.p_norm)]
+                      ('maxiterations', max_iterations), ('iterations', iterations), ('maxepsilon', max_epsilon),
+                      ('pnorm', args.p_norm)]
         param_path = ''.join(['{}_{}'.format(a, str(b)) for a, b in params_list])
+        
         adv_path = os.path.join(adv_save_path, param_path)
         if not os.path.isdir(adv_path):
             os.makedirs(adv_path)
 
         #use dataloader to create adv. examples; adv_inputs is an ndarray
         adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
-                model,
-                device, 
-                test_fold_loader,
-                loader_type="test",
-                loader_batch_size=args.batch_size,
-                bounds=bounds, 
-                num_classes=num_classes, 
-                dataset=args.model_type,
-                fold_num=i,
-                p_norm=args.p_norm, 
-                adv_attack=args.adv_attack, 
-                stepsize=stepsize,
-                confidence=confidence,
-                epsilon=epsilon,
-                max_iterations=max_iterations,
-                iterations=iterations,
-                max_epsilon=max_epsilon
+               	model,
+               	device, 
+               	test_fold_loader,
+               	loader_type="test",
+               	loader_batch_size=args.batch_size,
+               	bounds=bounds, 
+               	num_classes=num_classes, 
+               	dataset=args.model_type,
+               	fold_num=i,
+               	p_norm=args.p_norm, 
+               	adv_attack=args.adv_attack, 
+               	stepsize=stepsize,
+               	confidence=confidence,
+               	epsilon=epsilon,
+               	max_iterations=max_iterations,
+               	iterations=iterations,
+               	max_epsilon=max_epsilon
         )
-        #save test fold's adv. examples
+        
+	#save test fold's adv. examples
         np.save(os.path.join(adv_path, 'data_te_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_te_adv.npy'), adv_labels)
         np.save(os.path.join(adv_path, 'data_te_clean.npy'), clean_inputs)
@@ -216,30 +262,32 @@ def main():
        
         #use dataloader to create adv. examples; adv_inputs is an ndarray
         adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
-                model,
-                device, 
-                train_fold_loader,
-                loader_type="train",
-                loader_batch_size=args.batch_size,
-                bounds=bounds, 
-                num_classes=num_classes, 
-                dataset=args.model_type,
-                fold_num=i,
-                p_norm=args.p_norm, 
-                adv_attack=args.adv_attack,
-                stepsize=stepsize,
-                confidence=confidence,
-                epsilon=epsilon,
-                max_iterations=max_iterations,
-                iterations=iterations,
-                max_epsilon=max_epsilon
+               	model,
+               	device, 
+               	train_fold_loader,
+               	loader_type="train",
+               	loader_batch_size=args.batch_size,
+               	bounds=bounds, 
+               	num_classes=num_classes, 
+               	dataset=args.model_type,
+               	fold_num=i,
+               	p_norm=args.p_norm, 
+               	adv_attack=args.adv_attack,
+               	stepsize=stepsize,
+               	confidence=confidence,
+               	epsilon=epsilon,
+               	max_iterations=max_iterations,
+               	iterations=iterations,
+               	max_epsilon=max_epsilon
         )
-        #save train_fold's adv. examples
+        
+	#save train_fold's adv. examples
         np.save(os.path.join(adv_path, 'data_tr_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_tr_adv.npy'), adv_labels)
         np.save(os.path.join(adv_path, 'data_tr_clean.npy'), clean_inputs)
         np.save(os.path.join(adv_path, 'labels_tr_clean.npy'), clean_labels)
         print("saved adv. examples generated from the train data for fold:", i)
+	
 
         i = i + 1
 
