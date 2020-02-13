@@ -1,5 +1,7 @@
 import numpy as np
 import torch
+from torch.utils.data import TensorDataset, DataLoader
+from helpers.utils import convert_to_loader
 from helpers.constants import SEED_DEFAULT
 
 
@@ -43,19 +45,26 @@ def get_noisy(model, device, test_loader):
     return None
 
 
-def calc_accu(model, device, data, labels):
+def calc_accu(model, device, data, labels, batch_size=128):
     # assuming this is done in the calling function
     # model.eval()
 
-    # numpy array to torch tensor
-    data_ten = torch.from_numpy(data).to(device=device, dtype=torch.float)
-    labels_ten = torch.from_numpy(labels).to(device)
-    with torch.no_grad():
-        output = model(data_ten)
-        _, predicted = output.max(1)
-        correct = predicted.eq(labels_ten).sum().item()
+    # numpy arrays to torch data loader
+    # data_loader = convert_to_loader(data, labels, batch_size=batch_size)
+    # Not using `convert_to_loader` temporarily to fix an error
+    data_ten = torch.tensor(data, device=device, dtype=torch.float)
+    labels_ten = torch.tensor(labels, device=device)
+    dataset = TensorDataset(data_ten, labels_ten)
+    data_loader = DataLoader(dataset, batch_size=batch_size)
 
-    return (100. * correct) / labels_ten.size(0)
+    correct = 0.
+    with torch.no_grad():
+        for data_bt, target_bt in data_loader:
+            output = model(data_bt)
+            _, predicted = output.max(1)
+            correct += predicted.eq(target_bt).sum().item()
+
+    return (100. * correct) / labels.shape[0]
 
 
 def get_noise_stdev_helper(model, device, data, labels, stdev_arr, accu_min, n_trials):
@@ -88,8 +97,8 @@ def get_noise_stdev_helper(model, device, data, labels, stdev_arr, accu_min, n_t
     return accu_avg, i_max, err_msg
 
 
-def get_noise_stdev(model, device, data, labels, tol_drop=0.5, n_trials=100, line_search_size=10,
-                    seed=SEED_DEFAULT):
+def get_noise_stdev(model, device, data, labels, tol_drop=0.5, stdev_range=(1e-5, 1.0), n_trials=100,
+                    line_search_size=10, seed=SEED_DEFAULT):
     model.eval()
     np.random.seed(seed)
 
@@ -99,7 +108,7 @@ def get_noise_stdev(model, device, data, labels, tol_drop=0.5, n_trials=100, lin
     accu_min = accu_max - tol_drop
 
     # Coarse list of standard deviation values; linearly-spaced powers of two
-    stdev_arr = np.logspace(-14, -6, num=line_search_size, base=2)
+    stdev_arr = np.logspace(np.log2(stdev_range[0]), np.log2(stdev_range[1]), num=line_search_size, base=2)
     print("\nDoing a coarse line search between the standard deviation values: ({:.8f}, {:.8f})".
           format(stdev_arr[0], stdev_arr[-1]))
     accu_avg, i_max, err_msg = get_noise_stdev_helper(model, device, data, labels, stdev_arr, accu_min, n_trials)
