@@ -30,7 +30,8 @@ from helpers.utils import (
 )
 from helpers.noisy import (
     get_noisy,
-    create_noise_samples
+    get_noise_stdev,
+    create_noisy_samples
 )
 from helpers.attacks import foolbox_attack
 from detectors.detector_odds_are_odd import get_samples_as_ndarray
@@ -58,7 +59,8 @@ def main():
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
     parser.add_argument('--iterations', type=int, default=40, help='num. of iterations')
     parser.add_argument('--max-epsilon', type=int, default=1, help='max. value of epsilon')
-    parser.add_argument('--obtain-noise-params', type=bool, default=False, help='procedure to obtain noise params + samples')
+    parser.add_argument('--obtain-noise-params', '--onp', action='store_true', default=False,
+                        help='procedure to obtain noise params + samples')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     args = parser.parse_args()
@@ -91,7 +93,7 @@ def main():
         )
         test_loader = torch.utils.data.DataLoader(
             datasets.MNIST(data_path, train=False, download=True, transform=transform),
-            batch_size=args.test_batch_size, shuffle=True, **kwargs
+            batch_size=args.test_batch_size, shuffle=False, **kwargs
         )
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
@@ -103,11 +105,10 @@ def main():
              transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, **kwargs)
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
-        criterion = nn.CrossEntropyLoss()
 
     elif args.model_type == 'svhn':
         transform = transforms.Compose(
@@ -115,7 +116,7 @@ def main():
              transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
         testset = datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True, **kwargs)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=False, **kwargs)
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
@@ -123,43 +124,41 @@ def main():
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-    #convert the test data loader to 2 ndarrays
+    # convert the test data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
 
     # Get the range of values in the data array
     bounds = get_data_bounds(data)
     print("Range of data values: ({:.4f}, {:.4f})\n".format(*bounds))
 
-    #verify if the data loader is the same as the ndarrays it generates
+    # verify if the data loader is the same as the ndarrays it generates
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
-        print("data loader verification failed")
-        exit()
-
-    # Stratified cross-validation split
-    skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
+        raise ValueError("Data loader verification failed")
 
     if args.obtain_noise_params:
-        
-        #find noise parameters
-        std_deviation = get_noisy(model, device, test_loader, criterion)
-        
-        #create noisy samples
-        if std_deviation != None:
-            data, labels = create_noise_samples(test_loader, std_deviation)
-        else:
-            print("no good noise threshold (std. dev) found. exiting!")
-            exit()
+        # find the best noise standard deviation
+        # std_deviation = get_noisy(model, device, test_loader)
+        std_deviation = get_noise_stdev(model, device, data, labels, seed=args.seed)
 
-        #save obtained data and labels
-        noise_save_path = os.path.join(output_dir, "noise")
-        if not os.path.isdir(noise_save_path):
-            os.makedirs(noise_save_path)
-        np.save(os.path.join(noise_save_path, 'noisy_data.npy'), data)
-        np.save(os.path.join(noise_save_path, 'labels.npy'), labels)
-        print("saved noisy samples created with std dev:", std_deviation)
-        exit()
+        # create noisy samples
+        if std_deviation is not None:
+            data_noisy, labels_noisy = create_noisy_samples(test_loader, std_deviation)
+
+            # save obtained data and labels
+            noise_save_path = os.path.join(output_dir, "noise")
+            if not os.path.isdir(noise_save_path):
+                os.makedirs(noise_save_path)
+
+            np.save(os.path.join(noise_save_path, 'data_noisy.npy'), data_noisy)
+            np.save(os.path.join(noise_save_path, 'labels_noisy.npy'), labels_noisy)
+            print("Saved noisy samples created with std dev: {:.8f}".format(std_deviation))
+        else:
+            print("ERROR: no good noise standard deviation found. Try searching over a larger range of values.")
+
+        return
 
     #repeat for each fold in the cross-validation split
+    skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
     i = 1
     for ind_tr, ind_te in skf.split(data, labels):
         data_tr = data[ind_tr, :]
@@ -173,29 +172,26 @@ def main():
             os.makedirs(numpy_save_path)
 
         # save train fold to numpy_save_path or load if it exists already
-        if os.path.isfile(os.path.join(numpy_save_path, 'data_tr.npy')) == False:
+        if not os.path.isfile(os.path.join(numpy_save_path, 'data_tr.npy')):
             np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
         else:
-            data_tr = np.load(os.path.join(path, "data_tr.npy"))
+            data_tr = np.load(os.path.join(numpy_save_path, "data_tr.npy"))
 
-        if os.path.isfile(os.path.join(numpy_save_path, 'labels_tr.npy')) == False:
+        if not os.path.isfile(os.path.join(numpy_save_path, 'labels_tr.npy')):
             np.save(os.path.join(numpy_save_path, 'labels_tr.npy'), labels_tr)
         else:
-            labels_tr.npy = np.load(os.path.join(path, "labels_tr.npy"))
+            labels_tr = np.load(os.path.join(numpy_save_path, "labels_tr.npy"))
         
         #save test fold to numpy_save_path or load if it exists already
-        if os.path.isfile(os.path.join(numpy_save_path, 'data_te.npy')) == False:
+        if not os.path.isfile(os.path.join(numpy_save_path, 'data_te.npy')):
             np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
         else:
-            data_te = np.load(os.path.join(path, "data_te.npy"))
+            data_te = np.load(os.path.join(numpy_save_path, "data_te.npy"))
 
-        if os.path.isfile(os.path.join(numpy_save_path, 'labels_te.npy')) == False:
+        if not os.path.isfile(os.path.join(numpy_save_path, 'labels_te.npy')):
             np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
         else:
-            labels_te = np.load(os.path.join(path, "labels_te.npy"))
-        
-        # print prompt
-        #print("saved train and test data from fold:", i)
+            labels_te = np.load(os.path.join(numpy_save_path, "labels_te.npy"))
 
         # data loader for the training and test data split
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
@@ -204,7 +200,6 @@ def main():
         adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
         if not os.path.isdir(adv_save_path):
             os.makedirs(adv_save_path)
-
 
         #setting adv. attack parameters
         stepsize = args.stepsize
@@ -252,14 +247,13 @@ def main():
                	iterations=iterations,
                	max_epsilon=max_epsilon
         )
-        
-	#save test fold's adv. examples
+        #save test fold's adv. examples
         np.save(os.path.join(adv_path, 'data_te_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_te_adv.npy'), adv_labels)
         np.save(os.path.join(adv_path, 'data_te_clean.npy'), clean_inputs)
         np.save(os.path.join(adv_path, 'labels_te_clean.npy'), clean_labels)
         print("saved adv. examples generated from the test data for fold:", i)
-       
+
         #use dataloader to create adv. examples; adv_inputs is an ndarray
         adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
                	model,
@@ -280,14 +274,12 @@ def main():
                	iterations=iterations,
                	max_epsilon=max_epsilon
         )
-        
-	#save train_fold's adv. examples
+        #save train_fold's adv. examples
         np.save(os.path.join(adv_path, 'data_tr_adv.npy'), adv_inputs)
         np.save(os.path.join(adv_path, 'labels_tr_adv.npy'), adv_labels)
         np.save(os.path.join(adv_path, 'data_tr_clean.npy'), clean_inputs)
         np.save(os.path.join(adv_path, 'labels_tr_clean.npy'), clean_labels)
         print("saved adv. examples generated from the train data for fold:", i)
-	
 
         i = i + 1
 
