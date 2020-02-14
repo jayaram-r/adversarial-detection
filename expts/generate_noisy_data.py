@@ -1,10 +1,15 @@
 """
 Main script for generating noisy data from the cross-validation folds and saving them to numpy files.
+
+Example usage:
+python generate_noisy_data.py -m mnist --stdev-high 0.278256 --gpu 1
+
 """
 from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
+import shutil
 import numpy as np
 import torch
 from torchvision import datasets, transforms
@@ -36,8 +41,10 @@ from detectors.detector_odds_are_odd import get_samples_as_ndarray
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
-    parser.add_argument('--stdev-low', type=float, required=True, help='lower end of the standard deviation range')
-    parser.add_argument('--stdev-high', type=float, required=True, help='upper end of the standard deviation range')
+    parser.add_argument('--stdev-high', type=float, default=-1.0,
+                        help="Upper bound on the noise standard deviation. Use the option '--search-noise-stdev' "
+                             "to set this value automatically")
+    parser.add_argument('--stdev-low', type=float, default=-1.0, help="Lower bound on the noise standard deviation")
     parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
@@ -113,16 +120,20 @@ def main():
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
         raise ValueError("Data loader verification failed")
 
-    if args.search_noise_stdev:
+    stdev_high = args.stdev_high
+    if args.search_noise_stdev or (stdev_high < 0.):
         # Search for a suitable noise standard deviation
-        stdev = get_noise_stdev(model, device, data, labels, seed=args.seed)
-        if stdev is None:
+        stdev_high = get_noise_stdev(model, device, data, labels, seed=args.seed)
+        if stdev_high is None:
             print("\nERROR: no good noise standard deviation found. Try searching over a larger range of values.")
-
-        return
+            return
 
     # Noise standard deviation values
-    stdev_values = np.linspace(args.stdev_low, args.stdev_high, num=NUM_NOISE_VALUES)
+    stdev_low = args.stdev_low
+    if (stdev_low < 0.) or (stdev_low >= stdev_high):
+        stdev_low = stdev_high / 16.
+
+    stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
 
     # repeat for each fold in the cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
@@ -151,9 +162,11 @@ def main():
 
         # Directory for noisy train and test data from this fold
         noise_base_path = os.path.join(output_dir, 'fold_{}'.format(i), 'noise_gaussian')
-        if not os.path.isdir(noise_base_path):
-            os.makedirs(noise_base_path)
+        if os.path.isdir(noise_base_path):
+            # Clear out any old data files
+            shutil.rmtree(noise_base_path)
 
+        os.makedirs(noise_base_path)
         # Generate noisy data from the train and test fold for different standard deviation values and save them
         # to numpy files
         filenames_train = []
@@ -172,7 +185,7 @@ def main():
             np.save(fname, data_te_noisy)
             filenames_test.append(fname + '\n')
 
-        print("\nSaved noisy data files from fold {:d}.".format(i))
+        print("Saved noisy data files from fold {:d}.".format(i))
         fname = os.path.join(noise_base_path, 'filenames_train.txt')
         with open(fname, 'w') as fp:
             fp.writelines(filenames_train)
@@ -184,6 +197,7 @@ def main():
             fp.writelines(filenames_test)
 
         print("List of filenames for noisy test data from this fold can be found in the file: {}".format(fname))
+        print('\n')
         i = i + 1
 
     if not (np.all(loaded_from_file) or np.all(np.logical_not(loaded_from_file))):
