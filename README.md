@@ -12,6 +12,7 @@ The following packages with their corresponding version should be installed befo
 - pynndescent - 0.3.3
 - PyTorch - 1.3
 - Foolbox - 2.3.0
+- matplotlib >= 3.0.3
 
 It is recommended to use a setup a Conda environment and install these packages using conda.
 
