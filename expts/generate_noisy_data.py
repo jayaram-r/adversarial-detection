@@ -2,7 +2,11 @@
 Main script for generating noisy data from the cross-validation folds and saving them to numpy files.
 
 Example usage:
-python generate_noisy_data.py -m mnist --stdev-high 0.278256 --gpu 1
+# This searches for the best noise standard deviation and generates the noisy data files
+python generate_noisy_data.py -m mnist
+
+# This uses the value 0.25 as the upper bound of the noise standard deviation
+python generate_noisy_data.py -m mnist --stdev-high 0.25
 
 """
 from __future__ import absolute_import, division, print_function
