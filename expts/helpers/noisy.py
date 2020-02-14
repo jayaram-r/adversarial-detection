@@ -137,8 +137,8 @@ def get_noise_stdev(model, device, data, labels, tol_drop=0.5, stdev_range=(1e-5
 
 
 def create_noisy_samples(loader, std_dev):
-    X = []
-    Y = []
+    X = np.array([])
+    Y = np.array([])
     for batch_idx, (data, target) in enumerate(loader):
         # shape = tuple(list(data.shape))
         # rand = torch.normal(mean=0., std=std_dev, size=shape)
@@ -146,10 +146,10 @@ def create_noisy_samples(loader, std_dev):
         data = data + rand
         data, target = data.cpu().numpy(), target.cpu().numpy()
         if batch_idx == 0:
-            X, Y = data, target
+            X = data
+            Y = target[:, np.newaxis]
         else:
             X = np.vstack((X, data))
-            Y = np.vstack((Y, target))
+            Y = np.vstack((Y, target[:, np.newaxis]))
 
-    Y = Y.reshape((-1,))
-    return X, Y
+    return X, Y.ravel()

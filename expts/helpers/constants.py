@@ -26,6 +26,9 @@ SEED_DEFAULT = 123
 # Default number of folds to use for cross-validation
 CROSS_VAL_SIZE = 5
 
+# Number of Gaussian noise standard deviation values to use
+NUM_NOISE_VALUES = 10
+
 # Distance metric to use if not specified
 METRIC_DEF = 'cosine'
 
