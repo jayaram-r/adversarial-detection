@@ -41,19 +41,18 @@ def convert_to_loader(x, y, batch_size=1):
 
 
 def get_samples_as_ndarray(loader):
-    X = []
-    Y = []
+    X = np.array([])
+    Y = np.array([])
     for batch_idx, (data, target) in enumerate(loader):
         data, target = data.cpu().numpy(), target.cpu().numpy()
         target = target.reshape((target.shape[0], 1))
         if batch_idx == 0:
             X, Y = data, target
         else:
-            X = np.vstack((X,data))
-            Y = np.vstack((Y,target))
+            X = np.vstack((X, data))
+            Y = np.vstack((Y, target))
 
-    Y = Y.reshape((-1,))
-    return X,Y
+    return X, Y.ravel()
 
 
 def verify_data_loader(loader, batch_size=1):
@@ -121,6 +120,10 @@ def get_path_dr_models(model_type):
 
 def get_clean_data_path(model_type, fold):
     return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold))
+
+
+def get_noisy_data_path(model_type, fold):
+    return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold), 'noise_gaussian')
 
 
 def get_adversarial_data_path(model_type, fold, attack_type, attack_param_list):
