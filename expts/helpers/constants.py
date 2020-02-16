@@ -23,6 +23,9 @@ RHO = 0.5
 
 SEED_DEFAULT = 123
 
+# Default batch size
+BATCH_SIZE_DEF = 128
+
 # Default number of folds to use for cross-validation
 CROSS_VAL_SIZE = 5
 

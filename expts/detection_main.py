@@ -176,6 +176,9 @@ def main():
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
+    # Set model in evaluation mode
+    model.eval()
+
     attack_params_list = [
         ('stepsize', ATTACK_PARAMS['stepsize']),
         ('confidence', ATTACK_PARAMS['confidence']),
