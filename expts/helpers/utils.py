@@ -15,6 +15,7 @@ from helpers.constants import (
     SEED_DEFAULT,
     FPR_MAX_PAUC,
     FPR_THRESH,
+    BATCH_SIZE_DEF,
     COLORS
 )
 from torch.utils.data import TensorDataset, DataLoader
@@ -28,7 +29,7 @@ def convert_to_list(array):
     return [r for r in array]
 
 
-def convert_to_loader(x, y, batch_size=1):
+def convert_to_loader(x, y, batch_size=BATCH_SIZE_DEF):
     # transform to torch tensor; using `as_tensor` avoids creating a copy
     #tensor_x = torch.as_tensor(x)
     tensor_x = torch.tensor(x)
@@ -135,6 +136,87 @@ def get_adversarial_data_path(model_type, fold, attack_type, attack_param_list):
 def get_output_path(model_type):
     # Default output path
     return os.path.join(ROOT, 'outputs', model_type)
+
+
+def calculate_accuracy(model, device, data_loader=None, data=None, labels=None, batch_size=BATCH_SIZE_DEF):
+    """
+    Calculate the accuracy of a trained model on a given data set.
+
+    :param model: trained model object.
+    :param device: torch device object.
+    :param data_loader: None or a torch data loader. If this is specified, the inputs `data` and `labels` will
+                        be ignored.
+    :param data: None or a numpy array of inputs.
+    :param labels: None or a numpy array of labels (targets).
+    :param batch_size: batch size for prediction.
+
+    :return: model accuracy in percentage.
+    """
+    if model.training:
+        model.eval()
+
+    if data_loader is None:
+        if (data is None) or (labels is None):
+            raise ValueError("Invalid inputs - data and/or labels are not specified.")
+
+        # Create a torch data loader from numpy arrays
+        # data_loader = convert_to_loader(data, labels, batch_size=batch_size)
+        # Not using `convert_to_loader` temporarily to fix an error
+        data_ten = torch.tensor(data, device=device, dtype=torch.float)
+        labels_ten = torch.tensor(labels, device=device)
+        dataset = TensorDataset(data_ten, labels_ten)
+        data_loader = DataLoader(dataset, batch_size=batch_size)
+        n_samp = labels.shape[0]
+    else:
+        n_samp = len(data_loader.dataset)
+
+    correct = 0.
+    with torch.no_grad():
+        for data_bt, target_bt in data_loader:
+            output = model(data_bt)
+            _, predicted = output.max(1)
+            correct += predicted.eq(target_bt).sum().item()
+
+    return (100. * correct) / n_samp
+
+
+def get_predicted_classes(model, device, data_loader=None, data=None, labels=None, batch_size=BATCH_SIZE_DEF):
+    """
+    Get the model-predicted classes on a given data set.
+
+    :param model: trained model object.
+    :param device: torch device object.
+    :param data_loader: None or a torch data loader. If this is specified, the inputs `data` and `labels` will
+                        be ignored.
+    :param data: None or a numpy array of inputs.
+    :param labels: None or a numpy array of labels (targets).
+    :param batch_size: batch size for prediction.
+
+    :return: numpy array of predicted classes.
+    """
+    if model.training:
+        model.eval()
+
+    if data_loader is None:
+        if (data is None) or (labels is None):
+            raise ValueError("Invalid inputs - data and/or labels are not specified.")
+
+        # Create a torch data loader from numpy arrays
+        # data_loader = convert_to_loader(data, labels, batch_size=batch_size)
+        # Not using `convert_to_loader` temporarily to fix an error
+        data_ten = torch.tensor(data, device=device, dtype=torch.float)
+        labels_ten = torch.tensor(labels, device=device)
+        dataset = TensorDataset(data_ten, labels_ten)
+        data_loader = DataLoader(dataset, batch_size=batch_size)
+
+    labels_pred = []
+    with torch.no_grad():
+        for data_bt, target_bt in data_loader:
+            output = model(data_bt)
+            _, predicted = output.max(1)
+            labels_pred.extend(predicted.detach().cpu().numpy())
+
+    return np.array(labels_pred, dtype=np.int)
 
 
 def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose=True):

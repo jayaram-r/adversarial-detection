@@ -27,7 +27,8 @@ from helpers.constants import (
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
     NORMALIZE_IMAGES,
-    NUM_NOISE_VALUES
+    NUM_NOISE_VALUES,
+    BATCH_SIZE_DEF
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -57,7 +58,7 @@ def main():
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--gpu', type=str, default='2', help='which gpus to execute code on')
-    parser.add_argument('--batch-size', type=int, default=128, help='batch size of evaluation')
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE_DEF, help='batch size of evaluation')
     parser.add_argument('--search-noise-stdev', '--sns', action='store_true', default=False,
                         help='use option to search for a suitable noise standard deviation')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,

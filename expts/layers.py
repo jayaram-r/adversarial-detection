@@ -112,8 +112,9 @@ def main():
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-    # Load the saved model checkpoint
+    # Load the saved model checkpoint and set it to eval mode
     model = load_model_checkpoint(model, args.model_type)
+    model.eval()
 
     # Get the feature embeddings from all the layers and the labels
     print("Calculating layer embeddings for the train data:")
