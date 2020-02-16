@@ -64,6 +64,9 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
         - labels_pred: numpy array of the model-predicted class labels. Has shape `(N, )`.
         - counts: numpy array of sample counts for each distinct class in `labels`.
     """
+    if model.training:
+        model.eval()
+
     labels = []
     labels_pred = []
     embeddings = []

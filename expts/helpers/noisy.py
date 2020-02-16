@@ -1,7 +1,6 @@
 import numpy as np
 import torch
-from torch.utils.data import TensorDataset, DataLoader
-from helpers.utils import convert_to_loader
+from helpers.utils import calculate_accuracy
 from helpers.constants import SEED_DEFAULT
 
 
@@ -45,28 +44,6 @@ def get_noisy(model, device, test_loader):
     return None
 
 
-def calc_accu(model, device, data, labels, batch_size=128):
-    # assuming this is done in the calling function
-    # model.eval()
-
-    # numpy arrays to torch data loader
-    # data_loader = convert_to_loader(data, labels, batch_size=batch_size)
-    # Not using `convert_to_loader` temporarily to fix an error
-    data_ten = torch.tensor(data, device=device, dtype=torch.float)
-    labels_ten = torch.tensor(labels, device=device)
-    dataset = TensorDataset(data_ten, labels_ten)
-    data_loader = DataLoader(dataset, batch_size=batch_size)
-
-    correct = 0.
-    with torch.no_grad():
-        for data_bt, target_bt in data_loader:
-            output = model(data_bt)
-            _, predicted = output.max(1)
-            correct += predicted.eq(target_bt).sum().item()
-
-    return (100. * correct) / labels.shape[0]
-
-
 def get_noise_stdev_helper(model, device, data, labels, stdev_arr, accu_min, n_trials):
     shape = data.shape
     accu_avg = np.zeros_like(stdev_arr)
@@ -78,7 +55,7 @@ def get_noise_stdev_helper(model, device, data, labels, stdev_arr, accu_min, n_t
         for t in range(n_trials):
             noise = np.random.normal(loc=0., scale=sig, size=shape)
             data_noisy = data + noise
-            accu_avg[i] = accu_avg[i] + calc_accu(model, device, data_noisy, labels)
+            accu_avg[i] = accu_avg[i] + calculate_accuracy(model, device, data=data_noisy, labels=labels)
 
         accu_avg[i] /= n_trials
         print("{:.8f}\t{:.4f}".format(sig, accu_avg[i]))
@@ -103,7 +80,7 @@ def get_noise_stdev(model, device, data, labels, tol_drop=0.2, stdev_range=(1e-5
     np.random.seed(seed)
 
     # Model accuracy on clean data
-    accu_max = calc_accu(model, device, data, labels)
+    accu_max = calculate_accuracy(model, device, data=data, labels=labels)
     print("Accuracy of the model on clean data = {:.4f}.".format(accu_max))
     accu_min = accu_max - tol_drop
 

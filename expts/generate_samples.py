@@ -17,7 +17,8 @@ from helpers.constants import (
     ROOT,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
-    NORMALIZE_IMAGES
+    NORMALIZE_IMAGES,
+    BATCH_SIZE_DEF
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -45,7 +46,7 @@ def main():
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
-    parser.add_argument('--batch-size', type=int, default=128, help='batch size of evaluation')
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE_DEF, help='batch size of evaluation')
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
