@@ -49,6 +49,7 @@ from detectors.detector_lid_paper import (
 )   # ICLR 2018
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
+from detectors.detector_trust_score import TrustScore
 
 
 ATTACK_PARAMS = {

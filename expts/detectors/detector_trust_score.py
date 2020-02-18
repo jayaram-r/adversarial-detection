@@ -15,6 +15,7 @@ PCA is used to project high dimensional data sets to a dimension of 20.
 
 """
 import numpy as np
+import sys
 import logging
 from helpers.constants import (
     SEED_DEFAULT,
@@ -243,7 +244,8 @@ class TrustScore:
                     of the trust score. So a high value of this score corresponds to low trustworthiness (i.e.
                     high probability of being incorrectly classified).
         """
-        return -np.log(self.score_trust(data_test, labels_pred, is_train=is_train))
+        return -np.log(np.clip(self.score_trust(data_test, labels_pred, is_train=is_train),
+                               sys.float_info.min, None))
 
     def score_trust(self, data_test, labels_pred, is_train=False):
         """
@@ -283,6 +285,9 @@ class TrustScore:
         for j, c in enumerate(self.labels_unique):
             # All samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
+            if ind.shape[0] == 0:
+                continue
+
             dist_temp = distances_level_sets[ind, :]
             mask = np.ones(self.n_classes, dtype=np.bool)
             mask[j] = False
