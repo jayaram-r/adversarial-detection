@@ -110,9 +110,8 @@ class TrustScore:
 
     def fit(self, data, labels, labels_pred):
         """
-        Estimate parameters of the detection method given natural (non-adversarial) input data. Note that this
-        data should be different from that used to train the DNN classifier.
-        NOTE: Inputs to this method can be obtained by calling the function `extract_layer_embeddings`.
+        Estimate the `1 - alpha` density level sets for each class using the given data, with true labels and
+        classifier-predicted labels. This will be used to calculate the trust score.
 
         :param data: numpy array with the feature vectors of shape `(n, d)`, where `n` and `d` are the number of
                      samples and the data dimension respectively.
@@ -273,6 +272,8 @@ class TrustScore:
     def _score_helper(self, distance_level_sets, labels_pred):
         # A helper function to calculate the trust score from the distances of samples to the level sets
         scores = np.zeros(distance_level_sets.shape[0])
+        mask = np.ones((self.n_classes, self.n_classes), dtype=np.bool)
+        np.fill_diagonal(mask, False)
         for j, c in enumerate(self.labels_unique):
             # All samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
@@ -280,10 +281,8 @@ class TrustScore:
                 continue
 
             dist_temp = distance_level_sets[ind, :]
-            mask = np.ones(self.n_classes, dtype=np.bool)
-            mask[j] = False
             # Minimum distance to the level sets from classes other than `c` is the numerator of the trust score.
             # Distance to the level set of the predicted class `c` is the denominator of the trust score.
-            scores[ind] = np.min(dist_temp[:, mask], axis=1) / np.clip(dist_temp[:, j], 1e-32, None)
+            scores[ind] = np.min(dist_temp[:, mask[j, :]], axis=1) / np.clip(dist_temp[:, j], 1e-32, None)
 
         return scores
