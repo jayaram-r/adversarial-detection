@@ -13,6 +13,7 @@ the DNN layer representations using the neighborhood preserving projection (NPP)
 
 """
 import numpy as np
+import sys
 import logging
 from helpers.constants import (
     SEED_DEFAULT,
@@ -227,7 +228,7 @@ class DeepKNN:
         # Credibility is the maximum p-value over all classes
         credibility = np.max(p_values, axis=1)
         # Anomaly score
-        scores = -np.log(credibility)
+        scores = -np.log(np.clip(credibility, sys.float_info.min, None))
         # Deep k-NN prediction is the class corresponding to the largest p-value
         predictions = np.array([self.labels_unique[j] for j in np.argmax(p_values, axis=1)],
                                dtype=self.labels_unique.dtype)
