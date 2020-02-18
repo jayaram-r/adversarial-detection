@@ -4,8 +4,8 @@ Implementation of the trust score for identifying trustworthy and suspicious pre
 Jiang, Heinrich, et al. "To trust or not to trust a classifier." Advances in neural information processing
 systems. 2018.
 
-We use the negative of the trust score to rank samples for out-of-distribution and adversarial detection. We also
-provide the option of performing dimensionality reduction on the input feature vectors using the neighborhood
+We use the negative logarithm of the trust score to rank samples for out-of-distribution and adversarial detection.
+We also provide the option of performing dimensionality reduction on the input feature vectors using the neighborhood
 preserving projection (NPP) method.
 
 The paper used the following values for experiments:
@@ -165,13 +165,13 @@ class TrustScore:
             )
             # Distances to the k nearest neighbors of each sample
             _, nn_distances = self.index_knn[c].query_self(k=self.n_neighbors)
-
             # Radius or distance to the k-th nearest neighbor for each sample
             radius_arr = nn_distances[:, self.n_neighbors - 1]
+
             # Smallest radius `epsilon` such that only `alpha` fraction of the samples from class `c` have radius
             # greater than `epsilon`
             if self.alpha > 0.:
-                self.epsilon[c] = np.percentile(radius_arr, 100 * (1 - self.alpha))
+                self.epsilon[c] = np.percentile(radius_arr, 100 * (1 - self.alpha), interpolation='midpoint')
 
                 # Exclude the outliers and build a KNN index with the remaining samples
                 mask_incl = radius_arr <= self.epsilon[c]
@@ -206,7 +206,6 @@ class TrustScore:
                 _, dist_temp = self.index_knn[c].query(data_sub[mask_excl, :], k=1)
                 ind = indices_sub[c][mask_excl]
                 distance_level_sets[ind, j] = dist_temp[:, 0]
-
             else:
                 # No need to rebuild the KNN index because no samples are excluded.
                 # Distance to the nearest neighbor of each sample
@@ -216,7 +215,6 @@ class TrustScore:
         for c in self.labels_unique:
             # Compute the distance from each sample from class `c` to the level sets from the remaining classes
             data_sub = data[indices_sub[c], :]
-
             for j, c_hat in enumerate(self.labels_unique):
                 if c_hat == c:
                     continue
@@ -239,18 +237,15 @@ class TrustScore:
                             have shape `(n, )`.
         :param is_train: Set to true if this data was used to also passed to the `fit` method for estimation.
 
-        :return:
-            scores: numpy array of scores corresponding to OOD or adversarial detection. It is the negative log
-                    of the trust score. So a high value of this score corresponds to low trustworthiness (i.e.
-                    high probability of being incorrectly classified).
+        :return: numpy array of scores corresponding to OOD or adversarial detection.
         """
         return -np.log(np.clip(self.score_trust(data_test, labels_pred, is_train=is_train),
                                sys.float_info.min, None))
 
     def score_trust(self, data_test, labels_pred, is_train=False):
         """
-        Calculate the trust score of each test sample given its classifier predicted labels. A large value of this
-        score indicates that the class predicted by the classifier is likely to be correct.
+        Calculate the trust score of each test sample given its classifier-predicted labels. The score is non-negative,
+        with higher values corresponding to a higher level of trust in the classifier's prediction.
 
         :param data: numpy array with the test data of shape `(n, d)`, where `n` and `d` are the number of samples
                      and the dimension respectively.
@@ -258,10 +253,7 @@ class TrustScore:
                             have shape `(n, )`.
         :param is_train: Set to true if this data was used to also passed to the `fit` method for estimation.
 
-        :return:
-            scores: numpy array of scores corresponding to OOD or adversarial detection. It is the negative log
-                    of the trust score. So a high value of this score corresponds to low trustworthiness (i.e.
-                    high probability of being incorrectly classified).
+        :return: numpy array of trust scores for each test sample.
         """
         if is_train:
             return self.scores_estim
@@ -269,8 +261,7 @@ class TrustScore:
         if self.transform_model:
             data_test = transform_data_from_model(data_test, self.transform_model)
 
-        n_test = data_test.shape[0]
-        distance_level_sets = np.zeros((n_test, self.n_classes))
+        distance_level_sets = np.zeros((data_test.shape[0], self.n_classes))
         for j, c in enumerate(self.labels_unique):
             # Distance of each test sample to its nearest neighbor from the level set for class `c`
             _, dist_temp = self.index_knn[c].query(data_test, k=1)
@@ -279,19 +270,18 @@ class TrustScore:
         # Trust score calculation
         return self._score_helper(distance_level_sets, labels_pred)
 
-    def _score_helper(self, distances_level_sets, labels_pred):
+    def _score_helper(self, distance_level_sets, labels_pred):
         # A helper function to calculate the trust score from the distances of samples to the level sets
-        scores = np.zeros(distances_level_sets.shape[0])
+        scores = np.zeros(distance_level_sets.shape[0])
         for j, c in enumerate(self.labels_unique):
             # All samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
             if ind.shape[0] == 0:
                 continue
 
-            dist_temp = distances_level_sets[ind, :]
+            dist_temp = distance_level_sets[ind, :]
             mask = np.ones(self.n_classes, dtype=np.bool)
             mask[j] = False
-
             # Minimum distance to the level sets from classes other than `c` is the numerator of the trust score.
             # Distance to the level set of the predicted class `c` is the denominator of the trust score.
             scores[ind] = np.min(dist_temp[:, mask], axis=1) / np.clip(dist_temp[:, j], 1e-32, None)
