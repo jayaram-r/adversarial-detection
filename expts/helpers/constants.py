@@ -45,17 +45,30 @@ MAX_SAMPLES_DIM_REDUCTION = 10000
 # Cumulative variance cutoff for PCA
 PCA_CUTOFF = 0.995
 
-# Default proportion of attack samples in the test set
-ATTACK_PROPORTION_DEF = 0.1
+# Proportion of noisy samples to include in the training or test folds of cross-validation
+NOISE_PROPORTION = 0.05
 
 # Number of top ranked layer test statistics to use for detection (default value)
 NUM_TOP_RANKED = 3
 
+# List of detection methods
+DETECTION_METHODS = ['proposed', 'lid', 'odds', 'dknn', 'trust']
+
+# Method names to use for plots and results
+METHOD_NAME_MAP = {
+    'proposed': 'proposed',
+    'lid': 'LID_ICLR',
+    'odds': 'odds_are_odd_ICML',
+    'dknn': 'deep-KNN',
+    'trust': 'trust-score'
+}
+
 # List of layerwise test statistics supported by the proposed method
 TEST_STATS_SUPPORTED = ['multinomial', 'lid', 'lle']
 
-# Method names to use for plots and results
-METHOD_NAME_MAP = {'lid': 'LID_ICLR', 'odds': 'odds_are_odd_ICML', 'dknn': 'Deep-KNN'}
+# Layers at which the trust score calculation is supported. `fc_prelogit` refers to the fully connected layer
+# preceding the logit layer.
+LAYERS_TRUST_SCORE = ['input', 'logit', 'fc_prelogit']
 
 # Maximum FPR values for calculating partial AUC
 FPR_MAX_PAUC = [0.01, 0.05, 0.1, 0.2]

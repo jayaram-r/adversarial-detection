@@ -17,12 +17,15 @@ from helpers.constants import (
     DATA_PATH,
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
-    ATTACK_PROPORTION_DEF,
     NORMALIZE_IMAGES,
+    BATCH_SIZE_DEF,
+    DETECTION_METHODS,
     TEST_STATS_SUPPORTED,
+    NOISE_PROPORTION,
     FPR_MAX_PAUC,
     FPR_THRESH,
-    METHOD_NAME_MAP
+    METHOD_NAME_MAP,
+    LAYERS_TRUST_SCORE
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -74,34 +77,38 @@ MIXED_ATTACK_PROPORTIONS = {
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
-    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
+    parser.add_argument('--batch-size', type=int, default=256, help='batch size of evaluation')
+    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
-    parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
-    parser.add_argument('--detection-method', '--dm', choices=['proposed', 'lid', 'odds', 'dknn'],
-                        default='proposed', help='detection method to run')
+    parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
+                        help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
-                        help='type of test statistic to calculate at the layers for the proposed method')
+                        help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
+                        format(', '.join(TEST_STATS_SUPPORTED)))
+    parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
+                        help="Which layer to use for the trust score calculation. Choices are: {}".
+                        format(', '.join(LAYERS_TRUST_SCORE)))
     parser.add_argument('--ood', action='store_true', default=False,
                         help='Perform OOD detection instead of adversarial (if applicable)')
-    parser.add_argument('--include-noise', '--in', action='store_true', default=False,
-                        help='Include noisy samples in the evaluation')
+    parser.add_argument('--exclude-noisy', action='store_true', default=False,
+                        help='Use option to exclude noisy samples from training and evaluation')
     parser.add_argument('--model-dim-reduc', '--mdr', default='',
-                        help='Path to the saved dimension reduction model file')
-    parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
+                        help='Path to the saved dimension reduction model file. Specify only if the default path '
+                             'needs to be changed.')
+    parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
+    parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
+                        help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
                         help='Use option to enable a mixed attack strategy with multiple methods in '
                              'different proportions')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
-    parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
-    parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
-                        help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
+    parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
+    parser.add_argument('--gpu', type=str, default='2', help='which gpus to execute code on')
     parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
+    parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -111,65 +118,84 @@ def main():
 
     # Output directory
     if not args.output_dir:
-        output_dir = get_output_path(args.model_type)
+        base_dir = get_output_path(args.model_type)
+        output_dir = os.path.join(base_dir, 'detection')
     else:
         output_dir = args.output_dir
 
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    # Dimensionality reduction model
+    method_name = METHOD_NAME_MAP[args.detection_method]
+
+    # Dimensionality reduction is applied only for some methods in some scenarios
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
-        method_name = METHOD_NAME_MAP.get('', '{}_{}'.format(args.detection_method, args.test_statistic))
-    else:
-        method_name = METHOD_NAME_MAP[args.detection_method]
+        # Append the test statistic to the method name
+        method_name = '{}_{}'.format(method_name, args.test_statistic)
+    elif args.detection_method == 'trust':
+        # Append the layer name to the method name
+        method_name = '{}_{}'.format(method_name, args.layer_trust_score)
+        if args.layer_trust_score in ['input', 'fc_prelogit']:
+            # Dimension reduction is not applied to the logit layer
+            apply_dim_reduc = True
 
+    # Model file for dimension reduction, if required
     model_dim_reduc = None
     if apply_dim_reduc:
-        if not args.model_dim_reduc:
-            # Default path the dimension reduction model file
+        if args.model_dim_reduc:
+            model_dim_reduc = args.model_dim_reduc
+        else:
+            # Default path to the dimension reduction model file
             model_dim_reduc = get_path_dr_models(args.model_type)
+
+        if not os.path.isfile(model_dim_reduc):
+            raise ValueError("Model file specified for dimension reduction does not exist: {}".
+                             format(model_dim_reduc))
 
     # Data loader and pre-trained DNN model corresponding to the dataset
     data_path = DATA_PATH
     if args.model_type == 'mnist':
+        '''
         transform = transforms.Compose(
             [transforms.ToTensor(),
              transforms.Normalize(*NORMALIZE_IMAGES['mnist'])]
         )
         test_loader = torch.utils.data.DataLoader(
             datasets.MNIST(data_path, train=False, download=True, transform=transform),
-            batch_size=args.test_batch_size, shuffle=True, **kwargs_loader
+            batch_size=args.batch_size, shuffle=True, **kwargs_loader
         )
+        '''
         num_classes = 10
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
 
     elif args.model_type == 'cifar10':
+        '''
         transform_test = transforms.Compose(
             [transforms.ToTensor(),
              transforms.Normalize(*NORMALIZE_IMAGES['cifar10'])]
         )
         testset = datasets.CIFAR10(root=data_path, train=False, download=True, transform=transform_test)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True,
-                                                  **kwargs_loader)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=True, **kwargs_loader)
+        '''
         num_classes = 10
         model = ResNet34().to(device)
         model = load_model_checkpoint(model, args.model_type)
 
     elif args.model_type == 'svhn':
+        '''
         transform = transforms.Compose(
             [transforms.ToTensor(),
              transforms.Normalize(*NORMALIZE_IMAGES['svhn'])]
         )
         testset = datasets.SVHN(root=data_path, split='test', download=True, transform=transform)
-        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.test_batch_size, shuffle=True,
-                                                  **kwargs_loader)
+        test_loader = torch.utils.data.DataLoader(testset, batch_size=args.batch_size, shuffle=True, **kwargs_loader)
+        '''
         num_classes = 10
         model = SVHN().to(device)
         model = load_model_checkpoint(model, args.model_type)
@@ -200,10 +226,10 @@ def main():
         print("\nCross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
               format(i + 1, labels_tr.shape[0], labels_te.shape[0]))
         # Data loader for the train fold
-        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.test_batch_size)
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size)
 
         # Data loader for the test fold
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.test_batch_size)
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
 
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
         layer_embeddings_tr, labels_tr1, labels_pred_tr, _ = extract_layer_embeddings(
@@ -235,10 +261,10 @@ def main():
               format((100. * num_adv_te) / labels_te.shape[0]))
 
         # Adversarial data loader for the train fold
-        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.test_batch_size)
+        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size)
 
         # Adversarial data loader for the test fold
-        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.test_batch_size)
+        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size)
 
         if args.detection_method == 'lid':
             # Needed only for the LID method
@@ -338,7 +364,7 @@ def main():
         labels_folds.append(labels_detec)
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
-    fname = os.path.join(args.output_dir, 'detection_metrics_{}.pkl'.format(method_name))
+    fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
     results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, n_jobs=args.n_jobs,
                                                              output_file=fname)
     print("Performance metrics saved to the file: {}".format(fname))
