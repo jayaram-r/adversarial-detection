@@ -25,7 +25,9 @@ from helpers.constants import (
     FPR_MAX_PAUC,
     FPR_THRESH,
     METHOD_NAME_MAP,
-    LAYERS_TRUST_SCORE
+    LAYERS_TRUST_SCORE,
+    ATTACK_NORM_MAP,
+    EPSILON_VALUES
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -56,9 +58,9 @@ from detectors.detector_trust_score import TrustScore
 
 
 ATTACK_PARAMS = {
-    'stepsize': 0.001,
+    'stepsize': 0.05,
     'confidence': 0,
-    'epsilon': 0.003,
+    'epsilon': EPSILON_VALUES[0],
     'maxiterations': 1000,
     'iterations': 40,
     'maxepsilon': 1
@@ -98,8 +100,8 @@ def main():
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
-    parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
-                        help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
+    # parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
+    #                     help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
                         help='Use option to enable a mixed attack strategy with multiple methods in '
                              'different proportions')
@@ -137,7 +139,7 @@ def main():
 
         # Append the test statistic to the method name
         method_name = '{}_{}'.format(method_name, args.test_statistic)
-    elif args.detection_method == 'trust':
+    if args.detection_method == 'trust':
         # Append the layer name to the method name
         method_name = '{}_{}'.format(method_name, args.layer_trust_score)
         if args.layer_trust_score in ['input', 'fc_prelogit']:
@@ -213,7 +215,7 @@ def main():
         ('maxiterations', ATTACK_PARAMS['maxiterations']),
         ('iterations', ATTACK_PARAMS['iterations']),
         ('maxepsilon', ATTACK_PARAMS['maxepsilon']),
-        ('pnorm', args.p_norm)
+        ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
     ]
     # Cross-validation
     scores_folds = []
@@ -226,10 +228,10 @@ def main():
         print("\nCross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
               format(i + 1, labels_tr.shape[0], labels_te.shape[0]))
         # Data loader for the train fold
-        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size)
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
 
         # Data loader for the test fold
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
         layer_embeddings_tr, labels_tr1, labels_pred_tr, _ = extract_layer_embeddings(
@@ -257,15 +259,12 @@ def main():
         num_adv_te = labels_te_adv.shape[0]
         print("\nNumber of adversarial samples generated from the train fold = {:d}.".format(num_adv_tr))
         print("Number of adversarial samples generated from the test fold = {:d}.".format(num_adv_te))
-        print("Percentage of adversarial samples in the test fold = {:.4f}.".
-              format((100. * num_adv_te) / labels_te.shape[0]))
-
         # Adversarial data loader for the train fold
-        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size)
-
+        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
+                                                  device=device)
         # Adversarial data loader for the test fold
-        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size)
-
+        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size,
+                                                 device=device)
         if args.detection_method == 'lid':
             # Needed only for the LID method
             print("\nCalculating the layer embeddings and DNN predictions for the adversarial train data split:")
@@ -283,6 +282,10 @@ def main():
         if not np.array_equal(labels_te_adv, labels_te_adv1):
             raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
                              "labels.")
+
+        # Load noisy data from the saved numpy files
+        
+
 
         # Detection labels (0 denoting clean and 1 adversarial)
         labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),

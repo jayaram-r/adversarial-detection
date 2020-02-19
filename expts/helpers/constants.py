@@ -70,6 +70,16 @@ TEST_STATS_SUPPORTED = ['multinomial', 'lid', 'lle']
 # preceding the logit layer.
 LAYERS_TRUST_SCORE = ['input', 'logit', 'fc_prelogit']
 
+# norm type used for the different attack methods
+ATTACK_NORM_MAP = {
+    'FGSM': 'inf',
+    'PGD': 'inf',
+    'CW': '2'
+}
+
+# epsilon values used for the PGD and FGSM attacks
+EPSILON_VALUES = map(str, [i / 255. for i in range(1, 21, 2)])
+
 # Maximum FPR values for calculating partial AUC
 FPR_MAX_PAUC = [0.01, 0.05, 0.1, 0.2]
 
