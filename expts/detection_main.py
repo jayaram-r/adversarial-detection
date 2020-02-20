@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
+import random
 import numpy as np
 import torch
 from torchvision import datasets, transforms
@@ -22,6 +23,7 @@ from helpers.utils import (
     get_clean_data_path,
     get_adversarial_data_path,
     get_output_path,
+    list_all_adversarial_subdirs,
     check_label_mismatch,
     metrics_varying_positive_class_proportion
 )
@@ -148,6 +150,7 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
+    random.seed(args.seed)
     # Output directory
     if not args.output_dir:
         base_dir = get_output_path(args.model_type)
@@ -285,7 +288,8 @@ def main():
         )
 
         # Load the saved adversarial numpy data generated from this training and test fold
-        numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
+        numpy_save_path = random.choice(list_all_adversarial_subdirs(args.model_type, i + 1, args.adv_attack))
+        # numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_numpy_data(numpy_save_path, adversarial=True)
 
         num_adv_tr = labels_tr_adv.shape[0]
