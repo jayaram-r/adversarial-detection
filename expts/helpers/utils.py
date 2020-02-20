@@ -12,6 +12,7 @@ from sklearn.metrics import (
 )
 from helpers.constants import (
     ROOT,
+    NUMPY_DATA_PATH,
     SEED_DEFAULT,
     FPR_MAX_PAUC,
     FPR_THRESH,
@@ -62,6 +63,12 @@ def verify_data_loader(loader, batch_size=1):
     return np.array_equal(X_1, X_2) and np.array_equal(Y_1, Y_2)
 
 
+def check_label_mismatch(labels, labels_pred, frac=1.0):
+    d = np.sum(labels != labels_pred) / float(labels.shape[0])
+    if d < frac:
+        print("Fraction of mismatched samples with different original and predicted labels = {:.4f}".format(d))
+
+
 def load_numpy_data(path, adversarial=False):
     # print("Loading saved numpy data from the path:", path)
     if not adversarial:
@@ -71,9 +78,17 @@ def load_numpy_data(path, adversarial=False):
         labels_te = np.load(os.path.join(path, "labels_te.npy"))
     else:
         data_tr = np.load(os.path.join(path, "data_tr_adv.npy"))
-        labels_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
         data_te = np.load(os.path.join(path, "data_te_adv.npy"))
-        labels_te = np.load(os.path.join(path, "labels_te_adv.npy"))
+        # Predicted (mis-classified) labels
+        labels_pred_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
+        labels_pred_te = np.load(os.path.join(path, "labels_te_adv.npy"))
+        # Labels of the original inputs from which the adversarial inputs were created
+        labels_tr = np.load(os.path.join(path, "labels_tr_clean.npy"))
+        labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
+
+        # Check if the original and adversarial labels are all different
+        check_label_mismatch(labels_tr, labels_pred_tr)
+        check_label_mismatch(labels_te, labels_pred_te)
 
     return data_tr, labels_tr, data_te, labels_te
 
@@ -118,17 +133,17 @@ def get_path_dr_models(model_type):
 
 
 def get_clean_data_path(model_type, fold):
-    return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold))
+    return os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold))
 
 
 def get_noisy_data_path(model_type, fold):
-    return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold), 'noise_gaussian')
+    return os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), 'noise_gaussian')
 
 
 def get_adversarial_data_path(model_type, fold, attack_type, attack_param_list):
     # Example `attack_param_list = [('stepsize', 0.05), ('confidence', 0), ('epsilon', 0.0039)]`
     base = ''.join(['{}_{}'.format(a, str(b)) for a, b in attack_param_list])
-    return os.path.join(ROOT, 'numpy_data', model_type, 'fold_{}'.format(fold), attack_type, base)
+    return os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type, base)
 
 
 def get_output_path(model_type):

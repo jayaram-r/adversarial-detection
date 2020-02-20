@@ -12,23 +12,7 @@ from nets.mnist import *
 # from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
-from helpers.constants import (
-    ROOT,
-    DATA_PATH,
-    SEED_DEFAULT,
-    CROSS_VAL_SIZE,
-    NORMALIZE_IMAGES,
-    BATCH_SIZE_DEF,
-    DETECTION_METHODS,
-    TEST_STATS_SUPPORTED,
-    NOISE_PROPORTION,
-    FPR_MAX_PAUC,
-    FPR_THRESH,
-    METHOD_NAME_MAP,
-    LAYERS_TRUST_SCORE,
-    ATTACK_NORM_MAP,
-    EPSILON_VALUES
-)
+from helpers.constants import *
 from helpers.utils import (
     load_model_checkpoint,
     save_model_checkpoint,
@@ -38,8 +22,10 @@ from helpers.utils import (
     get_clean_data_path,
     get_adversarial_data_path,
     get_output_path,
+    check_label_mismatch,
     metrics_varying_positive_class_proportion
 )
+from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
     get_samples_as_ndarray,
     get_wcls,
@@ -57,6 +43,7 @@ from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
 
 
+# Parameters that were used for the attack data generation
 ATTACK_PARAMS = {
     'stepsize': 0.05,
     'confidence': 0,
@@ -74,6 +61,44 @@ MIXED_ATTACK_PROPORTIONS = {
     'PGD': 0.4,
     'CW': 0.5
 }
+
+
+def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
+    layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings(
+        model, device, data_loader, method=method
+    )
+    # NOTE: `labels` returned by this function should be the same as the `labels_orig`
+    if not np.array_equal(labels_orig, labels):
+        raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
+                         "labels.")
+
+    return layer_embeddings, labels_pred
+
+
+def get_config_trust_score(modelfile_dim_reduc, layer_type):
+    config_trust_score = dict()
+    # defines the `1 - alpha` density level set
+    config_trust_score['alpha'] = 0.0
+    # number of neighbors; set to 10 in the paper
+    config_trust_score['n_neighbors'] = None
+
+    if layer_type == 'input':
+        layer_index = 0
+    elif layer_type == 'logit':
+        layer_index = -1
+    elif layer_type == 'fc_prelogit':
+        layer_index = -2
+    else:
+        raise ValueError("Unknown layer type '{}'".format(layer_type))
+
+    config_trust_score['layer'] = layer_index
+    model_dim_reduc = None
+    if modelfile_dim_reduc:
+        models = load_dimension_reduction_models(modelfile_dim_reduc)
+        model_dim_reduc = models[layer_index]
+
+    config_trust_score['model_dr'] = model_dim_reduc
+    return config_trust_score
 
 
 def main():
@@ -94,7 +119,7 @@ def main():
                         help='Perform OOD detection instead of adversarial (if applicable)')
     parser.add_argument('--exclude-noisy', action='store_true', default=False,
                         help='Use option to exclude noisy samples from training and evaluation')
-    parser.add_argument('--model-dim-reduc', '--mdr', default='',
+    parser.add_argument('--modelfile-dim-reduc', '--mdr', default='',
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
@@ -128,36 +153,42 @@ def main():
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
+    # Method name for results and plots
     method_name = METHOD_NAME_MAP[args.detection_method]
 
-    # Dimensionality reduction is applied only for some methods in some scenarios
+    # Dimensionality reduction to the layer embeddings is applied only for methods in certain configurations
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
+        # Append the test statistic to the method name
+        method_name = '{}_{}'.format(method_name, args.test_statistic)
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
-        # Append the test statistic to the method name
-        method_name = '{}_{}'.format(method_name, args.test_statistic)
     if args.detection_method == 'trust':
         # Append the layer name to the method name
         method_name = '{}_{}'.format(method_name, args.layer_trust_score)
-        if args.layer_trust_score in ['input', 'fc_prelogit']:
-            # Dimension reduction is not applied to the logit layer
+        # Dimension reduction is not applied to the logit layer
+        if args.layer_trust_score != 'logit':
             apply_dim_reduc = True
 
     # Model file for dimension reduction, if required
-    model_dim_reduc = None
+    modelfile_dim_reduc = None
     if apply_dim_reduc:
-        if args.model_dim_reduc:
-            model_dim_reduc = args.model_dim_reduc
+        if args.modelfile_dim_reduc:
+            modelfile_dim_reduc = args.modelfile_dim_reduc
         else:
             # Default path to the dimension reduction model file
-            model_dim_reduc = get_path_dr_models(args.model_type)
+            modelfile_dim_reduc = get_path_dr_models(args.model_type)
 
-        if not os.path.isfile(model_dim_reduc):
-            raise ValueError("Model file specified for dimension reduction does not exist: {}".
-                             format(model_dim_reduc))
+        if not os.path.isfile(modelfile_dim_reduc):
+            raise ValueError("Model file for dimension reduction is required, but does not exist: {}".
+                             format(modelfile_dim_reduc))
+
+    config_trust_score = dict()
+    if args.detection_method == 'trust':
+        # Get the layer index and load the layer-specific dimensionality reduction model for the trust score
+        config_trust_score = get_config_trust_score(modelfile_dim_reduc, args.layer_trust_score)
 
     # Data loader and pre-trained DNN model corresponding to the dataset
     data_path = DATA_PATH
@@ -208,6 +239,11 @@ def main():
     # Set model in evaluation mode
     model.eval()
 
+    # Check if the numpy data directory exists
+    d = os.path.join(NUMPY_DATA_PATH, args.model_type)
+    if not os.path.isdir(d):
+        raise ValueError("Directory for the numpy data files not found: {}".format(d))
+
     attack_params_list = [
         ('stepsize', ATTACK_PARAMS['stepsize']),
         ('confidence', ATTACK_PARAMS['confidence']),
@@ -217,6 +253,7 @@ def main():
         ('maxepsilon', ATTACK_PARAMS['maxepsilon']),
         ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
     ]
+
     # Cross-validation
     scores_folds = []
     labels_folds = []
@@ -234,22 +271,13 @@ def main():
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
-        layer_embeddings_tr, labels_tr1, labels_pred_tr, _ = extract_layer_embeddings(
-            model, device, train_fold_loader, method=args.detection_method
+        layer_embeddings_tr, labels_pred_tr = helper_layer_embeddings(
+            model, device, train_fold_loader, args.detection_method, labels_tr
         )
-        # NOTE: `labels_tr1` returned by this function should be the same as the `labels_tr` loaded from file
-        # because the DataLoader has `shuffle` set to False.
-        if not np.array_equal(labels_tr, labels_tr1):
-            raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
-                             "labels.")
-
         print("\nCalculating the layer embeddings and DNN predictions for the clean test data split:")
-        layer_embeddings_te, labels_te1, labels_pred_te, _ = extract_layer_embeddings(
-            model, device, test_fold_loader, method=args.detection_method
+        layer_embeddings_te, labels_pred_te = helper_layer_embeddings(
+            model, device, test_fold_loader, args.detection_method, labels_te
         )
-        if not np.array_equal(labels_te, labels_te1):
-            raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
-                             "labels.")
 
         # Load the saved adversarial numpy data generated from this training and test fold
         numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
@@ -268,24 +296,18 @@ def main():
         if args.detection_method == 'lid':
             # Needed only for the LID method
             print("\nCalculating the layer embeddings and DNN predictions for the adversarial train data split:")
-            layer_embeddings_tr_adv, labels_tr_adv1, labels_pred_tr_adv, _ = extract_layer_embeddings(
-                model, device, adv_train_fold_loader, method=args.detection_method
+            layer_embeddings_tr_adv, labels_pred_tr_adv = helper_layer_embeddings(
+                model, device, adv_train_fold_loader, args.detection_method, labels_tr_adv
             )
-            if not np.array_equal(labels_tr_adv, labels_tr_adv1):
-                raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the "
-                                 "original labels.")
+            check_label_mismatch(labels_tr_adv, labels_pred_tr_adv)
 
         print("\nCalculating the layer embeddings and DNN predictions for the adversarial test data split:")
-        layer_embeddings_te_adv, labels_te_adv1, labels_pred_te_adv, _ = extract_layer_embeddings(
-            model, device, adv_test_fold_loader, method=args.detection_method
+        layer_embeddings_te_adv, labels_pred_te_adv = helper_layer_embeddings(
+            model, device, adv_test_fold_loader, args.detection_method, labels_te_adv
         )
-        if not np.array_equal(labels_te_adv, labels_te_adv1):
-            raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
-                             "labels.")
+        check_label_mismatch(labels_te_adv, labels_pred_te_adv)
 
-        # Load noisy data from the saved numpy files
-        
-
+        # TODO: Load noisy data from the saved numpy files, create data loaders, and extract layer embeddings
 
         # Detection labels (0 denoting clean and 1 adversarial)
         labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
@@ -311,8 +333,8 @@ def main():
                 seed_rng=args.seed
             )
             # Fit the detector on clean, noisy, and adversarial data from the training fold
-            ret = model_det.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
-                                layer_embeddings_noisy=layer_embeddings_tr_noisy)
+            _ = model_det.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
+                              layer_embeddings_noisy=layer_embeddings_tr_noisy)
             # Scores on clean data from the test fold
             scores_adv1 = model_det.score(layer_embeddings_te)
 
@@ -325,12 +347,12 @@ def main():
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
                 skip_dim_reduction=(not apply_dim_reduc),
-                model_file_dim_reduction=model_dim_reduc,
+                model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
             # Fit the detector on clean data from the training fold
-            det_model = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr)
+            _ = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
             scores_adv1, scores_ood1 = det_model.score(layer_embeddings_te, labels_pred_te)
@@ -345,12 +367,12 @@ def main():
             det_model = DeepKNN(
                 n_neighbors=None,  # can be set to other values used in the paper
                 skip_dim_reduction=True,
-                model_file_dim_reduction=model_dim_reduc,
+                model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
             # Fit the detector on clean data from the training fold
-            det_model = det_model.fit(layer_embeddings_tr, labels_tr)
+            _ = det_model.fit(layer_embeddings_tr, labels_tr)
 
             # Scores on clean data from the test fold
             scores_adv1, labels_pred_dknn1 = det_model.score(layer_embeddings_te)
@@ -359,7 +381,28 @@ def main():
             scores_adv2, labels_pred_dknn2 = det_model.score(layer_embeddings_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            # labels_pred_dknn = np.concatenate([labels_pred_dknn1, labels_pred_dknn2])
 
+        elif args.detection_method == 'trust':
+            ind_layer = config_trust_score['layer']
+            det_model = TrustScore(
+                alpha=config_trust_score['alpha'],
+                n_neighbors=config_trust_score['n_neighbors'],
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_dim_reduction=config_trust_score['model_dr'],
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            # Fit the detector on clean data from the training fold
+            _ = det_model.fit(layer_embeddings_tr[ind_layer], labels_tr, labels_pred_tr)
+
+            # Scores on clean data from the test fold
+            scores_adv1 = det_model.score(layer_embeddings_te[ind_layer], labels_pred_te)
+
+            # Scores on adversarial data from the test fold
+            scores_adv2 = det_model.score(layer_embeddings_te_adv[ind_layer], labels_pred_te_adv)
+
+            scores_adv = np.concatenate([scores_adv1, scores_adv2])
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 

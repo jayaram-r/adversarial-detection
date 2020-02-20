@@ -3,6 +3,7 @@ import numpy
 
 ROOT = '/nobackup/varun/adversarial-detection/expts'
 DATA_PATH = os.path.join(ROOT, 'data')
+NUMPY_DATA_PATH = os.path.join(ROOT, 'numpy_data')
 MODEL_PATH = os.path.join(ROOT, 'models')
 OUTPUT_PATH = os.path.join(ROOT, 'outputs')
 
@@ -59,8 +60,8 @@ METHOD_NAME_MAP = {
     'proposed': 'proposed',
     'lid': 'LID_ICLR',
     'odds': 'odds_are_odd_ICML',
-    'dknn': 'deep-KNN',
-    'trust': 'trust-score'
+    'dknn': 'deep_KNN',
+    'trust': 'trust_score'
 }
 
 # List of layerwise test statistics supported by the proposed method
