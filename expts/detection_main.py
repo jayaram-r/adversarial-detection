@@ -101,6 +101,11 @@ def get_config_trust_score(modelfile_dim_reduc, layer_type):
     return config_trust_score
 
 
+def get_config_deep_knn():
+    return {'n_neighbors': None,    # can be set to other values used in the paper
+            'skip_dim_reduction': True}
+
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
@@ -364,9 +369,10 @@ def main():
             scores_ood = np.concatenate([scores_ood1, scores_ood2])
 
         elif args.detection_method == 'dknn':
+            config_dknn = get_config_deep_knn()
             det_model = DeepKNN(
-                n_neighbors=None,  # can be set to other values used in the paper
-                skip_dim_reduction=True,
+                n_neighbors=config_dknn['n_neighbors'],
+                skip_dim_reduction=config_dknn['skip_dim_reduction'],
                 model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
