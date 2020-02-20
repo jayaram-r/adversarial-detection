@@ -59,7 +59,7 @@ DETECTION_METHODS = ['proposed', 'lid', 'odds', 'dknn', 'trust']
 METHOD_NAME_MAP = {
     'proposed': 'proposed',
     'lid': 'LID_ICLR',
-    'odds': 'odds_are_odd_ICML',
+    'odds': 'odds_are_odd',
     'dknn': 'deep_KNN',
     'trust': 'trust_score'
 }
