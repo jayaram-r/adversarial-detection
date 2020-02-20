@@ -45,7 +45,7 @@ class TrustScore:
                  metric='euclidean', metric_kwargs=None,
                  approx_nearest_neighbors=True,
                  skip_dim_reduction=True,
-                 model_file_dim_reduction=None,
+                 model_dim_reduction=None,
                  n_jobs=1,
                  low_memory=False,
                  seed_rng=SEED_DEFAULT):
@@ -67,9 +67,10 @@ class TrustScore:
                                          find the nearest neighbors. The NN-descent method is used for approximate
                                          nearest neighbor searches.
         :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
-        :param model_file_dim_reduction: Path to the model file that contains the models for performing dimension
-                                         reduction at each layer. This will be a pickle file that loads into a list
-                                         of model dictionaries.
+        :param model_dim_reduction: None or a dimensionality reduction model object that linearly transforms
+                                    (projects) data to a lower dimension. The transformation matrix can be obtained
+                                    by applying linear dimensionality reduction methods such as neighborhood
+                                    preserving projection (NPP) or PCA.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
         :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
                            is likely to increase the running time.
@@ -84,19 +85,18 @@ class TrustScore:
         self.metric_kwargs = metric_kwargs
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.skip_dim_reduction = skip_dim_reduction
-        self.model_file_dim_reduction = model_file_dim_reduction
+        self.model_dim_reduction = model_dim_reduction
         self.n_jobs = get_num_jobs(n_jobs)
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
         np.random.seed(self.seed_rng)
-        # Load the dimension reduction model if required
-        self.transform_model = None
-        if not self.skip_dim_reduction:
-            if self.model_file_dim_reduction is None:
-                raise ValueError("Model file for dimension reduction is required but not specified as input.")
-
-            self.transform_model = load_dimension_reduction_models(self.model_file_dim_reduction)
+        # Check the dimension reduction model
+        if skip_dim_reduction:
+            self.model_dim_reduction = None
+        else:
+            if self.model_dim_reduction is None:
+                raise ValueError("Model for dimensionality reduction is required but not specified as input.")
 
         self.labels_unique = None
         self.n_classes = None
@@ -139,8 +139,8 @@ class TrustScore:
         logger.info("Number of classes: {:d}.".format(self.n_classes))
         logger.info("Number of neighbors (k): {:d}.".format(self.n_neighbors))
         logger.info("Fraction of outliers (alpha): {:.4f}.".format(self.alpha))
-        if self.transform_model:
-            data = transform_data_from_model(data, self.transform_model)
+        if self.model_dim_reduction:
+            data = transform_data_from_model(data, self.model_dim_reduction)
             dim = data.shape[1]
             logger.info("Applying dimension reduction to the data. Projected dimension = {:d}.".format(dim))
 
@@ -257,8 +257,8 @@ class TrustScore:
         if is_train:
             return self.scores_estim
 
-        if self.transform_model:
-            data_test = transform_data_from_model(data_test, self.transform_model)
+        if self.model_dim_reduction:
+            data_test = transform_data_from_model(data_test, self.model_dim_reduction)
 
         distance_level_sets = np.zeros((data_test.shape[0], self.n_classes))
         for j, c in enumerate(self.labels_unique):

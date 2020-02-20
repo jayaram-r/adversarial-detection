@@ -73,7 +73,8 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
     num_samples_partial = 0
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(data_loader):
-            data, target = data.to(device), target.to(device)
+            data = data.to(device)
+            # target = target.to(device)
 
             temp = target.detach().cpu().numpy()
             labels.extend(temp)
