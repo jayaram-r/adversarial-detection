@@ -47,15 +47,15 @@ def select_covar_types(nd, ns):
     if nd <= 50:
         # low dimensional
         if ns >= (100 * nd):
-            covar_types = ['full', 'diag', 'tied']
+            covar_types = ['full', 'tied']
         elif ns >= (10 * nd):
-            covar_types = ['diag', 'tied']
+            covar_types = ['tied', 'diag']
         else:
             covar_types = ['diag', 'spherical']
     elif nd <= 250:
         # medium dimensional
         if ns >= (10 * nd):
-            covar_types = ['diag', 'tied']
+            covar_types = ['tied', 'diag']
         else:
             covar_types = ['diag', 'spherical']
     else:
