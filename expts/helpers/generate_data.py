@@ -3,9 +3,10 @@ Generate data that follows a mixture of factor analyzers (MFA) model
 """
 import numpy as np
 from numba import njit
+import sys
 import logging
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 

@@ -3,6 +3,7 @@ Basic k nearest neighbors classifier that supports approximate nearest neighbor 
 metrics including shared nearest neighbors.
 """
 import numpy as np
+import sys
 import multiprocessing
 import operator
 from functools import partial
@@ -25,7 +26,7 @@ from helpers.constants import (
     METRIC_DEF
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 

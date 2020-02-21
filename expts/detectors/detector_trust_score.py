@@ -28,7 +28,7 @@ from helpers.dimension_reduction_methods import (
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 

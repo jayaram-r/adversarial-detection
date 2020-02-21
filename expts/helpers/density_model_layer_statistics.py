@@ -9,11 +9,12 @@ criterion (BIC) for model complexity.
 
 """
 import numpy as np
+import sys
 import logging
 from sklearn.mixture import GaussianMixture
 from helpers.constants import SEED_DEFAULT
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 

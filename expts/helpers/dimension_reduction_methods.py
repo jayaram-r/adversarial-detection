@@ -25,6 +25,7 @@ Note that [4] also implements a variation of the OLPP method, but we do not impl
 
 """
 import numpy as np
+import sys
 from scipy import sparse
 from scipy.linalg import eigh, eigvalsh, solve
 from sklearn.decomposition import PCA
@@ -46,7 +47,7 @@ except:
     import pickle
 
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 METHODS_LIST = ['LPP', 'OLPP', 'NPP', 'ONPP', 'PCA']
