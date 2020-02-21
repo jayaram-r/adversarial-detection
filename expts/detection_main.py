@@ -356,8 +356,11 @@ def main():
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'proposed':
+            num_top_ranked = min(2, len(layer_embeddings_tr) - 1)
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
+                use_top_ranked=False,
+                num_top_ranked=num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
                 model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
@@ -372,8 +375,8 @@ def main():
             # Scores on adversarial data from the test fold
             scores_adv2, scores_ood2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv)
 
-            scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            scores_ood = np.concatenate([scores_ood1, scores_ood2])
+            # scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            scores_adv = np.concatenate([scores_ood1, scores_ood2])
 
         elif args.detection_method == 'dknn':
             config_dknn = get_config_deep_knn()
