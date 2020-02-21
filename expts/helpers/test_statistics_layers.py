@@ -251,7 +251,7 @@ class MultinomialScore(TestStatistic):
             nn_indices, _ = self.index_knn.query(features_test, k=self.n_neighbors)
             _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
-        scores = np.zeros(n_test, 1 + self.n_classes)
+        scores = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
@@ -388,7 +388,7 @@ class LIDScore(TestStatistic):
             _, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
             lid_estimates = lid_mle_amsaleg(nn_distances)
 
-        scores = np.zeros(n_test, 1 + self.n_classes)
+        scores = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
@@ -557,7 +557,7 @@ class LLEScore(TestStatistic):
             # the reconstruction errors
             errors_lle = self._calc_reconstruction_errors(features_test, nn_indices)
 
-        scores = np.zeros(n_test, 1 + self.n_classes)
+        scores = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
