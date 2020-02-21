@@ -501,12 +501,11 @@ class NeighborhoodPreservingProjection:
         # we can set `self.neighbors = data.shape[1]` or add a small nonzero value to the diagonal elements of the
         # Gram matrix
         d = data.shape[1]
-        if self.n_neighbors > d:
-            if d >= 10:
-                # Heuristic choice of dimension 10. Done to avoid setting the number of neighbors to be very small
-                logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
-                            "matrix while solving for neighborhood weights.".format(self.n_neighbors, d))
-                self.n_neighbors = d
+        if self.n_neighbors >= d:
+            k = max(d - 1, 1)
+            logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
+                        "matrix while solving for neighborhood weights.".format(self.n_neighbors, k))
+            self.n_neighbors = k
 
         if self.dim_projection == 'auto':
             # Estimate the intrinsic dimension of the data and use that as the projected dimension

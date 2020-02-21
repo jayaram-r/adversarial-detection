@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
+import random
 import numpy as np
 import torch
 from torchvision import datasets, transforms
@@ -22,6 +23,7 @@ from helpers.utils import (
     get_clean_data_path,
     get_adversarial_data_path,
     get_output_path,
+    list_all_adversarial_subdirs,
     check_label_mismatch,
     metrics_varying_positive_class_proportion
 )
@@ -103,7 +105,7 @@ def get_config_trust_score(modelfile_dim_reduc, layer_type):
 
 def get_config_deep_knn():
     return {'n_neighbors': None,    # can be set to other values used in the paper
-            'skip_dim_reduction': True}
+            'skip_dim_reduction': False}
 
 
 def main():
@@ -147,6 +149,7 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
+    random.seed(args.seed)
 
     # Output directory
     if not args.output_dir:
@@ -170,12 +173,15 @@ def main():
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
-    if args.detection_method == 'trust':
+    elif args.detection_method == 'trust':
         # Append the layer name to the method name
         method_name = '{}_{}'.format(method_name, args.layer_trust_score)
         # Dimension reduction is not applied to the logit layer
         if args.layer_trust_score != 'logit':
             apply_dim_reduc = True
+
+    elif args.detection_method == 'dknn':
+        apply_dim_reduc = True
 
     # Model file for dimension reduction, if required
     modelfile_dim_reduc = None
@@ -263,15 +269,13 @@ def main():
     scores_folds = []
     labels_folds = []
     for i in range(args.num_folds):
+        print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path, adversarial=False)
 
-        print("\nCross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
-              format(i + 1, labels_tr.shape[0], labels_te.shape[0]))
         # Data loader for the train fold
         train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
-
         # Data loader for the test fold
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
@@ -285,13 +289,16 @@ def main():
         )
 
         # Load the saved adversarial numpy data generated from this training and test fold
-        numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
+        # numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
+        numpy_save_path = list_all_adversarial_subdirs(args.model_type, i + 1, args.adv_attack)[0]
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_numpy_data(numpy_save_path, adversarial=True)
 
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
-        print("\nNumber of adversarial samples generated from the train fold = {:d}.".format(num_adv_tr))
-        print("Number of adversarial samples generated from the test fold = {:d}.".format(num_adv_te))
+        print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
+              "samples = {:.4f}".format(labels_tr.shape[0], num_adv_tr, (100. * num_adv_tr) / labels_tr.shape[0]))
+        print("Test fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
+              "samples = {:.4f}".format(labels_te.shape[0], num_adv_te, (100. * num_adv_te) / labels_te.shape[0]))
         # Adversarial data loader for the train fold
         adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
                                                   device=device)
@@ -349,8 +356,11 @@ def main():
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'proposed':
+            num_top_ranked = min(2, len(layer_embeddings_tr) - 1)
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
+                use_top_ranked=False,
+                num_top_ranked=num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
                 model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
@@ -365,8 +375,8 @@ def main():
             # Scores on adversarial data from the test fold
             scores_adv2, scores_ood2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv)
 
-            scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            scores_ood = np.concatenate([scores_ood1, scores_ood2])
+            # scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            scores_adv = np.concatenate([scores_ood1, scores_ood2])
 
         elif args.detection_method == 'dknn':
             config_dknn = get_config_deep_knn()
