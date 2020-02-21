@@ -122,10 +122,15 @@ def main():
     parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
                         help="Which layer to use for the trust score calculation. Choices are: {}".
                         format(', '.join(LAYERS_TRUST_SCORE)))
-    parser.add_argument('--ood', action='store_true', default=False,
-                        help='Perform OOD detection instead of adversarial (if applicable)')
-    parser.add_argument('--exclude-noisy', action='store_true', default=False,
-                        help='Use option to exclude noisy samples from training and evaluation')
+    parser.add_argument(
+        '--use-top-ranked', '--utr', action='store_true', default=False,
+        help='Option that enables only top-ranked test statistics from the layers to be used for the proposed method'
+    )
+    parser.add_argument(
+        '--num-top-ranked', '--ntr', type=int, default=NUM_TOP_RANKED,
+        help='If the option --use-top-ranked is provided, this option specifies the number of top-ranked test '
+             'statistics to be used by the proposed method'
+    )
     parser.add_argument('--modelfile-dim-reduc', '--mdr', default='',
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
@@ -356,11 +361,10 @@ def main():
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'proposed':
-            num_top_ranked = min(2, len(layer_embeddings_tr) - 1)
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
-                use_top_ranked=False,
-                num_top_ranked=num_top_ranked,
+                use_top_ranked=args.use_top_ranked,
+                num_top_ranked=args.num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
                 model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
