@@ -161,7 +161,7 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type):
     if not d_sub:
         raise ValueError("Directory '{}' does not have any sub-directories.".format(d))
 
-    return d_sub
+    return sorted(d_sub)
 
 
 def calculate_accuracy(model, device, data_loader=None, data=None, labels=None, batch_size=BATCH_SIZE_DEF):

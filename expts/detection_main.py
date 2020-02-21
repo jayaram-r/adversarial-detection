@@ -149,8 +149,8 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-
     random.seed(args.seed)
+
     # Output directory
     if not args.output_dir:
         base_dir = get_output_path(args.model_type)
@@ -266,15 +266,13 @@ def main():
     scores_folds = []
     labels_folds = []
     for i in range(args.num_folds):
+        print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path, adversarial=False)
 
-        print("\nCross-validation fold {:d}. Train split size = {:d}. Test split size = {:d}".
-              format(i + 1, labels_tr.shape[0], labels_te.shape[0]))
         # Data loader for the train fold
         train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
-
         # Data loader for the test fold
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
@@ -288,14 +286,16 @@ def main():
         )
 
         # Load the saved adversarial numpy data generated from this training and test fold
-        numpy_save_path = random.choice(list_all_adversarial_subdirs(args.model_type, i + 1, args.adv_attack))
         # numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
+        numpy_save_path = list_all_adversarial_subdirs(args.model_type, i + 1, args.adv_attack)[0]
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_numpy_data(numpy_save_path, adversarial=True)
 
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
-        print("\nNumber of adversarial samples generated from the train fold = {:d}.".format(num_adv_tr))
-        print("Number of adversarial samples generated from the test fold = {:d}.".format(num_adv_te))
+        print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
+              "samples = {:.4f}".format(labels_tr.shape[0], num_adv_tr, (100. * num_adv_tr) / labels_tr.shape[0]))
+        print("Test fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
+              "samples = {:.4f}".format(labels_te.shape[0], num_adv_te, (100. * num_adv_te) / labels_te.shape[0]))
         # Adversarial data loader for the train fold
         adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
                                                   device=device)
