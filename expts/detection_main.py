@@ -105,7 +105,7 @@ def get_config_trust_score(modelfile_dim_reduc, layer_type):
 
 def get_config_deep_knn():
     return {'n_neighbors': None,    # can be set to other values used in the paper
-            'skip_dim_reduction': True}
+            'skip_dim_reduction': False}
 
 
 def main():
@@ -173,12 +173,15 @@ def main():
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
 
-    if args.detection_method == 'trust':
+    elif args.detection_method == 'trust':
         # Append the layer name to the method name
         method_name = '{}_{}'.format(method_name, args.layer_trust_score)
         # Dimension reduction is not applied to the logit layer
         if args.layer_trust_score != 'logit':
             apply_dim_reduc = True
+
+    elif args.detection_method == 'dknn':
+        apply_dim_reduc = True
 
     # Model file for dimension reduction, if required
     modelfile_dim_reduc = None
