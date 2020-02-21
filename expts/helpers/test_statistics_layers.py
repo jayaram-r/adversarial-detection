@@ -469,7 +469,7 @@ class LLEScore(TestStatistic):
         super(LLEScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
         self.reg_eps = reg_eps
 
-        if features.shape[1] > min_dim_pca:
+        if features.shape[1] >= min_dim_pca:
             logger.info("Applying PCA as first-level dimension reduction step.")
             features, self.mean_data, self.transform_pca = pca_wrapper(
                 features, cutoff=pca_cutoff, seed_rng=self.seed_rng
@@ -480,12 +480,11 @@ class LLEScore(TestStatistic):
         # we set `self.neighbors = features.shape[1]` or add a small nonzero value to the diagonal elements of the
         # Gram matrix
         d = features.shape[1]
-        if self.n_neighbors > d:
-            if d >= 10:
-                # Heuristic choice of dimension 10. Done to avoid setting the number of neighbors to be very small
-                logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
-                            "matrix while solving for neighborhood weights.".format(self.n_neighbors, d))
-                self.n_neighbors = d
+        if self.n_neighbors >= d:
+            k = max(d - 1, 1)
+            logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
+                        "matrix while solving for neighborhood weights.".format(self.n_neighbors, k))
+            self.n_neighbors = k
 
         logger.info("Building a KNN index for nearest neighbor queries.")
         self.index_knn = KNNIndex(

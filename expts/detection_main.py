@@ -356,8 +356,11 @@ def main():
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'proposed':
+            num_top_ranked = min(2, len(layer_embeddings_tr) - 1)
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
+                use_top_ranked=False,
+                num_top_ranked=num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
                 model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
