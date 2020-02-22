@@ -172,8 +172,12 @@ def main():
     # Dimensionality reduction to the layer embeddings is applied only for methods in certain configurations
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
-        # Append the test statistic to the method name
-        method_name = '{}_{}'.format(method_name, args.test_statistic)
+        # Append the test statistic type to the method name
+        if not args.use_top_ranked:
+            method_name = '{}_{}_all'.format(method_name, args.test_statistic)
+        else:
+            method_name = '{}_{}_top{:d}'.format(method_name, args.test_statistic, args.num_top_ranked)
+
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
             apply_dim_reduc = True
