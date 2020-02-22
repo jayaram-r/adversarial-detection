@@ -9,11 +9,12 @@ criterion (BIC) for model complexity.
 
 """
 import numpy as np
+import sys
 import logging
 from sklearn.mixture import GaussianMixture
 from helpers.constants import SEED_DEFAULT
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
@@ -47,15 +48,15 @@ def select_covar_types(nd, ns):
     if nd <= 50:
         # low dimensional
         if ns >= (100 * nd):
-            covar_types = ['full', 'diag', 'tied']
+            covar_types = ['full', 'tied']
         elif ns >= (10 * nd):
-            covar_types = ['diag', 'tied']
+            covar_types = ['tied', 'diag']
         else:
             covar_types = ['diag', 'spherical']
     elif nd <= 250:
         # medium dimensional
         if ns >= (10 * nd):
-            covar_types = ['diag', 'tied']
+            covar_types = ['tied', 'diag']
         else:
             covar_types = ['diag', 'spherical']
     else:
