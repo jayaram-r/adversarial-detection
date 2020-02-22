@@ -45,18 +45,19 @@ def select_covar_types(nd, ns):
     :param ns: number of samples.
     :return: list of covariance types.
     """
-    if nd <= 50:
+    if nd <= 20:
         # low dimensional
-        if ns >= (100 * nd):
+        if ns >= (10 * nd):
             covar_types = ['full', 'tied']
-        elif ns >= (10 * nd):
-            covar_types = ['tied', 'diag']
         else:
-            covar_types = ['diag', 'spherical']
+            covar_types = ['tied', 'diag']
     elif nd <= 250:
         # medium dimensional
         if ns >= (10 * nd):
             covar_types = ['tied', 'diag']
+            if nd <= 50:
+                covar_types.append('full')
+
         else:
             covar_types = ['diag', 'spherical']
     else:

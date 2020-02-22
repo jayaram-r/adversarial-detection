@@ -35,11 +35,7 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.detector_lid_paper import (
-    flip,
-    get_noisy_samples,
-    DetectorLID
-)   # ICLR 2018
+from detectors.detector_lid_paper import DetectorLID
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
