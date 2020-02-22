@@ -1,5 +1,6 @@
 
 import numpy as np
+import sys
 import torch
 import logging
 import copy
@@ -24,7 +25,7 @@ from helpers.density_model_layer_statistics import (
     score_log_normal_mixture
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 

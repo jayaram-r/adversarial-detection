@@ -3,6 +3,7 @@ Test statistics to be calculated at the different layers of the trained deep neu
 
 """
 import numpy as np
+import sys
 from abc import ABC, abstractmethod
 import multiprocessing
 from functools import partial
@@ -25,7 +26,7 @@ from helpers.constants import (
     METRIC_DEF
 )
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
