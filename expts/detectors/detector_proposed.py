@@ -403,7 +403,8 @@ class DetectorLayerStatistics:
 
         return self
 
-    def score(self, layer_embeddings, labels_pred, return_corrected_predictions=False, is_train=False):
+    def score(self, layer_embeddings, labels_pred, score_type='adversarial',
+              return_corrected_predictions=False, is_train=False):
         """
         Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
         score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
@@ -415,18 +416,16 @@ class DetectorLayerStatistics:
                                  the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
                                  is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
         :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
+        :param score_type: string defining the type of score to return - 'adversarial' or 'ood'.
         :param return_corrected_predictions: Set to True in order to get the most probable class prediction based
                                              on Bayes class posterior given the test statistic vector. Note that this
                                              will change the returned values.
         :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
 
-        :return: (scores_adver, scores_ood [, corrected_classes])
-            - scores_adver: numpy array of scores corresponding to attack detection. The array should have shape
-                            `(labels_pred.shape[0], )`. Larger values of the scores correspond to a higher probability
-                            that the test sample is adversarial.
-            - scores_ood: numpy array of scores corresponding to OOD detection. Same shape as `scores_adver`. Larger
-                          values of the scores correspond to a higher probability that the test sample is OOD.
-            #
+        :return: (scores [, corrected_classes])
+            - scores: numpy array of scores for detection or ranking. The array should have shape
+                      `(labels_pred.shape[0], )` and larger values correspond to a higher higher probability that
+                      the sample is adversarial or OOD. Score returned will depend on the argument `score_type`.
             # returned only if `return_corrected_predictions = True`
             - corrected_classes: numpy array of the corrected class predictions. Has same shape and dtype as the
                                  array `labels_pred`.
@@ -435,6 +434,9 @@ class DetectorLayerStatistics:
         l = len(layer_embeddings)
         if l != self.n_layers:
             raise ValueError("Expecting {:d} layers in the input data, but received {:d}".format(self.n_layers, l))
+
+        if score_type not in {'adversarial', 'ood'}:
+            raise ValueError("Invalid value '{}' for input 'score_type'".format(score_type))
 
         # Test statistics at each layer conditioned on the predicted class and candidate true classes
         test_stats_pred = np.zeros((n_test, self.n_layers))
@@ -516,9 +518,15 @@ class DetectorLayerStatistics:
                 break
 
         if return_corrected_predictions:
-            return scores_adver, scores_ood, corrected_classes
+            if score_type == 'adversarial':
+                return scores_adver, corrected_classes
+            else:
+                return scores_ood, corrected_classes
         else:
-            return scores_adver, scores_ood
+            if score_type == 'adversarial':
+                return scores_adver
+            else:
+                return scores_ood
 
     def get_top_ranked(self, test_stats, reverse=False):
         """

@@ -111,6 +111,8 @@ def main():
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
                         format(', '.join(TEST_STATS_SUPPORTED)))
+    parser.add_argument('--score-type', '--st', choices=['adversarial', 'ood'], default='adversarial',
+                        help="Score type to use for the proposed method. Choices are 'adversarial' and 'ood'")
     parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
                         help="Which layer to use for the trust score calculation. Choices are: {}".
                         format(', '.join(LAYERS_TRUST_SCORE)))
@@ -382,13 +384,12 @@ def main():
             _ = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
-            scores_adv1, scores_ood1 = det_model.score(layer_embeddings_te, labels_pred_te)
+            scores_adv1 = det_model.score(layer_embeddings_te, labels_pred_te, score_type=args.score_type)
 
             # Scores on adversarial data from the test fold
-            scores_adv2, scores_ood2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv, score_type=args.score_type)
 
-            # scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            scores_adv = np.concatenate([scores_ood1, scores_ood2])
+            scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'dknn':
             det_model = DeepKNN(
