@@ -73,12 +73,12 @@ def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
     return layer_embeddings, labels_pred
 
 
-def get_config_trust_score(modelfile_dim_reduc, layer_type):
+def get_config_trust_score(modelfile_dim_reduc, layer_type, n_neighbors):
     config_trust_score = dict()
     # defines the `1 - alpha` density level set
     config_trust_score['alpha'] = 0.0
     # number of neighbors; set to 10 in the paper
-    config_trust_score['n_neighbors'] = None
+    config_trust_score['n_neighbors'] = n_neighbors
 
     if layer_type == 'input':
         layer_index = 0
@@ -97,11 +97,6 @@ def get_config_trust_score(modelfile_dim_reduc, layer_type):
 
     config_trust_score['model_dr'] = model_dim_reduc
     return config_trust_score
-
-
-def get_config_deep_knn():
-    return {'n_neighbors': None,    # can be set to other values used in the paper
-            'skip_dim_reduction': False}
 
 
 def main():
@@ -127,6 +122,9 @@ def main():
         help='If the option --use-top-ranked is provided, this option specifies the number of top-ranked test '
              'statistics to be used by the proposed method'
     )
+    parser.add_argument('--num-neighbors', '--nn', type=int, default=-1,
+                        help='Number of nearest neighbors (if applicable to the method). By default, this is set '
+                             'to be a power of the number of samples (n): n^{:.1f}'.format(NEIGHBORHOOD_CONST))
     parser.add_argument('--modelfile-dim-reduc', '--mdr', default='',
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
@@ -151,6 +149,11 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     random.seed(args.seed)
+
+    # Number of neighbors
+    n_neighbors = args.num_neighbors
+    if n_neighbors <= 0:
+        n_neighbors = None
 
     # Output directory
     if not args.output_dir:
@@ -204,7 +207,7 @@ def main():
     config_trust_score = dict()
     if args.detection_method == 'trust':
         # Get the layer index and load the layer-specific dimensionality reduction model for the trust score
-        config_trust_score = get_config_trust_score(modelfile_dim_reduc, args.layer_trust_score)
+        config_trust_score = get_config_trust_score(modelfile_dim_reduc, args.layer_trust_score, n_neighbors)
 
     # Data loader and pre-trained DNN model corresponding to the dataset
     data_path = DATA_PATH
@@ -345,7 +348,7 @@ def main():
             layer_embeddings_tr_noisy = None
 
             model_det = DetectorLID(
-                n_neighbors=None,
+                n_neighbors=n_neighbors,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
@@ -367,6 +370,7 @@ def main():
                 num_top_ranked=args.num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
                 model_file_dim_reduction=modelfile_dim_reduc,
+                n_neighbors=n_neighbors,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
@@ -383,10 +387,9 @@ def main():
             scores_adv = np.concatenate([scores_ood1, scores_ood2])
 
         elif args.detection_method == 'dknn':
-            config_dknn = get_config_deep_knn()
             det_model = DeepKNN(
-                n_neighbors=config_dknn['n_neighbors'],
-                skip_dim_reduction=config_dknn['skip_dim_reduction'],
+                n_neighbors=n_neighbors,
+                skip_dim_reduction=(not apply_dim_reduc),
                 model_file_dim_reduction=modelfile_dim_reduc,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
