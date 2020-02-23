@@ -37,6 +37,8 @@ class DetectorLID:
                  c_search_values=None,
                  approx_nearest_neighbors=True,
                  n_jobs=1,
+                 max_iter=200,
+                 balanced_classification=True,
                  low_memory=False,
                  seed_rng=SEED_DEFAULT):
         """
@@ -59,6 +61,11 @@ class DetectorLID:
                                          find the nearest neighbors. The NN-descent method is used for approximate
                                          nearest neighbor searches.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
+        :param max_iter: Maximum number of iterations for the optimization of the logistic classifier. The default
+                         value set by the scikit-learn library is 100, but sometimes this does not allow for
+                         convergence. Hence, increasing it to 200 here.
+        :param balanced_classification: Set to True to assign sample weights to balance the binary classification
+                                        problem separating adversarial from non-adversarial samples.
         :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
                            is likely to increase the running time.
         :param seed_rng: int value specifying the seed for the random number generator. This is passed around to
@@ -73,6 +80,8 @@ class DetectorLID:
         self.c_search_values = c_search_values
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.n_jobs = get_num_jobs(n_jobs)
+        self.max_iter = max_iter
+        self.balanced_classification = balanced_classification
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
@@ -182,31 +191,45 @@ class DetectorLID:
 
         # Feature vector and labels for the binary logistic classifier.
         # Normal and noisy samples are given labels 0 and adversarial samples are given label 1
+        n_pos = features_lid_adversarial.shape[0]
         if layer_embeddings_noisy:
             features_lid = np.concatenate([features_lid_normal, features_lid_noisy, features_lid_adversarial],
                                           axis=0)
             labels = np.concatenate([np.zeros(features_lid_normal.shape[0], dtype=np.int),
                                      np.zeros(features_lid_noisy.shape[0], dtype=np.int),
-                                     np.ones(features_lid_adversarial.shape[0], dtype=np.int)])
+                                     np.ones(n_pos, dtype=np.int)])
         else:
             features_lid = np.concatenate([features_lid_normal, features_lid_adversarial], axis=0)
             labels = np.concatenate([np.zeros(features_lid_normal.shape[0], dtype=np.int),
-                                     np.ones(features_lid_adversarial.shape[0], dtype=np.int)])
+                                     np.ones(n_pos, dtype=np.int)])
 
+        pos_prop = n_pos / float(labels.shape[0])
         # Randomly shuffle the samples to avoid determinism
         ind_perm = np.random.permutation(labels.shape[0])
         features_lid = features_lid[ind_perm, :]
         labels = labels[ind_perm]
         logger.info("Training a binary logistic classifier with {:d} samples and {:d} LID features.".
                     format(*features_lid.shape))
-        logger.info("Using {:d}-fold cross-validation with area under ROC curve (AUC) as the metric to select "
-                    "the best C hyper-parameter.".format(self.n_cv_folds))
+        logger.info("Using {:d}-fold cross-validation with area under ROC curve as the metric to select "
+                    "the best regularization hyperparameter.".format(self.n_cv_folds))
+        logger.info("Proportion of positive (adversarial or OOD) samples in the training data: {:.4f}".
+                    format(pos_prop))
+        if self.balanced_classification:
+            class_weight = {0: 1.0 / (1 - pos_prop),
+                            1: 1.0 / pos_prop}
+            logger.info("Balancing the classes by assigning sample weight {:.4f} to class 0 and sample weight "
+                        "{:.4f} to class 1".format(class_weight[0], class_weight[1]))
+        else:
+            class_weight = None
 
         self.model_logistic = LogisticRegressionCV(
             Cs=self.c_search_values,
             cv=self.n_cv_folds,
             penalty='l2',
             scoring='roc_auc',
+            multi_class='auto',
+            class_weight=class_weight,
+            max_iter=self.max_iter,
             refit=True,
             n_jobs=self.n_jobs,
             random_state=self.seed_rng
@@ -242,8 +265,8 @@ class DetectorLID:
 
         features_lid = np.zeros((n_test, self.n_layers))
         for i in range(self.n_layers):
-            logger.info("Calculating LID features for layer {:d}.".format(i + 1))
-            nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings[i], k=self.n_neighbors)
+            logger.info("Calculating LID features for layer {:d}".format(i + 1))
+            _, nn_distances = self.index_knn[i].query(layer_embeddings[i], k=self.n_neighbors)
             features_lid[:, i] = lid_mle_amsaleg(nn_distances)
 
         return self.model_logistic.decision_function(features_lid)

@@ -351,6 +351,8 @@ def main():
 
             model_det = DetectorLID(
                 n_neighbors=n_neighbors,
+                max_iter=200,
+                balanced_classification=True,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
