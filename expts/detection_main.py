@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
+import time
 import random
 import numpy as np
 import torch
@@ -35,11 +36,7 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.detector_lid_paper import (
-    flip,
-    get_noisy_samples,
-    DetectorLID
-)   # ICLR 2018
+from detectors.detector_lid_paper import DetectorLID
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
@@ -77,35 +74,31 @@ def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
     return layer_embeddings, labels_pred
 
 
-def get_config_trust_score(modelfile_dim_reduc, layer_type):
+def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
     config_trust_score = dict()
     # defines the `1 - alpha` density level set
     config_trust_score['alpha'] = 0.0
     # number of neighbors; set to 10 in the paper
-    config_trust_score['n_neighbors'] = None
+    config_trust_score['n_neighbors'] = n_neighbors
 
     if layer_type == 'input':
         layer_index = 0
     elif layer_type == 'logit':
         layer_index = -1
-    elif layer_type == 'fc_prelogit':
+    elif layer_type == 'prelogit':
         layer_index = -2
     else:
         raise ValueError("Unknown layer type '{}'".format(layer_type))
 
     config_trust_score['layer'] = layer_index
-    model_dim_reduc = None
-    if modelfile_dim_reduc:
-        models = load_dimension_reduction_models(modelfile_dim_reduc)
-        model_dim_reduc = models[layer_index]
 
-    config_trust_score['model_dr'] = model_dim_reduc
+    # Dimension reduction model for the specified layer
+    if model_dim_reduc:
+        config_trust_score['model_dr'] = model_dim_reduc[layer_index]
+    else:
+        config_trust_score['model_dr'] = None
+
     return config_trust_score
-
-
-def get_config_deep_knn():
-    return {'n_neighbors': None,    # can be set to other values used in the paper
-            'skip_dim_reduction': False}
 
 
 def main():
@@ -119,6 +112,8 @@ def main():
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
                         format(', '.join(TEST_STATS_SUPPORTED)))
+    parser.add_argument('--score-type', '--st', choices=['adversarial', 'ood'], default='adversarial',
+                        help="Score type to use for the proposed method. Choices are 'adversarial' and 'ood'")
     parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
                         help="Which layer to use for the trust score calculation. Choices are: {}".
                         format(', '.join(LAYERS_TRUST_SCORE)))
@@ -131,6 +126,9 @@ def main():
         help='If the option --use-top-ranked is provided, this option specifies the number of top-ranked test '
              'statistics to be used by the proposed method'
     )
+    parser.add_argument('--num-neighbors', '--nn', type=int, default=-1,
+                        help='Number of nearest neighbors (if applicable to the method). By default, this is set '
+                             'to be a power of the number of samples (n): n^{:.1f}'.format(NEIGHBORHOOD_CONST))
     parser.add_argument('--modelfile-dim-reduc', '--mdr', default='',
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
@@ -156,6 +154,11 @@ def main():
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
     random.seed(args.seed)
 
+    # Number of neighbors
+    n_neighbors = args.num_neighbors
+    if n_neighbors <= 0:
+        n_neighbors = None
+
     # Output directory
     if not args.output_dir:
         base_dir = get_output_path(args.model_type)
@@ -174,9 +177,13 @@ def main():
     if args.detection_method == 'proposed':
         # Append the test statistic type to the method name
         if not args.use_top_ranked:
-            method_name = '{}_{}_all'.format(method_name, args.test_statistic)
+            method_name = '{:.5s}_{:.5s}_all'.format(method_name, args.test_statistic)
         else:
-            method_name = '{}_{}_top{:d}'.format(method_name, args.test_statistic, args.num_top_ranked)
+            method_name = '{:.5s}_{:.5s}_top{:d}'.format(method_name, args.test_statistic, args.num_top_ranked)
+
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
@@ -184,31 +191,40 @@ def main():
 
     elif args.detection_method == 'trust':
         # Append the layer name to the method name
-        method_name = '{}_{}'.format(method_name, args.layer_trust_score)
+        method_name = '{:.5s}_{}'.format(method_name, args.layer_trust_score)
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
+
         # Dimension reduction is not applied to the logit layer
         if args.layer_trust_score != 'logit':
             apply_dim_reduc = True
 
     elif args.detection_method == 'dknn':
         apply_dim_reduc = True
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
 
     # Model file for dimension reduction, if required
-    modelfile_dim_reduc = None
+    model_dim_reduc = None
     if apply_dim_reduc:
         if args.modelfile_dim_reduc:
-            modelfile_dim_reduc = args.modelfile_dim_reduc
+            fname = args.modelfile_dim_reduc
         else:
             # Default path to the dimension reduction model file
-            modelfile_dim_reduc = get_path_dr_models(args.model_type)
+            fname = get_path_dr_models(args.model_type)
 
-        if not os.path.isfile(modelfile_dim_reduc):
-            raise ValueError("Model file for dimension reduction is required, but does not exist: {}".
-                             format(modelfile_dim_reduc))
+        if not os.path.isfile(fname):
+            raise ValueError("Model file for dimension reduction is required, but does not exist: {}".format(fname))
+        else:
+            # Load the dimension reduction models for each layer from the pickle file
+            model_dim_reduc = load_dimension_reduction_models(fname)
 
     config_trust_score = dict()
     if args.detection_method == 'trust':
-        # Get the layer index and load the layer-specific dimensionality reduction model for the trust score
-        config_trust_score = get_config_trust_score(modelfile_dim_reduc, args.layer_trust_score)
+        # Get the layer index and the layer-specific dimensionality reduction model for the trust score
+        config_trust_score = get_config_trust_score(model_dim_reduc, args.layer_trust_score, n_neighbors)
 
     # Data loader and pre-trained DNN model corresponding to the dataset
     data_path = DATA_PATH
@@ -274,6 +290,7 @@ def main():
         ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
     ]
 
+    ti = time.time()
     # Cross-validation
     scores_folds = []
     labels_folds = []
@@ -349,7 +366,9 @@ def main():
             layer_embeddings_tr_noisy = None
 
             model_det = DetectorLID(
-                n_neighbors=None,
+                n_neighbors=n_neighbors,
+                max_iter=200,
+                balanced_classification=True,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
@@ -370,7 +389,8 @@ def main():
                 use_top_ranked=args.use_top_ranked,
                 num_top_ranked=args.num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
-                model_file_dim_reduction=modelfile_dim_reduc,
+                model_dim_reduction=model_dim_reduc,
+                n_neighbors=n_neighbors,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
@@ -378,20 +398,18 @@ def main():
             _ = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
-            scores_adv1, scores_ood1 = det_model.score(layer_embeddings_te, labels_pred_te)
+            scores_adv1 = det_model.score(layer_embeddings_te, labels_pred_te, score_type=args.score_type)
 
             # Scores on adversarial data from the test fold
-            scores_adv2, scores_ood2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv, score_type=args.score_type)
 
-            # scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            scores_adv = np.concatenate([scores_ood1, scores_ood2])
+            scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'dknn':
-            config_dknn = get_config_deep_knn()
             det_model = DeepKNN(
-                n_neighbors=config_dknn['n_neighbors'],
-                skip_dim_reduction=config_dknn['skip_dim_reduction'],
-                model_file_dim_reduction=modelfile_dim_reduc,
+                n_neighbors=n_neighbors,
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_dim_reduction=model_dim_reduc,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
@@ -433,12 +451,13 @@ def main():
         scores_folds.append(scores_adv)
         labels_folds.append(labels_detec)
 
+    tf = time.time()
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
     results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, n_jobs=args.n_jobs,
                                                              output_file=fname)
     print("Performance metrics saved to the file: {}".format(fname))
-
+    print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
 
 if __name__ == '__main__':
     main()
