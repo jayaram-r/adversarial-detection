@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
+import time
 import random
 import numpy as np
 import torch
@@ -273,6 +274,7 @@ def main():
         ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
     ]
 
+    ti = time.time()
     # Cross-validation
     scores_folds = []
     labels_folds = []
@@ -432,12 +434,13 @@ def main():
         scores_folds.append(scores_adv)
         labels_folds.append(labels_detec)
 
+    tf = time.time()
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
     results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, n_jobs=args.n_jobs,
                                                              output_file=fname)
     print("Performance metrics saved to the file: {}".format(fname))
-
+    print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
 
 if __name__ == '__main__':
     main()
