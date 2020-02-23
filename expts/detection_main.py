@@ -85,7 +85,7 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
         layer_index = 0
     elif layer_type == 'logit':
         layer_index = -1
-    elif layer_type == 'fc_prelogit':
+    elif layer_type == 'prelogit':
         layer_index = -2
     else:
         raise ValueError("Unknown layer type '{}'".format(layer_type))
@@ -177,9 +177,13 @@ def main():
     if args.detection_method == 'proposed':
         # Append the test statistic type to the method name
         if not args.use_top_ranked:
-            method_name = '{}_{}_all'.format(method_name, args.test_statistic)
+            method_name = '{:.5s}_{:.5s}_all'.format(method_name, args.test_statistic)
         else:
-            method_name = '{}_{}_top{:d}'.format(method_name, args.test_statistic, args.num_top_ranked)
+            method_name = '{:.5s}_{:.5s}_top{:d}'.format(method_name, args.test_statistic, args.num_top_ranked)
+
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
@@ -187,13 +191,20 @@ def main():
 
     elif args.detection_method == 'trust':
         # Append the layer name to the method name
-        method_name = '{}_{}'.format(method_name, args.layer_trust_score)
+        method_name = '{:.5s}_{}'.format(method_name, args.layer_trust_score)
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
+
         # Dimension reduction is not applied to the logit layer
         if args.layer_trust_score != 'logit':
             apply_dim_reduc = True
 
     elif args.detection_method == 'dknn':
         apply_dim_reduc = True
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
 
     # Model file for dimension reduction, if required
     model_dim_reduc = None

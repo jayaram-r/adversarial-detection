@@ -67,9 +67,9 @@ METHOD_NAME_MAP = {
 # List of layerwise test statistics supported by the proposed method
 TEST_STATS_SUPPORTED = ['multinomial', 'lid', 'lle']
 
-# Layers at which the trust score calculation is supported. `fc_prelogit` refers to the fully connected layer
+# Layers at which the trust score calculation is supported. 'prelogit' refers to the fully connected layer
 # preceding the logit layer.
-LAYERS_TRUST_SCORE = ['input', 'logit', 'fc_prelogit']
+LAYERS_TRUST_SCORE = ['input', 'logit', 'prelogit']
 
 # norm type used for the different attack methods
 ATTACK_NORM_MAP = {
