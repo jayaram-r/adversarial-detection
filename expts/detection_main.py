@@ -74,7 +74,7 @@ def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
     return layer_embeddings, labels_pred
 
 
-def get_config_trust_score(modelfile_dim_reduc, layer_type, n_neighbors):
+def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
     config_trust_score = dict()
     # defines the `1 - alpha` density level set
     config_trust_score['alpha'] = 0.0
@@ -91,12 +91,13 @@ def get_config_trust_score(modelfile_dim_reduc, layer_type, n_neighbors):
         raise ValueError("Unknown layer type '{}'".format(layer_type))
 
     config_trust_score['layer'] = layer_index
-    model_dim_reduc = None
-    if modelfile_dim_reduc:
-        models = load_dimension_reduction_models(modelfile_dim_reduc)
-        model_dim_reduc = models[layer_index]
 
-    config_trust_score['model_dr'] = model_dim_reduc
+    # Dimension reduction model for the specified layer
+    if model_dim_reduc:
+        config_trust_score['model_dr'] = model_dim_reduc[layer_index]
+    else:
+        config_trust_score['model_dr'] = None
+
     return config_trust_score
 
 
@@ -195,22 +196,24 @@ def main():
         apply_dim_reduc = True
 
     # Model file for dimension reduction, if required
-    modelfile_dim_reduc = None
+    model_dim_reduc = None
     if apply_dim_reduc:
         if args.modelfile_dim_reduc:
-            modelfile_dim_reduc = args.modelfile_dim_reduc
+            fname = args.modelfile_dim_reduc
         else:
             # Default path to the dimension reduction model file
-            modelfile_dim_reduc = get_path_dr_models(args.model_type)
+            fname = get_path_dr_models(args.model_type)
 
-        if not os.path.isfile(modelfile_dim_reduc):
-            raise ValueError("Model file for dimension reduction is required, but does not exist: {}".
-                             format(modelfile_dim_reduc))
+        if not os.path.isfile(fname):
+            raise ValueError("Model file for dimension reduction is required, but does not exist: {}".format(fname))
+        else:
+            # Load the dimension reduction models for each layer from the pickle file
+            model_dim_reduc = load_dimension_reduction_models(fname)
 
     config_trust_score = dict()
     if args.detection_method == 'trust':
-        # Get the layer index and load the layer-specific dimensionality reduction model for the trust score
-        config_trust_score = get_config_trust_score(modelfile_dim_reduc, args.layer_trust_score, n_neighbors)
+        # Get the layer index and the layer-specific dimensionality reduction model for the trust score
+        config_trust_score = get_config_trust_score(model_dim_reduc, args.layer_trust_score, n_neighbors)
 
     # Data loader and pre-trained DNN model corresponding to the dataset
     data_path = DATA_PATH
@@ -375,7 +378,7 @@ def main():
                 use_top_ranked=args.use_top_ranked,
                 num_top_ranked=args.num_top_ranked,
                 skip_dim_reduction=(not apply_dim_reduc),
-                model_file_dim_reduction=modelfile_dim_reduc,
+                model_dim_reduction=model_dim_reduc,
                 n_neighbors=n_neighbors,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
@@ -395,7 +398,7 @@ def main():
             det_model = DeepKNN(
                 n_neighbors=n_neighbors,
                 skip_dim_reduction=(not apply_dim_reduc),
-                model_file_dim_reduction=modelfile_dim_reduc,
+                model_dim_reduction=model_dim_reduc,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
