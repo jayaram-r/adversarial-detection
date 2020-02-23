@@ -174,7 +174,7 @@ class DetectorLayerStatistics:
                  use_top_ranked=False,
                  num_top_ranked=NUM_TOP_RANKED,
                  skip_dim_reduction=False,
-                 model_file_dim_reduction=None,
+                 model_dim_reduction=None,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric=METRIC_DEF, metric_kwargs=None,
                  approx_nearest_neighbors=True,
@@ -190,9 +190,10 @@ class DetectorLayerStatistics:
                                statistics to use for detection. This number should be smaller than the number of
                                layers considered for detection.
         :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
-        :param model_file_dim_reduction: Path to the model file that contains the models for performing dimension
-                                         reduction at each layerr. This will be a pickle file that loads into a list
-                                         of model dictionaries.
+        :param model_dim_reduction: 1. None if dimension reduction is not required; (OR)
+                                    2. Path to a file containing the saved dimension reduction model. This will be
+                                       a pickle file that loads into a list of model dictionaries; (OR)
+                                    3. The dimension reduction model loaded into memory from the pickle file.
         :param neighborhood_constant: float value in (0, 1), that specifies the number of nearest neighbors as a
                                       function of the number of samples (data size). If `N` is the number of samples,
                                       then the number of neighbors is set to `N^neighborhood_constant`. It is
@@ -217,7 +218,6 @@ class DetectorLayerStatistics:
         self.use_top_ranked = use_top_ranked
         self.num_top_ranked = num_top_ranked
         self.skip_dim_reduction = skip_dim_reduction
-        self.model_file_dim_reduction = model_file_dim_reduction
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
         self.metric = metric
@@ -242,10 +242,16 @@ class DetectorLayerStatistics:
         # Load the dimension reduction models per-layer if required
         self.transform_models = None
         if not self.skip_dim_reduction:
-            if self.model_file_dim_reduction is None:
+            if model_dim_reduction is None:
                 raise ValueError("Model file for dimension reduction is required but not specified as input.")
-
-            self.transform_models = load_dimension_reduction_models(self.model_file_dim_reduction)
+            elif isinstance(model_dim_reduction, basestring):
+                # Pickle file is specified
+                self.transform_models = load_dimension_reduction_models(model_dim_reduction)
+            elif isinstance(model_dim_reduction, list):
+                # Model already loaded from pickle file
+                self.transform_models = model_dim_reduction
+            else:
+                raise ValueError("Invalid format for the dimension reduction model input.")
 
         self.n_layers = None
         self.labels_unique = None
