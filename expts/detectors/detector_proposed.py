@@ -174,7 +174,7 @@ class DetectorLayerStatistics:
                  use_top_ranked=False,
                  num_top_ranked=NUM_TOP_RANKED,
                  skip_dim_reduction=False,
-                 model_file_dim_reduction=None,
+                 model_dim_reduction=None,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric=METRIC_DEF, metric_kwargs=None,
                  approx_nearest_neighbors=True,
@@ -190,9 +190,10 @@ class DetectorLayerStatistics:
                                statistics to use for detection. This number should be smaller than the number of
                                layers considered for detection.
         :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
-        :param model_file_dim_reduction: Path to the model file that contains the models for performing dimension
-                                         reduction at each layerr. This will be a pickle file that loads into a list
-                                         of model dictionaries.
+        :param model_dim_reduction: 1. None if dimension reduction is not required; (OR)
+                                    2. Path to a file containing the saved dimension reduction model. This will be
+                                       a pickle file that loads into a list of model dictionaries; (OR)
+                                    3. The dimension reduction model loaded into memory from the pickle file.
         :param neighborhood_constant: float value in (0, 1), that specifies the number of nearest neighbors as a
                                       function of the number of samples (data size). If `N` is the number of samples,
                                       then the number of neighbors is set to `N^neighborhood_constant`. It is
@@ -217,7 +218,6 @@ class DetectorLayerStatistics:
         self.use_top_ranked = use_top_ranked
         self.num_top_ranked = num_top_ranked
         self.skip_dim_reduction = skip_dim_reduction
-        self.model_file_dim_reduction = model_file_dim_reduction
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
         self.metric = metric
@@ -242,10 +242,16 @@ class DetectorLayerStatistics:
         # Load the dimension reduction models per-layer if required
         self.transform_models = None
         if not self.skip_dim_reduction:
-            if self.model_file_dim_reduction is None:
+            if model_dim_reduction is None:
                 raise ValueError("Model file for dimension reduction is required but not specified as input.")
-
-            self.transform_models = load_dimension_reduction_models(self.model_file_dim_reduction)
+            elif isinstance(model_dim_reduction, basestring):
+                # Pickle file is specified
+                self.transform_models = load_dimension_reduction_models(model_dim_reduction)
+            elif isinstance(model_dim_reduction, list):
+                # Model already loaded from pickle file
+                self.transform_models = model_dim_reduction
+            else:
+                raise ValueError("Invalid format for the dimension reduction model input.")
 
         self.n_layers = None
         self.labels_unique = None
@@ -397,7 +403,8 @@ class DetectorLayerStatistics:
 
         return self
 
-    def score(self, layer_embeddings, labels_pred, return_corrected_predictions=False, is_train=False):
+    def score(self, layer_embeddings, labels_pred, score_type='adversarial',
+              return_corrected_predictions=False, is_train=False):
         """
         Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
         score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
@@ -409,18 +416,16 @@ class DetectorLayerStatistics:
                                  the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
                                  is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
         :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
+        :param score_type: string defining the type of score to return - 'adversarial' or 'ood'.
         :param return_corrected_predictions: Set to True in order to get the most probable class prediction based
                                              on Bayes class posterior given the test statistic vector. Note that this
                                              will change the returned values.
         :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
 
-        :return: (scores_adver, scores_ood [, corrected_classes])
-            - scores_adver: numpy array of scores corresponding to attack detection. The array should have shape
-                            `(labels_pred.shape[0], )`. Larger values of the scores correspond to a higher probability
-                            that the test sample is adversarial.
-            - scores_ood: numpy array of scores corresponding to OOD detection. Same shape as `scores_adver`. Larger
-                          values of the scores correspond to a higher probability that the test sample is OOD.
-            #
+        :return: (scores [, corrected_classes])
+            - scores: numpy array of scores for detection or ranking. The array should have shape
+                      `(labels_pred.shape[0], )` and larger values correspond to a higher higher probability that
+                      the sample is adversarial or OOD. Score returned will depend on the argument `score_type`.
             # returned only if `return_corrected_predictions = True`
             - corrected_classes: numpy array of the corrected class predictions. Has same shape and dtype as the
                                  array `labels_pred`.
@@ -429,6 +434,9 @@ class DetectorLayerStatistics:
         l = len(layer_embeddings)
         if l != self.n_layers:
             raise ValueError("Expecting {:d} layers in the input data, but received {:d}".format(self.n_layers, l))
+
+        if score_type not in {'adversarial', 'ood'}:
+            raise ValueError("Invalid value '{}' for input 'score_type'".format(score_type))
 
         # Test statistics at each layer conditioned on the predicted class and candidate true classes
         test_stats_pred = np.zeros((n_test, self.n_layers))
@@ -510,9 +518,15 @@ class DetectorLayerStatistics:
                 break
 
         if return_corrected_predictions:
-            return scores_adver, scores_ood, corrected_classes
+            if score_type == 'adversarial':
+                return scores_adver, corrected_classes
+            else:
+                return scores_ood, corrected_classes
         else:
-            return scores_adver, scores_ood
+            if score_type == 'adversarial':
+                return scores_adver
+            else:
+                return scores_ood
 
     def get_top_ranked(self, test_stats, reverse=False):
         """

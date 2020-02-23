@@ -44,7 +44,7 @@ class DeepKNN:
                  metric=METRIC_DEF, metric_kwargs=None,
                  approx_nearest_neighbors=True,
                  skip_dim_reduction=True,
-                 model_file_dim_reduction=None,
+                 model_dim_reduction=None,
                  n_jobs=1,
                  low_memory=False,
                  seed_rng=SEED_DEFAULT):
@@ -63,9 +63,10 @@ class DeepKNN:
                                          find the nearest neighbors. The NN-descent method is used for approximate
                                          nearest neighbor searches.
         :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
-        :param model_file_dim_reduction: Path to the model file that contains the models for performing dimension
-                                         reduction at each layer. This will be a pickle file that loads into a list
-                                         of model dictionaries.
+        :param model_dim_reduction: 1. None if dimension reduction is not required; (OR)
+                                    2. Path to a file containing the saved dimension reduction model. This will be
+                                       a pickle file that loads into a list of model dictionaries; (OR)
+                                    3. The dimension reduction model loaded into memory from the pickle file.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
         :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
                            is likely to increase the running time.
@@ -79,7 +80,6 @@ class DeepKNN:
         self.metric_kwargs = metric_kwargs
         self.approx_nearest_neighbors = approx_nearest_neighbors
         self.skip_dim_reduction = skip_dim_reduction
-        self.model_file_dim_reduction = model_file_dim_reduction
         self.n_jobs = get_num_jobs(n_jobs)
         self.low_memory = low_memory
         self.seed_rng = seed_rng
@@ -88,10 +88,16 @@ class DeepKNN:
         # Load the dimension reduction models per-layer if required
         self.transform_models = None
         if not self.skip_dim_reduction:
-            if self.model_file_dim_reduction is None:
+            if model_dim_reduction is None:
                 raise ValueError("Model file for dimension reduction is required but not specified as input.")
-
-            self.transform_models = load_dimension_reduction_models(self.model_file_dim_reduction)
+            elif isinstance(model_dim_reduction, basestring):
+                # Pickle file is specified
+                self.transform_models = load_dimension_reduction_models(model_dim_reduction)
+            elif isinstance(model_dim_reduction, list):
+                # Model already loaded from pickle file
+                self.transform_models = model_dim_reduction
+            else:
+                raise ValueError("Invalid format for the dimension reduction model input.")
 
         self.n_layers = None
         self.labels_unique = None
