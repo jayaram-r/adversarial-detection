@@ -1,18 +1,12 @@
 # Generate plots of the performance metrics from the metrics pickle files
-import sys
 import os
 import pickle
 import argparse
-
-lib_path = '/nobackup/varun/adversarial-detection/expts'
-if lib_path not in sys.path:
-    sys.path.append(lib_path)
-
 from helpers.utils import plot_performance_comparison
+
 
 FILE_PREFIX = 'detection_metrics_'
 FILE_EXT = '.pkl'
-
 
 def main():
     parser = argparse.ArgumentParser()
