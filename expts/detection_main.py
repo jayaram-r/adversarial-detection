@@ -183,7 +183,7 @@ def main():
 
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
-            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
+            method_name = '{}_k_{:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
@@ -194,7 +194,7 @@ def main():
         method_name = '{:.5s}_{}'.format(method_name, args.layer_trust_score)
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
-            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
+            method_name = '{}_k_{:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied to the logit layer
         if args.layer_trust_score != 'logit':
@@ -204,7 +204,7 @@ def main():
         apply_dim_reduc = True
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
-            method_name = '{}_k={:d}'.format(method_name, n_neighbors)
+            method_name = '{}_k_{:d}'.format(method_name, n_neighbors)
 
     # Model file for dimension reduction, if required
     model_dim_reduc = None
