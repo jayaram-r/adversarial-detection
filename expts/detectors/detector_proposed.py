@@ -244,7 +244,7 @@ class DetectorLayerStatistics:
         if not self.skip_dim_reduction:
             if model_dim_reduction is None:
                 raise ValueError("Model file for dimension reduction is required but not specified as input.")
-            elif isinstance(model_dim_reduction, basestring):
+            elif isinstance(model_dim_reduction, str):
                 # Pickle file is specified
                 self.transform_models = load_dimension_reduction_models(model_dim_reduction)
             elif isinstance(model_dim_reduction, list):
