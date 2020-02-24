@@ -14,7 +14,7 @@ The following packages with their corresponding version should be installed befo
 - Foolbox - 2.3.0
 - matplotlib >= 3.0.3
 
-It is recommended to use a setup a Conda environment and install these packages using conda.
+It is recommended to use a setup a Conda environment with `python3` and install these packages using conda.
 
 `PyNNDescent` is an approximate nearest neighbors library that we use, and can be installed from [here](https://github.com/lmcinnes/pynndescent). 
 Make sure to install version `0.3.3`, with `numba` version `0.46` and `llvmlite` version `0.30.0`.
