@@ -129,6 +129,25 @@ class TestStatistic(ABC):
         """
         raise NotImplementedError
 
+    @staticmethod
+    def pvalue_score(scores_null, scores_obs, log_transform=False):
+        """
+        Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
+        null distribution `scores_null`.
+
+        :param scores_null: numpy array of shape `(m, )`.
+        :param scores_obs: numpy array of shape `(n, )`.
+        :param log_transform: set to True to apply negative log transform to the p-values.
+
+        :return: p-values or log-transformed p-values of the same shape as `scores_obs`.
+        """
+        mask = scores_null[:, np.newaxis] >= scores_obs[np.newaxis, :]
+        p = np.sum(mask, axis=0) / float(scores_null.shape[0])
+        if log_transform:
+            return -np.log(np.clip(p, sys.float_info.min, None))
+        else:
+            return p
+
 
 class MultinomialScore(TestStatistic):
     """
@@ -243,10 +262,13 @@ class MultinomialScore(TestStatistic):
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
         :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
 
-        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
-                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
-                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
-                 being the candidate true class for the test sample.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
         """
         n_test = labels_pred_test.shape[0]
         # Get the class label counts from the nearest neighbors of each sample
@@ -257,6 +279,7 @@ class MultinomialScore(TestStatistic):
             _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
         scores = np.zeros((n_test, 1 + self.n_classes))
+        p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
@@ -267,6 +290,15 @@ class MultinomialScore(TestStatistic):
                 # Likelihood ratio statistic conditioned on the predicted class `c_hat`
                 scores[ind, 0] = self.multinomial_lrt(data_counts[ind, :], self.proba_params_pred[i, :],
                                                       self.n_neighbors)
+                if not is_train:
+                    p_values[ind, 0] = self.pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=True
+                    )
+                else:
+                    p_values[ind, 0] = self.pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=True
+                    )
+
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
                     break
@@ -274,8 +306,16 @@ class MultinomialScore(TestStatistic):
         for i, c in enumerate(self.labels_unique):
             # Likelihood ratio statistic conditioned on the candidate true class `c`
             scores[:, i + 1] = self.multinomial_lrt(data_counts, self.proba_params_true[i, :], self.n_neighbors)
+            if not is_train:
+                p_values[:, i + 1] = self.pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=True
+                )
+            else:
+                p_values[:, i + 1] = self.pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=True
+                )
 
-        return scores
+        return scores, p_values
 
     @staticmethod
     def multinomial_lrt(data_counts, proba_params, n_neighbors):
