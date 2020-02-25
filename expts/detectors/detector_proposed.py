@@ -15,7 +15,7 @@ from helpers.dimension_reduction_methods import (
     transform_data_from_model,
     load_dimension_reduction_models
 )
-from helpers.test_statistics_layers import (
+from detectors.test_statistics_layers import (
     MultinomialScore,
     LIDScore,
     LLEScore
