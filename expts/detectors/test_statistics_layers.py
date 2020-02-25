@@ -157,6 +157,9 @@ class MultinomialScore(TestStatistic):
         self.proba_params_true = None
         # Likelihood ratio statistic scores for the training data
         self.scores_train = None
+        # Index of train samples from each class based on the true class and predicted class
+        self.indices_true = dict()
+        self.indices_pred = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None):
         """
@@ -202,10 +205,10 @@ class MultinomialScore(TestStatistic):
         mat_ones = np.ones((self.n_classes, self.n_classes))
         self.proba_params_pred = (1. / self.n_classes) * mat_ones
         self.proba_params_true = (1. / self.n_classes) * mat_ones
-        for c in self.labels_unique:
-            i = self.label_encoder([c])[0]
+        for i, c in enumerate(self.labels_unique):
             # Index of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
+            self.indices_pred[c] = ind
             if ind.shape[0]:
                 # Estimate the multinomial probability parameters given the predicted class `c`
                 self.proba_params_pred[i, :] = multinomial_estimation(self.data_counts_train[ind, :],
@@ -216,6 +219,7 @@ class MultinomialScore(TestStatistic):
 
             # Index of samples with class label `c`
             ind = np.where(labels == c)[0]
+            self.indices_true[c] = ind
             if ind.shape[0]:
                 # Estimate the multinomial probability parameters given the true class `c`
                 self.proba_params_true[i, :] = multinomial_estimation(self.data_counts_train[ind, :],
@@ -306,6 +310,9 @@ class LIDScore(TestStatistic):
         self.lid_median_true = None
         # Scores for the training data
         self.scores_train = None
+        # Index of train samples from each class based on the true class and predicted class
+        self.indices_true = dict()
+        self.indices_pred = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None):
         """
@@ -345,10 +352,10 @@ class LIDScore(TestStatistic):
 
         self.lid_median_pred = np.ones(self.n_classes)
         self.lid_median_true = np.ones(self.n_classes)
-        for c in self.labels_unique:
-            i = self.label_encoder([c])[0]
+        for i, c in enumerate(self.labels_unique):
             # LID values of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
+            self.indices_pred[c] = ind
             if ind.shape[0]:
                 self.lid_median_pred[i] = np.median(self.lid_estimates_train[ind])
             else:
@@ -357,6 +364,7 @@ class LIDScore(TestStatistic):
 
             # LID values of samples labeled as class `c`
             ind = np.where(labels == c)[0]
+            self.indices_true[c] = ind
             if ind.shape[0]:
                 self.lid_median_true[i] = np.median(self.lid_estimates_train[ind])
             else:
@@ -445,6 +453,9 @@ class LLEScore(TestStatistic):
         self.err_median_true = None
         # Scores for the training data
         self.scores_train = None
+        # Index of train samples from each class based on the true class and predicted class
+        self.indices_true = dict()
+        self.indices_pred = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None,
             min_dim_pca=1000, pca_cutoff=0.995, reg_eps=0.001):
@@ -507,10 +518,10 @@ class LLEScore(TestStatistic):
 
         self.err_median_pred = np.ones(self.n_classes)
         self.err_median_true = np.ones(self.n_classes)
-        for c in self.labels_unique:
-            i = self.label_encoder([c])[0]
+        for i, c in enumerate(self.labels_unique):
             # Reconstruction error of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
+            self.indices_pred[c] = ind
             if ind.shape[0]:
                 self.err_median_pred[i] = np.clip(np.median(self.errors_lle_train[ind]), 1e-16, None)
             else:
@@ -519,6 +530,7 @@ class LLEScore(TestStatistic):
 
             # Reconstruction error of samples labeled as class `c`
             ind = np.where(labels == c)[0]
+            self.indices_true[c] = ind
             if ind.shape[0]:
                 self.err_median_true[i] = np.clip(np.median(self.errors_lle_train[ind]), 1e-16, None)
             else:
