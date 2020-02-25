@@ -398,7 +398,8 @@ class LIDScore(TestStatistic):
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
                 # LID scores normalized by the median LID value for the samples predicted into class `c`
-                scores[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
+                # scores[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
+                scores[ind, 0] = lid_estimates[ind]
 
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
@@ -406,7 +407,8 @@ class LIDScore(TestStatistic):
 
         for i, c in enumerate(self.labels_unique):
             # LID scores normalized by the median LID value for the samples labeled as class `c`
-            scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
+            # scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
+            scores[:, i + 1] = lid_estimates
 
         return scores
 
@@ -566,7 +568,8 @@ class LLEScore(TestStatistic):
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
                 # Reconstruction error scores normalized by the median value for the samples predicted into class `c`
-                scores[ind, 0] = errors_lle[ind] / self.err_median_pred[i]
+                # scores[ind, 0] = errors_lle[ind] / self.err_median_pred[i]
+                scores[ind, 0] = errors_lle[ind]
 
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
@@ -574,7 +577,8 @@ class LLEScore(TestStatistic):
 
         for i, c in enumerate(self.labels_unique):
             # Reconstruction error scores normalized by the median value for the samples labeled as class `c`
-            scores[:, i + 1] = errors_lle / self.err_median_true[i]
+            # scores[:, i + 1] = errors_lle / self.err_median_true[i]
+            scores[:, i + 1] = errors_lle
 
         return scores
 
