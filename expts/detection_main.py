@@ -119,12 +119,18 @@ def main():
                         format(', '.join(LAYERS_TRUST_SCORE)))
     parser.add_argument(
         '--use-top-ranked', '--utr', action='store_true', default=False,
-        help='Option that enables only top-ranked test statistics from the layers to be used for the proposed method'
+        help="Option that enables the proposed method to use only the top-ranked (by p-values) test statistics for "
+             "detection. The number of test statistics is specified through the option '--num-layers'"
     )
     parser.add_argument(
-        '--num-top-ranked', '--ntr', type=int, default=NUM_TOP_RANKED,
-        help='If the option --use-top-ranked is provided, this option specifies the number of top-ranked test '
-             'statistics to be used by the proposed method'
+        '--use-deep-layers', '--udl', action='store_true', default=False,
+        help="Option that enables the proposed method to use only a given number of last few layers of the DNN. "
+             "The number of layers is specified through the option '--num-layers'"
+    )
+    parser.add_argument(
+        '--num-layers', '--nl', type=int, default=NUM_TOP_RANKED,
+        help="If the option '--use-top-ranked' or '--use-deep-layers' is provided, this option specifies the number "
+             "of layers or test statistics to be used by the proposed method"
     )
     parser.add_argument('--num-neighbors', '--nn', type=int, default=-1,
                         help='Number of nearest neighbors (if applicable to the method). By default, this is set '
@@ -147,6 +153,10 @@ def main():
     parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     args = parser.parse_args()
+
+    if args.use_top_ranked and args.use_deep_layers:
+        raise ValueError("Cannot provide both command line options '--use-top-ranked' and '--use-deep-layers'. "
+                         "Specify only one of them.")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -176,10 +186,12 @@ def main():
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
         # Append the test statistic type to the method name
-        if not args.use_top_ranked:
-            method_name = '{:.5s}_{:.5s}_all'.format(method_name, args.test_statistic)
+        if args.use_top_ranked:
+            method_name = '{:.5s}_{:.5s}_top{:d}'.format(method_name, args.test_statistic, args.num_layers)
+        elif args.use_deep_layers:
+            method_name = '{:.5s}_{:.5s}_last{:d}'.format(method_name, args.test_statistic, args.num_layers)
         else:
-            method_name = '{:.5s}_{:.5s}_top{:d}'.format(method_name, args.test_statistic, args.num_top_ranked)
+            method_name = '{:.5s}_{:.5s}_all'.format(method_name, args.test_statistic)
 
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
@@ -384,24 +396,38 @@ def main():
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'proposed':
+            nl = len(layer_embeddings_tr)
+            st_ind = 0
+            if args.use_deep_layers:
+                if args.num_layers > nl:
+                    print("WARNING: number of layers specified using the option '--num-layers' exceeds the number "
+                          "of layers in the model. Using all the layers.")
+                    st_ind = 0
+                else:
+                    st_ind = nl - args.num_layers
+                    print("Using only the last {:d} layer embeddings from the {:d} layers for the proposed method.".
+                          format(args.num_layers, nl))
+
+            mod_dr = None if (model_dim_reduc is None) else model_dim_reduc[st_ind:]
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
                 use_top_ranked=args.use_top_ranked,
-                num_top_ranked=args.num_top_ranked,
+                num_top_ranked=args.num_layers,
                 skip_dim_reduction=(not apply_dim_reduc),
-                model_dim_reduction=model_dim_reduc,
+                model_dim_reduction=mod_dr,
                 n_neighbors=n_neighbors,
                 n_jobs=args.n_jobs,
                 seed_rng=args.seed
             )
             # Fit the detector on clean data from the training fold
-            _ = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr)
+            _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
-            scores_adv1 = det_model.score(layer_embeddings_te, labels_pred_te, score_type=args.score_type)
+            scores_adv1 = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te, score_type=args.score_type)
 
             # Scores on adversarial data from the test fold
-            scores_adv2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv, score_type=args.score_type)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv,
+                                          score_type=args.score_type)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
