@@ -116,15 +116,16 @@ class TestStatistic(ABC):
             self.n_neighbors = int(np.ceil(self.n_train ** self.neighborhood_constant))
 
     @abstractmethod
-    def score(self, features_test, labels_pred_test, is_train=False):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
         """
         Given the feature vector and predicted labels for `N` samples, calculate their test statistic scores.
 
         :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
                               dimension respectively.
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
-        :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
-                          This is used to remove points from their own set of nearest neighbors.
+        :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+                         This is used to remove points from their own set of nearest neighbors.
+        :param log_transform: Set to True to apply negative log transformation to the p-values.
         :return:
         """
         raise NotImplementedError
@@ -191,11 +192,14 @@ class MultinomialScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
-        :return:
-            numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
-            of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
-            The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
-            being the candidate true class for the sample.
+
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
         """
         super(MultinomialScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
@@ -248,11 +252,11 @@ class MultinomialScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Skipping multinomial parameter estimation "
                                "and assigning uniform probabilities.".format(c))
 
-        # Calculate the scores for each sample
-        self.scores_train = self.score(features, labels_pred, is_train=True)
-        return self.scores_train
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
@@ -260,7 +264,8 @@ class MultinomialScore(TestStatistic):
         :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
                               dimension respectively.
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
-        :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param log_transform: Set to True to apply negative log transformation to the p-values.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -292,11 +297,11 @@ class MultinomialScore(TestStatistic):
                                                       self.n_neighbors)
                 if not is_train:
                     p_values[ind, 0] = self.pvalue_score(
-                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=True
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform
                     )
                 else:
                     p_values[ind, 0] = self.pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=True
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform
                     )
 
                 cnt_par += ind.shape[0]
@@ -308,11 +313,11 @@ class MultinomialScore(TestStatistic):
             scores[:, i + 1] = self.multinomial_lrt(data_counts, self.proba_params_true[i, :], self.n_neighbors)
             if not is_train:
                 p_values[:, i + 1] = self.pvalue_score(
-                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=True
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
                 )
             else:
                 p_values[:, i + 1] = self.pvalue_score(
-                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=True
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
                 )
 
         return scores, p_values
@@ -366,10 +371,13 @@ class LIDScore(TestStatistic):
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
 
-        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
-                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
-                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
-                 being the candidate true class for the sample.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
         """
         super(LIDScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
@@ -410,11 +418,11 @@ class LIDScore(TestStatistic):
             else:
                 logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
 
-        # Calculate the scores for each sample
-        self.scores_train = self.score(features, labels_pred, is_train=True)
-        return self.scores_train
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
@@ -422,12 +430,16 @@ class LIDScore(TestStatistic):
         :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
                               dimension respectively.
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
-        :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param log_transform: Set to True to apply negative log transformation to the p-values.
 
-        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
-                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
-                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
-                 being the candidate true class for the test sample.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
         """
         n_test = labels_pred_test.shape[0]
         # Query the index of `self.n_neighbors` nearest neighbors of each test sample and find the LID estimates
@@ -438,6 +450,7 @@ class LIDScore(TestStatistic):
             lid_estimates = lid_mle_amsaleg(nn_distances)
 
         scores = np.zeros((n_test, 1 + self.n_classes))
+        p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
@@ -448,6 +461,14 @@ class LIDScore(TestStatistic):
                 # LID scores normalized by the median LID value for the samples predicted into class `c`
                 # scores[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
                 scores[ind, 0] = lid_estimates[ind]
+                if not is_train:
+                    p_values[ind, 0] = self.pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform
+                    )
+                else:
+                    p_values[ind, 0] = self.pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform
+                    )
 
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
@@ -457,8 +478,16 @@ class LIDScore(TestStatistic):
             # LID scores normalized by the median LID value for the samples labeled as class `c`
             # scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
             scores[:, i + 1] = lid_estimates
+            if not is_train:
+                p_values[:, i + 1] = self.pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                )
+            else:
+                p_values[:, i + 1] = self.pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                )
 
-        return scores
+        return scores, p_values
 
 
 class LLEScore(TestStatistic):
@@ -515,10 +544,13 @@ class LLEScore(TestStatistic):
         :param reg_eps: small float value that multiplies the trace to regularize the Gram matrix, if it is
                         close to singular.
 
-        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
-                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
-                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
-                 being the candidate true class for the sample.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
         """
         super(LLEScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
         self.reg_eps = reg_eps
@@ -577,11 +609,11 @@ class LLEScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Setting the median reconstruction error "
                                "to 1.".format(c))
 
-        # Calculate the scores for each sample
-        self.scores_train = self.score(features, labels_pred, is_train=True)
-        return self.scores_train
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
@@ -589,12 +621,16 @@ class LLEScore(TestStatistic):
         :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
                               dimension respectively.
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
-        :param  is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param log_transform: Set to True to apply negative log transformation to the p-values.
 
-        :return: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the number
-                 of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted class.
-                 The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned on `i - 1`
-                 being the candidate true class for the test sample.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
         """
         n_test = labels_pred_test.shape[0]
         if is_train:
@@ -612,6 +648,7 @@ class LLEScore(TestStatistic):
             errors_lle = self._calc_reconstruction_errors(features_test, nn_indices)
 
         scores = np.zeros((n_test, 1 + self.n_classes))
+        p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
@@ -622,6 +659,14 @@ class LLEScore(TestStatistic):
                 # Reconstruction error scores normalized by the median value for the samples predicted into class `c`
                 # scores[ind, 0] = errors_lle[ind] / self.err_median_pred[i]
                 scores[ind, 0] = errors_lle[ind]
+                if not is_train:
+                    p_values[ind, 0] = self.pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform
+                    )
+                else:
+                    p_values[ind, 0] = self.pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform
+                    )
 
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
@@ -631,8 +676,16 @@ class LLEScore(TestStatistic):
             # Reconstruction error scores normalized by the median value for the samples labeled as class `c`
             # scores[:, i + 1] = errors_lle / self.err_median_true[i]
             scores[:, i + 1] = errors_lle
+            if not is_train:
+                p_values[:, i + 1] = self.pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                )
+            else:
+                p_values[:, i + 1] = self.pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                )
 
-        return scores
+        return scores, p_values
 
     def _calc_reconstruction_errors(self, features, nn_indices):
         """
