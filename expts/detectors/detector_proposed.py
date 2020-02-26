@@ -15,7 +15,7 @@ from helpers.dimension_reduction_methods import (
     transform_data_from_model,
     load_dimension_reduction_models
 )
-from helpers.test_statistics_layers import (
+from detectors.test_statistics_layers import (
     MultinomialScore,
     LIDScore,
     LLEScore
@@ -307,14 +307,21 @@ class DetectorLayerStatistics:
         indices_true = dict()
         indices_pred = dict()
         test_stats_true = dict()
+        pvalues_true = dict()
         test_stats_pred = dict()
+        pvalues_pred = dict()
         for c in self.labels_unique:
             indices_true[c] = np.where(labels == c)[0]
             indices_pred[c] = np.where(labels_pred == c)[0]
-            # Test statistics across the layers for the samples labeled into class `c`
+            # Test statistics and negative log p-values across the layers for the samples labeled into class `c`
             test_stats_true[c] = np.zeros((indices_true[c].shape[0], self.n_layers))
-            # Test statistics across the layers for the samples predicted into class `c`
+            pvalues_true[c] = np.zeros((indices_true[c].shape[0], self.n_layers))
+
+            # Test statistics and negative log p-values across the layers for the samples predicted into class `c`
             test_stats_pred[c] = np.zeros((indices_pred[c].shape[0], self.n_layers))
+            pvalues_pred[c] = np.zeros((indices_pred[c].shape[0], self.n_layers))
+
+            # Log of the class prior probability
             self.log_class_priors[c] = indices_true[c].shape[0]
 
         self.log_class_priors = np.log(self.log_class_priors) - np.log(self.n_samples)
@@ -363,7 +370,7 @@ class DetectorLayerStatistics:
                     seed_rng=self.seed_rng
                 )
 
-            scores_temp = ts_obj.fit(data_proj, labels, labels_pred, labels_unique=self.labels_unique)
+            scores_temp, pvalues_temp = ts_obj.fit(data_proj, labels, labels_pred, labels_unique=self.labels_unique)
             '''
             `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
             test statistics for each sample.
@@ -373,23 +380,25 @@ class DetectorLayerStatistics:
             '''
             self.test_stats_models.append(ts_obj)
             for j, c in enumerate(self.labels_unique):
-                # Test statistics from layer `i`
+                # Test statistics and negative log p-values from layer `i`
                 test_stats_pred[c][:, i] = scores_temp[indices_pred[c], 0]
+                pvalues_pred[c][:, i] = pvalues_temp[indices_pred[c], 0]
                 test_stats_true[c][:, i] = scores_temp[indices_true[c], j + 1]
+                pvalues_true[c][:, i] = pvalues_temp[indices_true[c], j + 1]
 
         # Learn a joint probability density model for the test statistics
         for c in self.labels_unique:
-            # Get the top ranked order statistics if required
             if self.use_top_ranked:
                 logger.info("Using the largest (smallest) {:d} test statistics conditioned on the predicted "
                             "(true) class.".format(self.num_top_ranked))
                 # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
-                # test statistics across the layers
-                test_stats_pred[c] = self.get_top_ranked(test_stats_pred[c], reverse=True)
+                # negative log p-values across the layers
+                test_stats_pred[c], pvalues_pred[c] = self.get_top_ranked(test_stats_pred[c], pvalues_pred[c],
+                                                                          reverse=True)
 
                 # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
-                # test statistics across the layers
-                test_stats_true[c] = self.get_top_ranked(test_stats_true[c])
+                # negative log p-values across the layers
+                test_stats_true[c], pvalues_true[c] = self.get_top_ranked(test_stats_true[c], pvalues_true[c])
 
             logger.info("Learning a joint probability density model for the test statistics conditioned on the "
                         "predicted class '{}':".format(c))
@@ -440,7 +449,9 @@ class DetectorLayerStatistics:
 
         # Test statistics at each layer conditioned on the predicted class and candidate true classes
         test_stats_pred = np.zeros((n_test, self.n_layers))
+        pvalues_pred = np.zeros((n_test, self.n_layers))
         test_stats_true = {c: np.zeros((n_test, self.n_layers)) for c in self.labels_unique}
+        pvalues_true = {c: np.zeros((n_test, self.n_layers)) for c in self.labels_unique}
         for i in range(self.n_layers):
             if self.transform_models:
                 # Dimension reduction
@@ -448,23 +459,25 @@ class DetectorLayerStatistics:
             else:
                 data_proj = layer_embeddings[i]
 
-            # Test statistics for layer `i`
-            scores_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train)
-            # `scores_test` will have shape `(n_test, self.n_classes + 1)`
+            # Test statistics and negative log p-values for layer `i`
+            scores_temp, pvalues_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train)
+            # `scores_test` and `pvalues_temp` will have shape `(n_test, self.n_classes + 1)`
 
             test_stats_pred[:, i] = scores_temp[:, 0]
+            pvalues_pred[:, i] = pvalues_temp[:, 0]
             for j, c in enumerate(self.labels_unique):
                 test_stats_true[c][:, i] = scores_temp[:, j + 1]
+                pvalues_true[c][:, i] = pvalues_temp[:, j + 1]
 
         if self.use_top_ranked:
             # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
-            # test statistics across the layers
-            test_stats_pred = self.get_top_ranked(test_stats_pred, reverse=True)
+            # negative log p-values across the layers
+            test_stats_pred, pvalues_pred = self.get_top_ranked(test_stats_pred, pvalues_pred, reverse=True)
 
             for c in self.labels_unique:
                 # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
-                # test statistics across the layers
-                test_stats_true[c] = self.get_top_ranked(test_stats_true[c])
+                # negative log p-values across the layers
+                test_stats_true[c], pvalues_true[c] = self.get_top_ranked(test_stats_true[c], pvalues_true[c])
 
         # Adversarial or OOD scores for the test samples
         scores_adver = np.zeros(n_test)
@@ -528,16 +541,23 @@ class DetectorLayerStatistics:
             else:
                 return scores_ood
 
-    def get_top_ranked(self, test_stats, reverse=False):
+    def get_top_ranked(self, test_stats, p_values, reverse=False):
         """
-        Get the top-ranked (largest or smallest) test statistics across the layers.
+        Get the top-ranked (largest or smallest) test statistics across the layers. Ranking is done based on the
+        p-values.
 
         :param test_stats: numpy array of shape `(n, d)`, where `n` is the number of samples and `d` is the
                            number of test statistics.
+        :param p_values: numpy array with the p-values corresponding to the test statistics. Has same shape
+                         as `test_stats`.
         :param reverse: set to True to get the largest scores.
         :return:
         """
         if reverse:
-            return np.fliplr(np.sort(test_stats, axis=1))[:, :self.num_top_ranked]
+            ind = np.fliplr(np.argsort(p_values, axis=1))
         else:
-            return np.sort(test_stats, axis=1)[:, :self.num_top_ranked]
+            ind = np.argsort(p_values, axis=1)
+
+        test_stats = np.take_along_axis(test_stats, ind, axis=1)[:, :self.num_top_ranked]
+        p_values = np.take_along_axis(p_values, ind, axis=1)[:, :self.num_top_ranked]
+        return test_stats, p_values
