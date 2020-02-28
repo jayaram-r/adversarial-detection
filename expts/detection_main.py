@@ -112,8 +112,12 @@ def main():
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
                         format(', '.join(TEST_STATS_SUPPORTED)))
-    parser.add_argument('--score-type', '--st', choices=['adversarial', 'ood'], default='adversarial',
-                        help="Score type to use for the proposed method. Choices are 'adversarial' and 'ood'")
+    parser.add_argument('--score-type', '--st', choices=SCORE_TYPES, default='pvalue',
+                        help="Score type to use for the proposed method. Choices are: {}".
+                        format(', '.join(SCORE_TYPES)))
+    parser.add_argument('--ood-detection', '--ood', action='store_true', default=False,
+                        help="Option that enables out-of-distribution detection instead of adversarial detection "
+                             "for the proposed method")
     parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
                         help="Which layer to use for the trust score calculation. Choices are: {}".
                         format(', '.join(LAYERS_TRUST_SCORE)))
@@ -185,13 +189,15 @@ def main():
     # Dimensionality reduction to the layer embeddings is applied only for methods in certain configurations
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
-        # Append the test statistic type to the method name
-        if args.use_top_ranked:
-            method_name = '{:.5s}_{:.5s}_top{:d}'.format(method_name, args.test_statistic, args.num_layers)
-        elif args.use_deep_layers:
-            method_name = '{:.5s}_{:.5s}_last{:d}'.format(method_name, args.test_statistic, args.num_layers)
+        if not args.ood_detection:
+            method_name = '{:.5s}_{:.5s}_{}_adver'.format(method_name, args.test_statistic, args.score_type)
         else:
-            method_name = '{:.5s}_{:.5s}_all'.format(method_name, args.test_statistic)
+            method_name = '{:.5s}_{:.5s}_{}_ood'.format(method_name, args.test_statistic, args.score_type)
+
+        if args.use_top_ranked:
+            method_name = '{}_top{:d}'.format(method_name, args.num_layers)
+        elif args.use_deep_layers:
+            method_name = '{}_last{:d}'.format(method_name, args.num_layers)
 
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
@@ -411,6 +417,9 @@ def main():
             mod_dr = None if (model_dim_reduc is None) else model_dim_reduc[st_ind:]
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
+                score_type=args.score_type,
+                ood_detection=args.ood_detection,
+                pvalue_fusion='harmonic_mean',
                 use_top_ranked=args.use_top_ranked,
                 num_top_ranked=args.num_layers,
                 skip_dim_reduction=(not apply_dim_reduc),
@@ -423,11 +432,10 @@ def main():
             _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
-            scores_adv1 = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te, score_type=args.score_type)
+            scores_adv1 = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te)
 
             # Scores on adversarial data from the test fold
-            scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv,
-                                          score_type=args.score_type)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
