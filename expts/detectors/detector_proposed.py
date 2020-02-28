@@ -629,7 +629,8 @@ class DetectorLayerStatistics:
         n_test = labels_pred.shape[0]
         nl = pvalues_pred.shape[1]
         # Equal weight to all the layers
-        log_weights = np.log(1. / nl) * np.ones(nl)
+        weights = (1. / nl) * np.ones(nl)
+        log_weights = np.log(weights)
         mask_layers = np.zeros(nl, dtype=np.bool)
         mask_layers[start_layer:] = True
 
@@ -643,7 +644,7 @@ class DetectorLayerStatistics:
         elif self.pvalue_fusion == 'harmonic_mean':
             # log of the combined p-values
             arr_temp = log_weights + pvalues_pred
-            offset = np.log(np.sum(log_weights[mask_layers]))
+            offset = np.log(np.sum(weights[mask_layers]))
             pvalues_comb_pred = offset - self._log_sum_exp(arr_temp[:, mask_layers])
             for i, c in enumerate(self.labels_unique):
                 arr_temp = log_weights + pvalues_true[c]
@@ -692,7 +693,7 @@ class DetectorLayerStatistics:
         # `x` is a 2d numpy array
         if x.shape[1] > 1:
             col_max = np.max(x, axis=1)
-            v = np.sum(np.exp(x - col_max), axis=1)
+            v = np.sum(np.exp(x - col_max[:, np.newaxis]), axis=1)
             return np.log(np.clip(v, sys.float_info.min, None)) + col_max
         elif x.shape[1] == 1:
             return x[:, 0]
