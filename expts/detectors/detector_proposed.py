@@ -1,4 +1,6 @@
-
+"""
+Implemention of the proposed adversarial and OOD detection methods.
+"""
 import numpy as np
 import sys
 import torch
@@ -9,7 +11,8 @@ from helpers.constants import (
     NEIGHBORHOOD_CONST,
     METRIC_DEF,
     NUM_TOP_RANKED,
-    TEST_STATS_SUPPORTED
+    TEST_STATS_SUPPORTED,
+    SCORE_TYPES
 )
 from helpers.dimension_reduction_methods import (
     transform_data_from_model,
@@ -168,9 +171,19 @@ class DetectorLayerStatistics:
     """
     Main class implementing the adversarial and OOD detector based on joint hypothesis testing of test statistics
     calculated at the layers of a trained DNN.
+
+    Harmonic mean method for combining p-values from multiple tetsts:
+        - https://en.wikipedia.org/wiki/Harmonic_mean_p-value
+        - https://www.ncbi.nlm.nih.gov/pmc/articles/PMC6347718/
+
+    Fisher's method for combining p-values from multiple tests:
+        https://en.wikipedia.org/wiki/Fisher%27s_method
     """
     def __init__(self,
                  layer_statistic='multinomial',
+                 score_type='pvalue',
+                 ood_detection=False,
+                 pvalue_fusion='harmonic_mean',
                  use_top_ranked=False,
                  num_top_ranked=NUM_TOP_RANKED,
                  skip_dim_reduction=False,
@@ -185,6 +198,12 @@ class DetectorLayerStatistics:
 
         :param layer_statistic: Type of test statistic to calculate at the layers. Valid values are 'multinomial',
                                 'lid', and 'lle'.
+        :param score_type: Name of the scoring method to use. Valid options are: 'density' and 'pvalue'.
+        :param ood_detection: Set to True to perform out-of-distribution detection instead of adversarial detection.
+        :param pvalue_fusion: Method for combining the p-values across the layers. Options are 'harmonic_mean'
+                              and 'fisher'. The former corresponds to the weighted harmonic mean of the p-values
+                              and the latter corresponds to Fisher's method of combining p-values. This input is
+                              used only when `score_type = 'pvalue'`.
         :param use_top_ranked: Set to True in order to use only a few top ranked test statistics for detection.
         :param num_top_ranked: If `use_top_ranked` is set to True, this specifies the number of top-ranked test
                                statistics to use for detection. This number should be smaller than the number of
@@ -215,6 +234,9 @@ class DetectorLayerStatistics:
                          for reproducible results.
         """
         self.layer_statistic = layer_statistic.lower()
+        self.score_type = score_type.lower()
+        self.ood_detection = ood_detection
+        self.pvalue_fusion = pvalue_fusion
         self.use_top_ranked = use_top_ranked
         self.num_top_ranked = num_top_ranked
         self.skip_dim_reduction = skip_dim_reduction
@@ -231,6 +253,12 @@ class DetectorLayerStatistics:
         if self.layer_statistic not in TEST_STATS_SUPPORTED:
             raise ValueError("Invalid value '{}' for the input argument 'layer_statistic'.".
                              format(self.layer_statistic))
+
+        if self.score_type not in SCORE_TYPES:
+            raise ValueError("Invalid value '{}' for the input argument 'score_type'.".format(self.score_type))
+
+        if self.pvalue_fusion not in ['harmonic_mean', 'fisher']:
+            raise ValueError("Invalid value '{}' for the input argument 'pvalue_fusion'.".format(self.pvalue_fusion))
 
         if self.layer_statistic in {'lid', 'lle'}:
             if not self.skip_dim_reduction:
@@ -372,11 +400,13 @@ class DetectorLayerStatistics:
 
             scores_temp, pvalues_temp = ts_obj.fit(data_proj, labels, labels_pred, labels_unique=self.labels_unique)
             '''
-            `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
+            - `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
             test statistics for each sample.
             The first column `scores_temp[:, 0]` gives the scores conditioned on the predicted class.
             The remaining columns `scores_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on `i - 1`
             being the candidate true class for the sample.
+            - `pvalues_temp` is also a numpy array of the same shape with the negative log transformed p-values 
+            corresponding to the test statistics.
             '''
             self.test_stats_models.append(ts_obj)
             for j, c in enumerate(self.labels_unique):
@@ -386,34 +416,35 @@ class DetectorLayerStatistics:
                 test_stats_true[c][:, i] = scores_temp[indices_true[c], j + 1]
                 pvalues_true[c][:, i] = pvalues_temp[indices_true[c], j + 1]
 
-        # Learn a joint probability density model for the test statistics
-        for c in self.labels_unique:
-            if self.use_top_ranked:
-                logger.info("Using the largest (smallest) {:d} test statistics conditioned on the predicted "
-                            "(true) class.".format(self.num_top_ranked))
-                # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
-                # negative log p-values across the layers
-                test_stats_pred[c], pvalues_pred[c] = self.get_top_ranked(test_stats_pred[c], pvalues_pred[c],
-                                                                          reverse=True)
+        if self.score_type == 'density':
+            # Learn a joint probability density model for the test statistics
+            for c in self.labels_unique:
+                if self.use_top_ranked:
+                    logger.info("Using the test statistics corresponding to the smallest (largest) {:d} p-values "
+                                "conditioned on the predicted (true) class.".format(self.num_top_ranked))
+                    # For the test statistics conditioned on the predicted class, take the largest
+                    # `self.num_top_ranked` negative log-transformed p-values across the layers
+                    test_stats_pred[c], pvalues_pred[c] = self._get_top_ranked(
+                        test_stats_pred[c], pvalues_pred[c], reverse=True
+                    )
+                    # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
+                    # negative log-transformed p-values across the layers
+                    test_stats_true[c], pvalues_true[c] = self._get_top_ranked(test_stats_true[c], pvalues_true[c])
 
-                # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
-                # negative log p-values across the layers
-                test_stats_true[c], pvalues_true[c] = self.get_top_ranked(test_stats_true[c], pvalues_true[c])
+                logger.info("Learning a joint probability density model for the test statistics conditioned on the "
+                            "predicted class '{}':".format(c))
+                logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_pred[c].shape))
+                self.density_models_pred[c] = train_log_normal_mixture(test_stats_pred[c], seed_rng=self.seed_rng)
 
-            logger.info("Learning a joint probability density model for the test statistics conditioned on the "
-                        "predicted class '{}':".format(c))
-            logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_pred[c].shape))
-            self.density_models_pred[c] = train_log_normal_mixture(test_stats_pred[c], seed_rng=self.seed_rng)
-
-            logger.info("Learning a joint probability density model for the test statistics conditioned on the "
-                        "true class '{}':".format(c))
-            logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
-            self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
+                logger.info("Learning a joint probability density model for the test statistics conditioned on the "
+                            "true class '{}':".format(c))
+                logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
+                self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
 
         return self
 
-    def score(self, layer_embeddings, labels_pred, score_type='adversarial',
-              return_corrected_predictions=False, is_train=False):
+    def score(self, layer_embeddings, labels_pred, return_corrected_predictions=False, start_layer=0,
+              is_train=False):
         """
         Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
         score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
@@ -424,17 +455,20 @@ class DetectorLayerStatistics:
         :param layer_embeddings: list of numpy arrays with the layer embedding data. Length of the list is equal to
                                  the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
                                  is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
-        :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
-        :param score_type: string defining the type of score to return - 'adversarial' or 'ood'.
+        :param labels_pred: numpy array of class predictions made by the DNN.
         :param return_corrected_predictions: Set to True in order to get the most probable class prediction based
                                              on Bayes class posterior given the test statistic vector. Note that this
                                              will change the returned values.
+        :param start_layer: Starting index of the layers to include in the p-value fusion. Set to 0 to include all
+                            the layers. Set to negative values such as -1, -2, -3 using the same convention as
+                            python indexing. For example, a value of `-3` implies the last 3 layers are included.
         :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
 
         :return: (scores [, corrected_classes])
             - scores: numpy array of scores for detection or ranking. The array should have shape
                       `(labels_pred.shape[0], )` and larger values correspond to a higher higher probability that
-                      the sample is adversarial or OOD. Score returned will depend on the argument `score_type`.
+                      the sample is adversarial or OOD. Score corresponding to OOD detection is returned if
+                      `self.ood_detection = True`.
             # returned only if `return_corrected_predictions = True`
             - corrected_classes: numpy array of the corrected class predictions. Has same shape and dtype as the
                                  array `labels_pred`.
@@ -443,9 +477,6 @@ class DetectorLayerStatistics:
         l = len(layer_embeddings)
         if l != self.n_layers:
             raise ValueError("Expecting {:d} layers in the input data, but received {:d}".format(self.n_layers, l))
-
-        if score_type not in {'adversarial', 'ood'}:
-            raise ValueError("Invalid value '{}' for input 'score_type'".format(score_type))
 
         # Test statistics at each layer conditioned on the predicted class and candidate true classes
         test_stats_pred = np.zeros((n_test, self.n_layers))
@@ -472,14 +503,59 @@ class DetectorLayerStatistics:
         if self.use_top_ranked:
             # For the test statistics conditioned on the predicted class, take the largest `self.num_top_ranked`
             # negative log p-values across the layers
-            test_stats_pred, pvalues_pred = self.get_top_ranked(test_stats_pred, pvalues_pred, reverse=True)
+            test_stats_pred, pvalues_pred = self._get_top_ranked(test_stats_pred, pvalues_pred, reverse=True)
 
             for c in self.labels_unique:
                 # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
                 # negative log p-values across the layers
-                test_stats_true[c], pvalues_true[c] = self.get_top_ranked(test_stats_true[c], pvalues_true[c])
+                test_stats_true[c], pvalues_true[c] = self._get_top_ranked(test_stats_true[c], pvalues_true[c])
 
-        # Adversarial or OOD scores for the test samples
+        # Adversarial or OOD scores for the test samples and the corrected class predictions
+        if self.score_type == 'density':
+            scores_adver, scores_ood, corrected_classes = self._score_density_based(
+                labels_pred, test_stats_pred, test_stats_true,
+                return_corrected_predictions=return_corrected_predictions
+            )
+        elif self.score_type == 'pvalue':
+            scores_adver, scores_ood, corrected_classes = self._score_pvalue_based(
+                labels_pred, pvalues_pred, pvalues_true,
+                return_corrected_predictions=return_corrected_predictions, start_layer=start_layer
+            )
+        else:
+            raise ValueError("Invalid score type '{}'".format(self.score_type))
+
+        if return_corrected_predictions:
+            if self.ood_detection:
+                return scores_ood, corrected_classes
+            else:
+                return scores_adver, corrected_classes
+        else:
+            if self.ood_detection:
+                return scores_ood
+            else:
+                return scores_adver
+
+
+    def _score_density_based(self, labels_pred, test_stats_pred, test_stats_true,
+                             return_corrected_predictions=False):
+        """
+        Scoring method based on modeling the joint probability density of the test statistics, conditioned on the
+        predicted and true class.
+
+        :param labels_pred: Same as the method `score`.
+        :param test_stats_pred: numpy array with the test statistics from the different layers, conditioned on the
+                                predicted class of the test samples. Is a numpy array of shape `(n_test, n_layers)`,
+                                where `n_test` and `n_layers` are the number of test samples and number of layers
+                                respectively.
+        :param test_stats_true: dict with the test statistics from the different layers, conditioned on each candidate
+                                true class (since this is unknown at test time). The class labels are the keys of the
+                                dict and the values are numpy arrays of shape `(n_test, n_layers)` similar to
+                                `test_stats_pred`.
+        :param return_corrected_predictions: Same as the method `score`.
+        :return:
+        """
+        n_test = labels_pred.shape[0]
+        # Adversarial or OOD scores for the test samples and the corrected class predictions
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
         corrected_classes = copy.copy(labels_pred)
@@ -530,18 +606,102 @@ class DetectorLayerStatistics:
             if cnt_par >= n_test:
                 break
 
-        if return_corrected_predictions:
-            if score_type == 'adversarial':
-                return scores_adver, corrected_classes
-            else:
-                return scores_ood, corrected_classes
-        else:
-            if score_type == 'adversarial':
-                return scores_adver
-            else:
-                return scores_ood
+        return scores_adver, scores_ood, corrected_classes
 
-    def get_top_ranked(self, test_stats, p_values, reverse=False):
+    def _score_pvalue_based(self, labels_pred, pvalues_pred, pvalues_true, return_corrected_predictions=False,
+                            start_layer=0):
+        """
+        Scoring method based on combining the p-values of the test statistics calculated from the layer embeddings.
+
+        :param labels_pred: Same as the method `score`.
+        :param pvalues_pred: numpy array with the negative log p-values from the different layers, conditioned on
+                             the predicted class of the test samples. Is a numpy array of shape `(n_test, n_layers)`,
+                             where `n_test` and `n_layers` are the number of test samples and number of layers
+                             respectively.
+        :param pvalues_true: dict with the negative log p-values from the different layers, conditioned on each
+                             candidate true class (since this is unknown at test time). The class labels are the keys
+                             of the dict and the values are numpy arrays of shape `(n_test, n_layers)` similar to
+                             `pvalues_pred`.
+        :param return_corrected_predictions: Same as the method `score`.
+        :param start_layer: Starting index of the layers to include in the p-value fusion. Set to 0 to include all
+                            the layers. Set to negative values such as -1, -2, -3 using the same convention as
+                            python indexing. For example, a value of `-3` implies the last 3 layers are included.
+        :return:
+        """
+        n_test, nl = pvalues_pred.shape
+        # Equal weight to all the layers
+        weights = (1. / nl) * np.ones(nl)
+        log_weights = np.log(weights)
+        mask_layers = np.zeros(nl, dtype=np.bool)
+        mask_layers[start_layer:] = True
+
+        # Log of the combined p-values
+        pvalues_comb_pred = np.zeros(n_test)
+        pvalues_comb_true = np.zeros((n_test, self.n_classes))
+        if self.pvalue_fusion == 'fisher':
+            pvalues_comb_pred = -1 * np.sum(pvalues_pred[:, mask_layers], axis=1)
+            for i, c in enumerate(self.labels_unique):
+                pvalues_comb_true[:, i] = -1 * np.sum(pvalues_true[c][:, mask_layers], axis=1)
+        elif self.pvalue_fusion == 'harmonic_mean':
+            # log of the combined p-values
+            arr_temp = log_weights + pvalues_pred
+            offset = np.log(np.sum(weights[mask_layers]))
+            pvalues_comb_pred = offset - self._log_sum_exp(arr_temp[:, mask_layers])
+            for i, c in enumerate(self.labels_unique):
+                arr_temp = log_weights + pvalues_true[c]
+                pvalues_comb_true[:, i] = offset - self._log_sum_exp(arr_temp[:, mask_layers])
+        else:
+            raise ValueError("Invalid value '{}' for the input argument 'pvalue_fusion'.".format(self.pvalue_fusion))
+
+        # Adversarial or OOD scores for the test samples and the corrected class predictions
+        scores_adver = np.zeros(n_test)
+        scores_ood = np.zeros(n_test)
+        corrected_classes = copy.copy(labels_pred)
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred[0]]
+        cnt_par = 0
+        for c in preds_unique:
+            # Scoring samples that are predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            n_pred = ind.shape[0]
+            if n_pred == 0:
+                continue
+
+            # OOD score
+            scores_ood[ind] = -1 * pvalues_comb_pred[ind]
+
+            # Adversarial score
+            # Mask to include all classes, except the predicted class `c`
+            i = np.where(self.labels_unique == c)[0][0]
+            mask_excl = np.ones(self.n_classes, dtype=np.bool)
+            mask_excl[i] = False
+            arr_temp = pvalues_comb_true[ind, :]
+            scores_adver[ind] = np.max(arr_temp[:, mask_excl], axis=1) - pvalues_comb_pred[ind]
+
+            # Corrected class prediction based on the maximum p-value conditioned on the candidate true class
+            if return_corrected_predictions:
+                corrected_classes[ind] = [self.labels_unique[j] for j in np.argmax(arr_temp, axis=1)]
+
+            # Break if we have already covered all the test samples
+            cnt_par += n_pred
+            if cnt_par >= n_test:
+                break
+
+        return scores_adver, scores_ood, corrected_classes
+
+    @staticmethod
+    def _log_sum_exp(x):
+        # Numerically stable computation of the log-sum-exponential function
+        # `x` is a 2d numpy array
+        if x.shape[1] > 1:
+            col_max = np.max(x, axis=1)
+            v = np.sum(np.exp(x - col_max[:, np.newaxis]), axis=1)
+            return np.log(np.clip(v, sys.float_info.min, None)) + col_max
+        elif x.shape[1] == 1:
+            return x[:, 0]
+        else:
+            return x
+
+    def _get_top_ranked(self, test_stats, p_values, reverse=False):
         """
         Get the top-ranked (largest or smallest) test statistics across the layers. Ranking is done based on the
         p-values.

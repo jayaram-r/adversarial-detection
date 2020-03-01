@@ -485,7 +485,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None):
     plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
     plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
-    plt.legend(loc='best')
+    plt.legend(loc='best', prop={'size': 'xx-small'})
     fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
 
