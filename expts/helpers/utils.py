@@ -450,7 +450,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     return results
 
 
-def plot_helper(plot_dict, methods, plot_file, min_yrange=None):
+def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False):
     fig = plt.figure()
     x_vals = []
     y_vals = []
@@ -485,18 +485,25 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None):
     plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
     plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
-    plt.legend(loc='best', prop={'size': 'xx-small'})
+    if not place_legend_outside:
+        plt.legend(loc='best', prop={'size': 'xx-small'})
+    else:
+        # place the upper center of the box outside and slightly below the plot axes
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), prop={'size': 'xx-small'})
+
     fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
 
 
-def plot_performance_comparison(results_dict, output_dir):
+def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True):
     """
     Plot the performance comparison for different detection methods.
 
     :param results_dict: dict mapping each method name to its metrics dict (obtained from the function
                          `metrics_varying_positive_class_proportion`).
     :param output_dir: path to the output directory where the plots are to be saved.
+    :param place_legend_outside: Set to True to place the legend outside the plot area.
+
     :return: None
     """
     if not os.path.isdir(output_dir):
@@ -523,7 +530,7 @@ def plot_performance_comparison(results_dict, output_dir):
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('auc'))
-    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
+    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
 
     # Average precision plots
     plot_dict = dict()
@@ -544,7 +551,7 @@ def plot_performance_comparison(results_dict, output_dir):
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('avg_prec'))
-    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
+    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
 
     # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
@@ -566,7 +573,7 @@ def plot_performance_comparison(results_dict, output_dir):
             }
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
-        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
 
     # Scaled TPR for different target FPR values
     for j, f in enumerate(FPR_THRESH):
@@ -586,7 +593,7 @@ def plot_performance_comparison(results_dict, output_dir):
             }
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('tpr', j + 1))
-        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1)
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
 
 
 def get_num_jobs(n_jobs):
