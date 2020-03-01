@@ -115,6 +115,9 @@ def main():
     parser.add_argument('--score-type', '--st', choices=SCORE_TYPES, default='pvalue',
                         help="Score type to use for the proposed method. Choices are: {}".
                         format(', '.join(SCORE_TYPES)))
+    parser.add_argument('--pvalue-fusion', '--pf', choices=['harmonic_mean', 'fisher'], default='harmonic_mean',
+                        help="Name of the method to use for combining p-values from multiple layers for the "
+                             "proposed method. Choices are: 'harmonic_mean' and 'fisher'")
     parser.add_argument('--ood-detection', '--ood', action='store_true', default=False,
                         help="Option that enables out-of-distribution detection instead of adversarial detection "
                              "for the proposed method")
@@ -189,10 +192,19 @@ def main():
     # Dimensionality reduction to the layer embeddings is applied only for methods in certain configurations
     apply_dim_reduc = False
     if args.detection_method == 'proposed':
+        # Name string for the proposed method based on the input configuration
+        # Score type suffix in the method name
+        st = '{:.4s}'.format(args.score_type)
+        if args.score_type == 'pvalue':
+            if args.pvalue_fusion == 'harmonic_mean':
+                st += '_hmp'
+            if args.pvalue_fusion == 'fisher':
+                st += '_fis'
+
         if not args.ood_detection:
-            method_name = '{:.5s}_{:.5s}_{}_adver'.format(method_name, args.test_statistic, args.score_type)
+            method_name = '{:.5s}_{:.5s}_{}_adv'.format(method_name, args.test_statistic, st)
         else:
-            method_name = '{:.5s}_{:.5s}_{}_ood'.format(method_name, args.test_statistic, args.score_type)
+            method_name = '{:.5s}_{:.5s}_{}_ood'.format(method_name, args.test_statistic, st)
 
         if args.use_top_ranked:
             method_name = '{}_top{:d}'.format(method_name, args.num_layers)
@@ -201,7 +213,7 @@ def main():
 
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
-            method_name = '{}_k_{:d}'.format(method_name, n_neighbors)
+            method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
         if args.test_statistic == 'multinomial':
@@ -212,7 +224,7 @@ def main():
         method_name = '{:.5s}_{}'.format(method_name, args.layer_trust_score)
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
-            method_name = '{}_k_{:d}'.format(method_name, n_neighbors)
+            method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied to the logit layer
         if args.layer_trust_score != 'logit':
@@ -222,7 +234,7 @@ def main():
         apply_dim_reduc = True
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
-            method_name = '{}_k_{:d}'.format(method_name, n_neighbors)
+            method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
     # Model file for dimension reduction, if required
     model_dim_reduc = None
@@ -419,7 +431,7 @@ def main():
                 layer_statistic=args.test_statistic,
                 score_type=args.score_type,
                 ood_detection=args.ood_detection,
-                pvalue_fusion='harmonic_mean',
+                pvalue_fusion=args.pvalue_fusion,
                 use_top_ranked=args.use_top_ranked,
                 num_top_ranked=args.num_layers,
                 skip_dim_reduction=(not apply_dim_reduc),

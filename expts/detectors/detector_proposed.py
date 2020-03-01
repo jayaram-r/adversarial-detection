@@ -181,7 +181,7 @@ class DetectorLayerStatistics:
     """
     def __init__(self,
                  layer_statistic='multinomial',
-                 score_type='density',
+                 score_type='pvalue',
                  ood_detection=False,
                  pvalue_fusion='harmonic_mean',
                  use_top_ranked=False,
@@ -400,11 +400,13 @@ class DetectorLayerStatistics:
 
             scores_temp, pvalues_temp = ts_obj.fit(data_proj, labels, labels_pred, labels_unique=self.labels_unique)
             '''
-            `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
+            - `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
             test statistics for each sample.
             The first column `scores_temp[:, 0]` gives the scores conditioned on the predicted class.
             The remaining columns `scores_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on `i - 1`
             being the candidate true class for the sample.
+            - `pvalues_temp` is also a numpy array of the same shape with the negative log transformed p-values 
+            corresponding to the test statistics.
             '''
             self.test_stats_models.append(ts_obj)
             for j, c in enumerate(self.labels_unique):
@@ -418,15 +420,15 @@ class DetectorLayerStatistics:
             # Learn a joint probability density model for the test statistics
             for c in self.labels_unique:
                 if self.use_top_ranked:
-                    logger.info("Using the largest (smallest) {:d} test statistics conditioned on the predicted "
-                                "(true) class.".format(self.num_top_ranked))
+                    logger.info("Using the test statistics corresponding to the smallest (largest) {:d} p-values "
+                                "conditioned on the predicted (true) class.".format(self.num_top_ranked))
                     # For the test statistics conditioned on the predicted class, take the largest
-                    # `self.num_top_ranked` negative log p-values across the layers
+                    # `self.num_top_ranked` negative log-transformed p-values across the layers
                     test_stats_pred[c], pvalues_pred[c] = self._get_top_ranked(
                         test_stats_pred[c], pvalues_pred[c], reverse=True
                     )
                     # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
-                    # negative log p-values across the layers
+                    # negative log-transformed p-values across the layers
                     test_stats_true[c], pvalues_true[c] = self._get_top_ranked(test_stats_true[c], pvalues_true[c])
 
                 logger.info("Learning a joint probability density model for the test statistics conditioned on the "
