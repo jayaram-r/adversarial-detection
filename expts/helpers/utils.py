@@ -486,10 +486,10 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
     plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
     if not place_legend_outside:
-        plt.legend(loc='best', prop={'size': 'xx-small'})
+        plt.legend(loc='best', prop={'size': 'xx-small', 'weight': 'bold'})
     else:
-        # place the upper center of the box outside and slightly below the plot axes
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.05), prop={'size': 'xx-small'})
+        # place the upper right end of the box outside and slightly below the plot axes
+        plt.legend(loc='upper right', bbox_to_anchor=(1, -0.07), prop={'size': 'xx-small', 'weight': 'bold'})
 
     fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
@@ -509,7 +509,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    x_label = '% of positive samples'
+    x_label = '% positive samples'
     methods = sorted(results_dict.keys())
     # AUC plots
     plot_dict = dict()
