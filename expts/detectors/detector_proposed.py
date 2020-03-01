@@ -628,8 +628,7 @@ class DetectorLayerStatistics:
                             python indexing. For example, a value of `-3` implies the last 3 layers are included.
         :return:
         """
-        n_test = labels_pred.shape[0]
-        nl = pvalues_pred.shape[1]
+        n_test, nl = pvalues_pred.shape
         # Equal weight to all the layers
         weights = (1. / nl) * np.ones(nl)
         log_weights = np.log(weights)

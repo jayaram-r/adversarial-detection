@@ -109,6 +109,7 @@ def main():
                         help='model type or name of the dataset')
     parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
                         help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
+    ################ Optional arguments for the proposed method
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
                         format(', '.join(TEST_STATS_SUPPORTED)))
@@ -121,9 +122,6 @@ def main():
     parser.add_argument('--ood-detection', '--ood', action='store_true', default=False,
                         help="Option that enables out-of-distribution detection instead of adversarial detection "
                              "for the proposed method")
-    parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
-                        help="Which layer to use for the trust score calculation. Choices are: {}".
-                        format(', '.join(LAYERS_TRUST_SCORE)))
     parser.add_argument(
         '--use-top-ranked', '--utr', action='store_true', default=False,
         help="Option that enables the proposed method to use only the top-ranked (by p-values) test statistics for "
@@ -139,6 +137,10 @@ def main():
         help="If the option '--use-top-ranked' or '--use-deep-layers' is provided, this option specifies the number "
              "of layers or test statistics to be used by the proposed method"
     )
+    ################ Optional arguments for the proposed method
+    parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
+                        help="Which layer to use for the trust score calculation. Choices are: {}".
+                        format(', '.join(LAYERS_TRUST_SCORE)))
     parser.add_argument('--num-neighbors', '--nn', type=int, default=-1,
                         help='Number of nearest neighbors (if applicable to the method). By default, this is set '
                              'to be a power of the number of samples (n): n^{:.1f}'.format(NEIGHBORHOOD_CONST))
