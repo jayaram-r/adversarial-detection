@@ -640,7 +640,7 @@ class LLEScore(TestStatistic):
             errors_lle = self.errors_lle_train
         else:
             # Apply a PCA transformation to the test features if required
-            if self.transform_pca:
+            if self.transform_pca is not None:
                 features_test = np.dot(features_test - self.mean_data, self.transform_pca)
 
             # Query the index of `self.n_neighbors` nearest neighbors of each test sample
