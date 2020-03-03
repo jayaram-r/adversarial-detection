@@ -643,14 +643,33 @@ def solve_lle_weights(x, neighbors, reg_eps=0.001):
     Z = x - neighbors
     G = np.dot(Z, Z.T)
 
-    # Smallest eigenvalue of `G`
-    e_min = eigvalsh(G, eigvals=(0, 0))[0]
-    # Ensure that `G` is not singular
-    if e_min < 1e-8:
-        tr = max(np.trace(G), 1e-8)
-        np.fill_diagonal(G, G.diagonal() + reg_eps * tr)
+    eps = sys.float_info.epsilon
+    # Trace of G is the sum of squared distance from `x` to its neighbors
+    G_diag = G.diagonal()
+    tr_G = np.sum(G_diag)
+    max_diag_G = np.max(G_diag)
+    if tr_G < eps or max_diag_G < eps:
+        # Equal weight to all the neighbors
+        return (1. / G_diag.shape[0]) * np.ones(G_diag.shape[0])
 
+    # Normalize the diagonal values to the range [0, 1]. Then look for really small values
+    G_diag_norm = G_diag / max_diag_G
+    mask = G_diag_norm < eps
+    if np.any(mask):
+        # One or more of the neighbors are very close to the point `x`. In this case, we assign equal weight to
+        # such overlapping neighbors
+        w = np.zeros_like(G_diag)
+        w[mask] = 1.
+        return w / np.sum(w)
+
+    # Check for large value of condition number of `G`
+    if np.linalg.cond(G) > 1e6:
+        # Add a small perturbation to the diagonal of `G` to ensure that it is not singular
+        np.fill_diagonal(G, G_diag + reg_eps * tr_G)
+
+    # Solve for the optimal weights, ensure they are non-negative, and normalize them to sum to 1
     w = solve(G, np.ones(G.shape[0]), assume_a='pos')
+    w = np.clip(w, 0., None)
     return w / np.sum(w)
 
 
