@@ -262,10 +262,8 @@ class DetectorLayerStatistics:
 
         if self.layer_statistic in {'lid', 'lle'}:
             if not self.skip_dim_reduction:
-                logger.warning("Option 'skip_dim_reduction' is set to False for the test statistic '{}'. Setting "
-                               "it to True because it is preferred to skip dimension reduction for this "
-                               "test statistic.".format(self.layer_statistic))
-                self.skip_dim_reduction = True
+                logger.warning("Option 'skip_dim_reduction' is set to False for the test statistic '{}'. Making sure "
+                               "that this is the intended setting.".format(self.layer_statistic))
 
         # Load the dimension reduction models per-layer if required
         self.transform_models = None
