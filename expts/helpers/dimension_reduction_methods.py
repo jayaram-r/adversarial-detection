@@ -642,6 +642,7 @@ def solve_lle_weights(x, neighbors, reg_eps=0.001):
     # Gram matrix of the neighborhood of the point
     Z = x - neighbors
     G = np.dot(Z, Z.T)
+    k = G.shape[0]
 
     eps = sys.float_info.epsilon
     # Trace of G is the sum of squared distance from `x` to its neighbors
@@ -650,15 +651,14 @@ def solve_lle_weights(x, neighbors, reg_eps=0.001):
     max_diag_G = np.max(G_diag)
     if tr_G < eps or max_diag_G < eps:
         # Equal weight to all the neighbors
-        return (1. / G_diag.shape[0]) * np.ones(G_diag.shape[0])
+        return (1. / k) * np.ones(k)
 
     # Normalize the diagonal values to the range [0, 1]. Then look for really small values
-    G_diag_norm = G_diag / max_diag_G
-    mask = G_diag_norm < eps
+    mask = G_diag < (eps * max_diag_G)
     if np.any(mask):
         # One or more of the neighbors are very close to the point `x`. In this case, we assign equal weight to
         # such overlapping neighbors
-        w = np.zeros_like(G_diag)
+        w = np.zeros(k)
         w[mask] = 1.
         return w / np.sum(w)
 
@@ -668,7 +668,7 @@ def solve_lle_weights(x, neighbors, reg_eps=0.001):
         np.fill_diagonal(G, G_diag + reg_eps * tr_G)
 
     # Solve for the optimal weights, ensure they are non-negative, and normalize them to sum to 1
-    w = solve(G, np.ones(G.shape[0]), assume_a='pos')
+    w = solve(G, np.ones(k), assume_a='pos')
     w = np.clip(w, 0., None)
     return w / np.sum(w)
 
