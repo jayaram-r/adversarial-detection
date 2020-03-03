@@ -525,6 +525,8 @@ class LLEScore(TestStatistic):
         # Index of train samples from each class based on the true class and predicted class
         self.indices_true = dict()
         self.indices_pred = dict()
+        # Feature vectors used to build the KNN graph
+        self.features_knn = None
 
     def fit(self, features, labels, labels_pred, labels_unique=None,
             min_dim_pca=1000, pca_cutoff=0.995, reg_eps=0.001):
@@ -573,6 +575,7 @@ class LLEScore(TestStatistic):
             self.n_neighbors = k
 
         logger.info("Building a KNN index for nearest neighbor queries.")
+        self.features_knn = features
         self.index_knn = KNNIndex(
             features, n_neighbors=self.n_neighbors,
             metric=self.metric, metric_kwargs=self.metric_kwargs,
@@ -586,7 +589,7 @@ class LLEScore(TestStatistic):
         nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
 
         logger.info("Calculating the optimal LLE reconstruction from the nearest neighbors of each sample.")
-        self.errors_lle_train = self._calc_reconstruction_errors(features, nn_indices)
+        self.errors_lle_train = self._calc_reconstruction_errors(features, self.features_knn, nn_indices)
 
         self.err_median_pred = np.ones(self.n_classes)
         self.err_median_true = np.ones(self.n_classes)
@@ -645,7 +648,7 @@ class LLEScore(TestStatistic):
 
             # Find the optimal convex reconstruction of each point from its nearest neighbors and the norm of
             # the reconstruction errors
-            errors_lle = self._calc_reconstruction_errors(features_test, nn_indices)
+            errors_lle = self._calc_reconstruction_errors(features_test, self.features_knn, nn_indices)
 
         scores = np.zeros((n_test, 1 + self.n_classes))
         p_values = np.zeros((n_test, 1 + self.n_classes))
@@ -687,21 +690,23 @@ class LLEScore(TestStatistic):
 
         return scores, p_values
 
-    def _calc_reconstruction_errors(self, features, nn_indices):
+    def _calc_reconstruction_errors(self, features, features_knn, nn_indices):
         """
         Calculate the norm of the reconstruction errors of the LLE embedding in the neighborhood of each point.
 
         :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
                          dimension respectively.
+        :param features_knn: numpy array of shape `(m, d)` with the feature vectors used for the original KNN
+                             graph construction.
         :param nn_indices: numpy array of shape `(N, k)` where `k` is the number of neighbors.
         :return:
             - array with the norm of the reconstruction errors. Has shape `(N, )`.
         """
         N = nn_indices.shape[0]
         if self.n_jobs == 1:
-            w = [helper_reconstruction_error(features, nn_indices, self.reg_eps, i) for i in range(N)]
+            w = [helper_reconstruction_error(features, features_knn, nn_indices, self.reg_eps, i) for i in range(N)]
         else:
-            helper_partial = partial(helper_reconstruction_error, features, nn_indices, self.reg_eps)
+            helper_partial = partial(helper_reconstruction_error, features, features_knn, nn_indices, self.reg_eps)
             pool_obj = multiprocessing.Pool(processes=self.n_jobs)
             w = []
             _ = pool_obj.map_async(helper_partial, range(N), callback=w.extend)

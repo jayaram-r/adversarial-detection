@@ -658,11 +658,11 @@ def helper_solve_lle(data, nn_indices, reg_eps, n):
     return solve_lle_weights(data[n, :], data[nn_indices[n, :], :], reg_eps=reg_eps)
 
 
-def helper_reconstruction_error(data, nn_indices, reg_eps, n):
+def helper_reconstruction_error(data, data_knn, nn_indices, reg_eps, n):
     # Euclidean norm of the error in the LLE reconstruction
     x = data[n, :]
     # nearest neighbors of `x`
-    y = data[nn_indices[n, :], :]
+    y = data_knn[nn_indices[n, :], :]
     w = solve_lle_weights(x, y, reg_eps=reg_eps)
     e = x - np.dot(w, y)
 
