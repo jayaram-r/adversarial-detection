@@ -32,11 +32,11 @@ logger = logging.getLogger(__name__)
 
 def helper_pvalue(scores_null_repl, scores_obs, n_samp, i):
     scores_null = scores_null_repl[i, :]
-    mask = scores_null[:, np.newaxis] >= scores_obs[np.newaxis, :]
-    return np.count_nonzero(mask, axis=0) / float(n_samp)
+    mask = scores_null[:, np.newaxis] >= scores_obs
+    return mask.sum(axis=0, dtype=np.float) / n_samp
 
 
-def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=500, n_jobs=1):
+def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=200, n_jobs=1):
     """
     Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
     null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
@@ -51,8 +51,9 @@ def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, 
     :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
     """
     n_samp = scores_null.shape[0]
-    mask = scores_null[:, np.newaxis] >= scores_obs[np.newaxis, :]
-    p = np.count_nonzero(mask, axis=0) / float(n_samp)
+    scores_obs = scores_obs[np.newaxis, :]
+    mask = scores_null[:, np.newaxis] >= scores_obs
+    p = mask.sum(axis=0, dtype=np.float) / n_samp
     if bootstrap:
         scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, n_samp), replace=True)
         if n_jobs == 1:
