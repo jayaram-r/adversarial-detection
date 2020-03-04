@@ -7,6 +7,7 @@ import sys
 from abc import ABC, abstractmethod
 import multiprocessing
 from functools import partial
+from numba import njit, prange
 import logging
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
@@ -36,7 +37,7 @@ def helper_pvalue(scores_null_repl, scores_obs, n_samp, i):
     return mask.sum(axis=0, dtype=np.float) / n_samp
 
 
-def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=200, n_jobs=1):
+def pvalue_score_alt(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=100, n_jobs=1):
     """
     Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
     null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
@@ -70,8 +71,47 @@ def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, 
         # Average p-value from the bootstrap replications
         p = np.mean(np.array(p_repl), axis=0)
 
+    p = np.clip(p, sys.float_info.epsilon, None)
     if log_transform:
-        return -np.log(np.clip(p, sys.float_info.min, None))
+        return -np.log(p)
+    else:
+        return p
+
+
+# numba version
+@njit
+def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=100):
+    """
+    Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
+    null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
+
+    :param scores_null: numpy array of shape `(m, )` with the scores from the null distribution.
+    :param scores_obs: numpy array of shape `(n, )` with the observed scores.
+    :param log_transform: set to True to apply negative log transform to the p-values.
+    :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
+    :param n_bootstrap: number of bootstrap resamples to use.
+    :param n_jobs: number of jobs to execute in parallel.
+
+    :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
+    """
+    eps = 1e-16
+    n_samp = scores_null.shape[0]
+    scores_obs = np.expand_dims(scores_obs, 0)
+    mask = np.expand_dims(scores_null, 1) >= scores_obs
+    p = np.sum(mask, axis=0) / float(n_samp)
+    if bootstrap:
+        scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, n_samp), replace=True)
+        p_sum = p
+        for b in range(n_bootstrap):
+            mask = np.expand_dims(scores_null_repl[b, :], 1) >= scores_obs
+            p_sum += np.sum(mask, axis=0) / float(n_samp)
+
+        # Average p-value from the bootstrap replications
+        p = p_sum / (n_bootstrap + 1.)
+
+    p[p < eps] = eps
+    if log_transform:
+        return -np.log(p)
     else:
         return p
 
@@ -162,7 +202,7 @@ class TestStatistic(ABC):
             self.n_neighbors = int(np.ceil(self.n_train ** self.neighborhood_constant))
 
     @abstractmethod
-    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
         """
         Given the feature vector and predicted labels for `N` samples, calculate their test statistic scores.
 
@@ -172,6 +212,7 @@ class TestStatistic(ABC):
         :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
                          This is used to remove points from their own set of nearest neighbors.
         :param log_transform: Set to True to apply negative log transformation to the p-values.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
         :return:
         """
         raise NotImplementedError
@@ -279,8 +320,9 @@ class MultinomialScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Skipping multinomial parameter estimation "
                                "and assigning uniform probabilities.".format(c))
 
-        # Calculate the scores and p-values for each sample
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
+        # here are not used
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
@@ -326,12 +368,11 @@ class MultinomialScore(TestStatistic):
                 if not is_train:
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
-                        bootstrap=bootstrap, n_jobs=self.n_jobs
+                        bootstrap=bootstrap
                     )
                 else:
                     p_values[ind, 0] = pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=log_transform,
-                        bootstrap=bootstrap, n_jobs=self.n_jobs
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
                     )
 
                 cnt_par += ind.shape[0]
@@ -344,12 +385,12 @@ class MultinomialScore(TestStatistic):
             if not is_train:
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
-                    bootstrap=bootstrap, n_jobs=self.n_jobs
+                    bootstrap=bootstrap
                 )
             else:
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
-                    bootstrap=bootstrap, n_jobs=self.n_jobs
+                    bootstrap=bootstrap
                 )
 
         return scores, p_values
@@ -450,8 +491,9 @@ class LIDScore(TestStatistic):
             else:
                 logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
 
-        # Calculate the scores and p-values for each sample
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
+        # here are not used
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
@@ -497,12 +539,11 @@ class LIDScore(TestStatistic):
                 if not is_train:
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
-                        bootstrap=bootstrap, n_jobs=self.n_jobs
+                        bootstrap=bootstrap
                     )
                 else:
                     p_values[ind, 0] = pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=log_transform,
-                        bootstrap=bootstrap, n_jobs=self.n_jobs
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
                     )
 
                 cnt_par += ind.shape[0]
@@ -516,12 +557,12 @@ class LIDScore(TestStatistic):
             if not is_train:
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
-                    bootstrap=bootstrap, n_jobs=self.n_jobs
+                    bootstrap=bootstrap
                 )
             else:
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
-                    bootstrap=bootstrap, n_jobs=self.n_jobs
+                    bootstrap=bootstrap
                 )
 
         return scores, p_values
@@ -649,8 +690,9 @@ class LLEScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Setting the median reconstruction error "
                                "to 1.".format(c))
 
-        # Calculate the scores and p-values for each sample
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
+        # here are not used
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
@@ -703,12 +745,11 @@ class LLEScore(TestStatistic):
                 if not is_train:
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
-                        bootstrap=bootstrap, n_jobs=self.n_jobs
+                        bootstrap=bootstrap
                     )
                 else:
                     p_values[ind, 0] = pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=log_transform,
-                        bootstrap=bootstrap, n_jobs=self.n_jobs
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
                     )
 
                 cnt_par += ind.shape[0]
@@ -722,12 +763,12 @@ class LLEScore(TestStatistic):
             if not is_train:
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
-                    bootstrap=bootstrap, n_jobs=self.n_jobs
+                    bootstrap=bootstrap
                 )
             else:
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
-                    bootstrap=bootstrap, n_jobs=self.n_jobs
+                    bootstrap=bootstrap
                 )
 
         return scores, p_values
