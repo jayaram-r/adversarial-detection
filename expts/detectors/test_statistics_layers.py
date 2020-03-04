@@ -30,6 +30,51 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
+def helper_pvalue(scores_null_repl, scores_obs, n_samp, i):
+    scores_null = scores_null_repl[i, :]
+    mask = scores_null[:, np.newaxis] >= scores_obs[np.newaxis, :]
+    return np.count_nonzero(mask, axis=0) / float(n_samp)
+
+
+def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=500, n_jobs=1):
+    """
+    Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
+    null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
+
+    :param scores_null: numpy array of shape `(m, )` with the scores from the null distribution.
+    :param scores_obs: numpy array of shape `(n, )` with the observed scores.
+    :param log_transform: set to True to apply negative log transform to the p-values.
+    :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
+    :param n_bootstrap: number of bootstrap resamples to use.
+    :param n_jobs: number of jobs to execute in parallel.
+
+    :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
+    """
+    n_samp = scores_null.shape[0]
+    mask = scores_null[:, np.newaxis] >= scores_obs[np.newaxis, :]
+    p = np.count_nonzero(mask, axis=0) / float(n_samp)
+    if bootstrap:
+        scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, n_samp), replace=True)
+        if n_jobs == 1:
+            p_repl = [helper_pvalue(scores_null_repl, scores_obs, n_samp, i) for i in range(n_bootstrap)]
+        else:
+            helper_partial = partial(helper_pvalue, scores_null_repl, scores_obs, n_samp)
+            pool_obj = multiprocessing.Pool(processes=n_jobs)
+            p_repl = []
+            _ = pool_obj.map_async(helper_partial, range(n_bootstrap), callback=p_repl.extend)
+            pool_obj.close()
+            pool_obj.join()
+
+        p_repl.append(p)
+        # Average p-value from the bootstrap replications
+        p = np.mean(np.array(p_repl), axis=0)
+
+    if log_transform:
+        return -np.log(np.clip(p, sys.float_info.min, None))
+    else:
+        return p
+
+
 class TestStatistic(ABC):
     """
     Skeleton class for different potential test statistics using the DNN layer representations.
@@ -129,25 +174,6 @@ class TestStatistic(ABC):
         :return:
         """
         raise NotImplementedError
-
-    @staticmethod
-    def pvalue_score(scores_null, scores_obs, log_transform=False):
-        """
-        Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
-        null distribution `scores_null`.
-
-        :param scores_null: numpy array of shape `(m, )`.
-        :param scores_obs: numpy array of shape `(n, )`.
-        :param log_transform: set to True to apply negative log transform to the p-values.
-
-        :return: p-values or log-transformed p-values of the same shape as `scores_obs`.
-        """
-        mask = scores_null[:, np.newaxis] >= scores_obs[np.newaxis, :]
-        p = np.sum(mask, axis=0) / float(scores_null.shape[0])
-        if log_transform:
-            return -np.log(np.clip(p, sys.float_info.min, None))
-        else:
-            return p
 
 
 class MultinomialScore(TestStatistic):
@@ -256,7 +282,7 @@ class MultinomialScore(TestStatistic):
         self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
         return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
@@ -266,6 +292,7 @@ class MultinomialScore(TestStatistic):
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
         :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
         :param log_transform: Set to True to apply negative log transformation to the p-values.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -296,12 +323,14 @@ class MultinomialScore(TestStatistic):
                 scores[ind, 0] = self.multinomial_lrt(data_counts[ind, :], self.proba_params_pred[i, :],
                                                       self.n_neighbors)
                 if not is_train:
-                    p_values[ind, 0] = self.pvalue_score(
-                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform
+                    p_values[ind, 0] = pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap, n_jobs=self.n_jobs
                     )
                 else:
-                    p_values[ind, 0] = self.pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=log_transform
+                    p_values[ind, 0] = pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap, n_jobs=self.n_jobs
                     )
 
                 cnt_par += ind.shape[0]
@@ -312,12 +341,14 @@ class MultinomialScore(TestStatistic):
             # Likelihood ratio statistic conditioned on the candidate true class `c`
             scores[:, i + 1] = self.multinomial_lrt(data_counts, self.proba_params_true[i, :], self.n_neighbors)
             if not is_train:
-                p_values[:, i + 1] = self.pvalue_score(
-                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                p_values[:, i + 1] = pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap, n_jobs=self.n_jobs
                 )
             else:
-                p_values[:, i + 1] = self.pvalue_score(
-                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                p_values[:, i + 1] = pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap, n_jobs=self.n_jobs
                 )
 
         return scores, p_values
@@ -422,7 +453,7 @@ class LIDScore(TestStatistic):
         self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
         return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
@@ -432,6 +463,7 @@ class LIDScore(TestStatistic):
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
         :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
         :param log_transform: Set to True to apply negative log transformation to the p-values.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -462,12 +494,14 @@ class LIDScore(TestStatistic):
                 # scores[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
                 scores[ind, 0] = lid_estimates[ind]
                 if not is_train:
-                    p_values[ind, 0] = self.pvalue_score(
-                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform
+                    p_values[ind, 0] = pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap, n_jobs=self.n_jobs
                     )
                 else:
-                    p_values[ind, 0] = self.pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=log_transform
+                    p_values[ind, 0] = pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap, n_jobs=self.n_jobs
                     )
 
                 cnt_par += ind.shape[0]
@@ -479,12 +513,14 @@ class LIDScore(TestStatistic):
             # scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
             scores[:, i + 1] = lid_estimates
             if not is_train:
-                p_values[:, i + 1] = self.pvalue_score(
-                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                p_values[:, i + 1] = pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap, n_jobs=self.n_jobs
                 )
             else:
-                p_values[:, i + 1] = self.pvalue_score(
-                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                p_values[:, i + 1] = pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap, n_jobs=self.n_jobs
                 )
 
         return scores, p_values
@@ -616,7 +652,7 @@ class LLEScore(TestStatistic):
         self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
         return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
@@ -626,6 +662,7 @@ class LLEScore(TestStatistic):
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
         :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
         :param log_transform: Set to True to apply negative log transformation to the p-values.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -663,12 +700,14 @@ class LLEScore(TestStatistic):
                 # scores[ind, 0] = errors_lle[ind] / self.err_median_pred[i]
                 scores[ind, 0] = errors_lle[ind]
                 if not is_train:
-                    p_values[ind, 0] = self.pvalue_score(
-                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform
+                    p_values[ind, 0] = pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap, n_jobs=self.n_jobs
                     )
                 else:
-                    p_values[ind, 0] = self.pvalue_score(
-                        scores[ind, 0], scores[ind, 0], log_transform=log_transform
+                    p_values[ind, 0] = pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap, n_jobs=self.n_jobs
                     )
 
                 cnt_par += ind.shape[0]
@@ -680,12 +719,14 @@ class LLEScore(TestStatistic):
             # scores[:, i + 1] = errors_lle / self.err_median_true[i]
             scores[:, i + 1] = errors_lle
             if not is_train:
-                p_values[:, i + 1] = self.pvalue_score(
-                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                p_values[:, i + 1] = pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap, n_jobs=self.n_jobs
                 )
             else:
-                p_values[:, i + 1] = self.pvalue_score(
-                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform
+                p_values[:, i + 1] = pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap, n_jobs=self.n_jobs
                 )
 
         return scores, p_values
