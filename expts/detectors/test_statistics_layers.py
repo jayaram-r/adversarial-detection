@@ -549,9 +549,9 @@ class BinomialScore(TestStatistic):
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
-                # Score is the proportion of samples in the neighborhood that have the same label as the
+                # Score is the proportion of samples in the neighborhood that have a different label than the
                 # predicted class `c_hat`
-                scores[ind, 0] = (1. / self.n_neighbors) * data_counts[ind, i]
+                scores[ind, 0] = (1. / self.n_neighbors) * (self.n_neighbors - data_counts[ind, i])
 
                 # Empirical p-value estimates
                 if not is_train:
@@ -571,8 +571,8 @@ class BinomialScore(TestStatistic):
                     break
 
         for i, c in enumerate(self.labels_unique):
-            # Score is the proportion of samples in the neighborhood that have label `c`
-            scores[:, i + 1] = (1. / self.n_neighbors) * data_counts[:, i]
+            # Score is the proportion of samples in the neighborhood that have a different label from `c`
+            scores[:, i + 1] = (1. / self.n_neighbors) * (self.n_neighbors - data_counts[:, i])
 
             # Empirical p-value estimates
             if not is_train:
