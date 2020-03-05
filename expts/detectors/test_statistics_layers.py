@@ -467,7 +467,7 @@ class BinomialScore(TestStatistic):
         nn_indices, _ = self.index_knn.query_self(k=self.n_neighbors)
 
         logger.info("Calculating the class label counts in the neighborhood of each sample and performing "
-                    "multinomial parameter estimation.")
+                    "binomial parameter estimation.")
         self.labels_train_enc = self.label_encoder(labels)
         _, self.data_counts_train = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
