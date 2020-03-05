@@ -38,7 +38,8 @@ def helper_pvalue(scores_null_repl, scores_obs, n_samp, i):
     return mask.sum(axis=0, dtype=np.float) / n_samp
 
 
-def pvalue_score_alt(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=100, n_jobs=1):
+# Not using this version since it's slower than the numba version
+def pvalue_score_alt(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=100, n_jobs=1):
     """
     Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
     null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
@@ -80,8 +81,8 @@ def pvalue_score_alt(scores_null, scores_obs, log_transform=False, bootstrap=Fal
 
 
 # numba version
-@njit
-def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, n_bootstrap=100):
+@njit(parallel=True)
+def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=100):
     """
     Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
     null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
@@ -96,16 +97,24 @@ def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=False, 
     :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
     """
     eps = 1e-16
-    n_samp = scores_null.shape[0]
-    scores_obs = np.expand_dims(scores_obs, 0)
-    mask = np.expand_dims(scores_null, 1) >= scores_obs
-    p = np.sum(mask, axis=0) / float(n_samp)
+    n_samp = float(scores_null.shape[0])
+    n_obs = scores_obs.shape[0]
+    p = np.zeros(n_obs)
+    for i in prange(n_obs):
+        mask = scores_null >= scores_obs[i]
+        p[i] = mask[mask].shape[0] / n_samp
+
     if bootstrap:
-        scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, n_samp), replace=True)
+        scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, scores_null.shape[0]), replace=True)
         p_sum = p
-        for b in range(n_bootstrap):
-            mask = np.expand_dims(scores_null_repl[b, :], 1) >= scores_obs
-            p_sum += np.sum(mask, axis=0) / float(n_samp)
+        for b in prange(n_bootstrap):
+            scores_null_curr = scores_null_repl[b, :]
+            p_curr = np.zeros(n_obs)
+            for i in prange(n_obs):
+                mask = scores_null_curr >= scores_obs[i]
+                p_curr[i] = mask[mask].shape[0] / n_samp
+
+            p_sum += p_curr
 
         # Average p-value from the bootstrap replications
         p = p_sum / (n_bootstrap + 1.)
