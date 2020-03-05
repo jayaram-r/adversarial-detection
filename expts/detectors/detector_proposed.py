@@ -20,6 +20,7 @@ from helpers.dimension_reduction_methods import (
 )
 from detectors.test_statistics_layers import (
     MultinomialScore,
+    BinomialScore,
     LIDScore,
     LLEScore
 )
@@ -197,7 +198,7 @@ class DetectorLayerStatistics:
         """
 
         :param layer_statistic: Type of test statistic to calculate at the layers. Valid values are 'multinomial',
-                                'lid', and 'lle'.
+                                'binomial', 'lid', and 'lle'.
         :param score_type: Name of the scoring method to use. Valid options are: 'density' and 'pvalue'.
         :param ood_detection: Set to True to perform out-of-distribution detection instead of adversarial detection.
         :param pvalue_fusion: Method for combining the p-values across the layers. Options are 'harmonic_mean'
@@ -361,10 +362,22 @@ class DetectorLayerStatistics:
             else:
                 data_proj = layer_embeddings[i]
 
-            logger.info("Parameter estimatison and test statistics calculation for layer {:d}:".format(i + 1))
+            logger.info("Parameter estimation and test statistics calculation for layer {:d}:".format(i + 1))
             ts_obj = None
             if self.layer_statistic == 'multinomial':
                 ts_obj = MultinomialScore(
+                    neighborhood_constant=self.neighborhood_constant,
+                    n_neighbors=self.n_neighbors,
+                    metric=self.metric,
+                    metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=False,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+            elif self.layer_statistic == 'binomial':
+                ts_obj = BinomialScore(
                     neighborhood_constant=self.neighborhood_constant,
                     n_neighbors=self.n_neighbors,
                     metric=self.metric,
