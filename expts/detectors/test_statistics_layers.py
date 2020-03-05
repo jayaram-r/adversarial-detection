@@ -507,22 +507,22 @@ class BinomialScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Skipping binomial parameter estimation "
                                "and setting the probability parameter to 0.5.".format(c))
 
-        # Calculate the scores and p-values for each sample
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True)
+        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values estimated
+        # here are not used
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
         return self.scores_train, p_values
 
-    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=False):
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
         """
         Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
         each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
-        Note that `bootstrap` is set to False because this method computes exact p-values (not empirical).
 
         :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
                               dimension respectively.
         :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
         :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
         :param log_transform: Set to True to apply negative log transformation to the p-values.
-        :param bootstrap: Set to False always.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -540,6 +540,7 @@ class BinomialScore(TestStatistic):
             nn_indices, _ = self.index_knn.query(features_test, k=self.n_neighbors)
             _, data_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
 
+        scores = np.zeros((n_test, 1 + self.n_classes))
         p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
@@ -548,30 +549,42 @@ class BinomialScore(TestStatistic):
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
-                if log_transform:
-                    # Negative log of the CDF evaluated at the observed counts from the predicted class `c_hat`
-                    p_values[ind, 0] = -binom.logcdf(data_counts[ind, i], self.n_neighbors, self.proba_params_pred[i])
+                # Score is the proportion of samples in the neighborhood that have the same label as the
+                # predicted class `c_hat`
+                scores[ind, 0] = (1. / self.n_neighbors) * data_counts[ind, i]
+
+                # Empirical p-value estimates
+                if not is_train:
+                    # `self.scores_train[self.indices_pred[c_hat], 0]` are the scores from the training data that
+                    # were predicted into class `c_hat`
+                    p_values[ind, 0] = pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap
+                    )
                 else:
-                    # CDF evaluated at the observed counts from the predicted class `c_hat`
-                    p_values[ind, 0] = binom.cdf(data_counts[ind, i], self.n_neighbors, self.proba_params_pred[i])
+                    p_values[ind, 0] = pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
+                    )
 
                 cnt_par += ind.shape[0]
                 if cnt_par >= n_test:
                     break
 
         for i, c in enumerate(self.labels_unique):
-            if log_transform:
-                # Negative log of the CDF evaluated at the observed counts from class `c`
-                p_values[:, i + 1] = -binom.logcdf(data_counts[:, i], self.n_neighbors, self.proba_params_true[i])
-            else:
-                # CDF evaluated at the observed counts from class `c`
-                p_values[:, i + 1] = binom.cdf(data_counts[:, i], self.n_neighbors, self.proba_params_true[i])
+            # Score is the proportion of samples in the neighborhood that have label `c`
+            scores[:, i + 1] = (1. / self.n_neighbors) * data_counts[:, i]
 
-        # For this test statistic the score is simply the negative log of the p-value
-        if log_transform:
-            scores = p_values
-        else:
-            scores = -np.log(np.clip(p_values, sys.float_info.epsilon, None))
+            # Empirical p-value estimates
+            if not is_train:
+                p_values[:, i + 1] = pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap
+                )
+            else:
+                p_values[:, i + 1] = pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap
+                )
 
         return scores, p_values
 
