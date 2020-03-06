@@ -10,6 +10,7 @@ from functools import partial
 from numba import njit, prange
 from scipy.stats import binom
 import logging
+import copy
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
 from helpers.multinomial import (
@@ -258,8 +259,12 @@ class MultinomialScore(TestStatistic):
         # Index of train samples from each class based on the true class and predicted class
         self.indices_true = dict()
         self.indices_pred = dict()
+        # Boolean mask indicating which subset of classes will be used for the test statistic.
+        # This differs depending on the predicted class and the true class
+        self.mask_included_pred = None
+        self.mask_included_true = None
 
-    def fit(self, features, labels, labels_pred, labels_unique=None):
+    def fit(self, features, labels, labels_pred, labels_unique=None, n_classes_multinom=None):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -270,6 +275,9 @@ class MultinomialScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
+        :param n_classes_multinom: None or an int value >= 1. If `None`, then all classes will be included in the
+                                   multinomial likelihood ratio test statistic. Otherwise, only the specified number
+                                   of classes will be used.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -280,6 +288,15 @@ class MultinomialScore(TestStatistic):
                       p-values of the scores.
         """
         super(MultinomialScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
+        # Number of classes to use for the multinomial likelihood ratio test statistic
+        if n_classes_multinom is not None:
+            n_classes_multinom = int(n_classes_multinom)
+            if n_classes_multinom > self.n_classes:
+                logger.warning("Argument 'n_classes_multinom' cannot be larger than the number of classes {:d}. "
+                               "Setting it equal to the number of classes.".format(self.n_classes))
+                n_classes_multinom = self.n_classes
+            if n_classes_multinom < 1:
+                raise ValueError("Invalid value {:d} for the argument 'n_classes_multinom'".format(n_classes_multinom))
 
         logger.info("Building a KNN index for nearest neighbor queries.")
         self.index_knn = KNNIndex(
@@ -306,6 +323,9 @@ class MultinomialScore(TestStatistic):
         mat_ones = np.ones((self.n_classes, self.n_classes))
         self.proba_params_pred = (1. / self.n_classes) * mat_ones
         self.proba_params_true = (1. / self.n_classes) * mat_ones
+        # Class inclusion mask conditioned on the predicted and the true class
+        self.mask_included_pred = np.zeros((self.n_classes, self.n_classes), dtype=np.bool)
+        self.mask_included_true = np.zeros((self.n_classes, self.n_classes), dtype=np.bool)
         for i, c in enumerate(self.labels_unique):
             # Index of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
@@ -318,6 +338,10 @@ class MultinomialScore(TestStatistic):
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
                                "estimation and assigning uniform probabilities.".format(c))
 
+            # Set the classes to include in the test statistic given the predicted class `c`
+            self.mask_included_pred[i, :] = self.set_classes_to_include(self.proba_params_pred[i, :],
+                                                                        self.n_classes, n_classes_multinom, i)
+
             # Index of samples with class label `c`
             ind = np.where(labels == c)[0]
             self.indices_true[c] = ind
@@ -329,6 +353,10 @@ class MultinomialScore(TestStatistic):
                 # Unexpected, should not occur in practice
                 logger.warning("No labeled samples from class '{}'. Skipping multinomial parameter estimation "
                                "and assigning uniform probabilities.".format(c))
+
+            # Set the classes to include in the test statistic givene the true class `c`
+            self.mask_included_true[i, :] = self.set_classes_to_include(self.proba_params_true[i, :],
+                                                                        self.n_classes, n_classes_multinom, i)
 
         # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
         # here are not used
@@ -373,8 +401,9 @@ class MultinomialScore(TestStatistic):
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
                 # Likelihood ratio statistic conditioned on the predicted class `c_hat`
-                scores[ind, 0] = self.multinomial_lrt(data_counts[ind, :], self.proba_params_pred[i, :],
-                                                      self.n_neighbors)
+                scores[ind, 0] = self.multinomial_lrt(
+                    data_counts[ind, :], self.proba_params_pred[i, :], self.mask_included_pred[i, :], self.n_neighbors
+                )
                 if not is_train:
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
@@ -391,7 +420,9 @@ class MultinomialScore(TestStatistic):
 
         for i, c in enumerate(self.labels_unique):
             # Likelihood ratio statistic conditioned on the candidate true class `c`
-            scores[:, i + 1] = self.multinomial_lrt(data_counts, self.proba_params_true[i, :], self.n_neighbors)
+            scores[:, i + 1] = self.multinomial_lrt(
+                data_counts, self.proba_params_true[i, :], self.mask_included_true[i, :], self.n_neighbors
+            )
             if not is_train:
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
@@ -406,9 +437,45 @@ class MultinomialScore(TestStatistic):
         return scores, p_values
 
     @staticmethod
-    def multinomial_lrt(data_counts, proba_params, n_neighbors):
-        mat = data_counts * (np.log(np.clip(data_counts, 1e-16, None)) - np.log(n_neighbors * proba_params))
+    def multinomial_lrt(data_counts, proba_params, mask_classes, n_neighbors):
+        # Multinomial likelihood ratio test statistic
+        if np.all(mask_classes):
+            mat = data_counts * (np.log(np.clip(data_counts, sys.float_info.epsilon, None)) -
+                                 np.log(n_neighbors * proba_params))
+        else:
+            # Counts from the selected classes
+            data_counts_sel = data_counts[:, mask_classes]
+            # Adjoin the cumulative count from the remaining classes as a new column
+            counts_rem = n_neighbors - np.sum(data_counts_sel, axis=1)
+            data_counts_sel = np.hstack((data_counts_sel, counts_rem[:, np.newaxis]))
+
+            # Probability parameters from the selected classes
+            p = proba_params[mask_classes]
+            # Append the cumulative probability from the remaining classes
+            p = np.append(p, max(1. - np.sum(p), sys.float_info.epsilon))
+
+            mat = data_counts_sel * (np.log(np.clip(data_counts_sel, sys.float_info.epsilon, None)) -
+                                     np.log(n_neighbors * p))
+
         return np.sum(mat, axis=1)
+
+    @staticmethod
+    def set_classes_to_include(proba, n_classes, n_classes_multinom, ind_class):
+        if n_classes_multinom is None:
+            # All classes are included for the default value None
+            mask_incl = np.ones(n_classes, dtype=np.bool)
+        else:
+            mask_incl = np.zeros(n_classes, dtype=np.bool)
+            mask_incl[ind_class] = True
+            if n_classes_multinom > 1:
+                # Sort the classes in decreasing order of probability
+                v = copy.copy(proba)
+                v[ind_class] = -1.
+                tmp_ind = np.argsort(v)[::-1]
+                # Include the required number of classes with highest probability
+                mask_incl[tmp_ind[:(n_classes_multinom - 1)]] = True
+
+        return mask_incl
 
 
 class BinomialScore(TestStatistic):
