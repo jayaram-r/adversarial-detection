@@ -268,7 +268,7 @@ class MultinomialScore(TestStatistic):
         self.type_test_stat_true = None
 
     def fit(self, features, labels, labels_pred, labels_unique=None,
-            n_classes_multinom=None, combine_low_proba_classes=False):
+            n_classes_multinom=None, combine_low_proba_classes=True):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -370,7 +370,7 @@ class MultinomialScore(TestStatistic):
                 self.type_test_stat_pred[i] = 'multi'
 
             if num_incl < self.n_classes:
-                logger.info("Predicted class {}: {:d} distinct classes. Remaining {:d} classes are grouped "
+                logger.info("Predicted class {}: {:d} distinct class(es). Remaining {:d} class(es) are grouped "
                             "into one.".format(c, num_incl, self.n_classes - num_incl))
 
             # Index of samples with class label `c`
@@ -396,7 +396,7 @@ class MultinomialScore(TestStatistic):
                 self.type_test_stat_true[i] = 'multi'
 
             if num_incl < self.n_classes:
-                logger.info("     True class {}: {:d} distinct classes. Remaining {:d} classes are grouped "
+                logger.info("     True class {}: {:d} distinct class(es). Remaining {:d} class(es) are grouped "
                             "into one.".format(c, num_incl, self.n_classes - num_incl))
 
         # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
