@@ -360,7 +360,7 @@ class MultinomialScore(TestStatistic):
                                "estimation and assigning uniform probabilities.".format(c))
 
             # Set the classes to include as distinct classes in test statistic given the predicted class `c`
-            self.mask_included_pred[i, :], num_incl = self.set_classes_to_include(
+            self.mask_included_pred[i, :], num_incl = self.set_distinct_classes(
                 self.proba_params_pred[i, :], i, self.n_classes, n_classes_multinom, combine_low_proba_classes
             )
             if self.n_classes == 2 or num_incl == 1:
@@ -386,7 +386,7 @@ class MultinomialScore(TestStatistic):
                                "and assigning uniform probabilities.".format(c))
 
             # Set the classes to include as distinct classes in the test statistic givene the true class `c`
-            self.mask_included_true[i, :], num_incl = self.set_classes_to_include(
+            self.mask_included_true[i, :], num_incl = self.set_distinct_classes(
                 self.proba_params_true[i, :], i, self.n_classes, n_classes_multinom, combine_low_proba_classes
             )
             if self.n_classes == 2 or num_incl == 1:
@@ -396,7 +396,7 @@ class MultinomialScore(TestStatistic):
                 self.type_test_stat_true[i] = 'multi'
 
             if num_incl < self.n_classes:
-                logger.info("True class {}: {:d} distinct classes. Remaining {:d} classes are grouped "
+                logger.info("     True class {}: {:d} distinct classes. Remaining {:d} classes are grouped "
                             "into one.".format(c, num_incl, self.n_classes - num_incl))
 
         # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
@@ -516,7 +516,7 @@ class MultinomialScore(TestStatistic):
         return np.sum(mat, axis=1)
 
     @staticmethod
-    def set_classes_to_include(proba, ind_class, n_classes, n_classes_multinom, combine_low_proba_classes):
+    def set_distinct_classes(proba, ind_class, n_classes, n_classes_multinom, combine_low_proba_classes):
         if n_classes_multinom is None:
             if not combine_low_proba_classes:
                 # All classes are kept distinct in the default setting
