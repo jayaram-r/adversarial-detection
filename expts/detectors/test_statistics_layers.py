@@ -263,8 +263,12 @@ class MultinomialScore(TestStatistic):
         # This differs depending on the predicted class and the true class
         self.mask_included_pred = None
         self.mask_included_true = None
+        # Type of test statistic (multinomial LRT or binomial deviation) to use given the predicted and true class
+        self.type_test_stat_pred = None
+        self.type_test_stat_true = None
 
-    def fit(self, features, labels, labels_pred, labels_unique=None, n_classes_multinom=None):
+    def fit(self, features, labels, labels_pred, labels_unique=None,
+            n_classes_multinom=None, combine_low_proba_classes=False):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -275,9 +279,21 @@ class MultinomialScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
-        :param n_classes_multinom: None or an int value >= 1. If `None`, then all classes will be included in the
+
+        The optional arguments below allow you to combine low probability classes into one bigger class while
+        calculating the multinomial likelihood ratio test statistic. This can be useful when the dataset has a
+        large number of classes.
+        Specify one of the options `n_classes_multinom` or `combine_low_proba_classes`:
+        - The option `n_classes_multinom` allows you to explicitly specify the number of classes to include. If it
+          is specified, then the option `combine_low_proba_classes` is ignored.
+        - If the option `combine_low_proba_classes` is set to True, classes with very low probability are grouped
+          into one bigger class. This can help reduce noise in the detection.
+        :param n_classes_multinom: None or an int value >= 1. If `None`, then all classes will be distinct in the
                                    multinomial likelihood ratio test statistic. Otherwise, only the specified number
-                                   of classes will be used.
+                                   of classes with highest probability will be kept distinct, and the rest of the
+                                   classes will be grouped into one.
+        :param combine_low_proba_classes: Set to True to automatically group low probability classes into one
+                                          bigger class. This option will be used only if `n_classes_multinom = None`.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -288,8 +304,10 @@ class MultinomialScore(TestStatistic):
                       p-values of the scores.
         """
         super(MultinomialScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
+
         # Number of classes to use for the multinomial likelihood ratio test statistic
         if n_classes_multinom is not None:
+            combine_low_proba_classes = False
             n_classes_multinom = int(n_classes_multinom)
             if n_classes_multinom > self.n_classes:
                 logger.warning("Argument 'n_classes_multinom' cannot be larger than the number of classes {:d}. "
@@ -319,13 +337,16 @@ class MultinomialScore(TestStatistic):
         # Dirichlet prior counts for MAP estimation
         alpha_diric = special_dirichlet_prior(self.n_classes)
 
-        # Parameter estimation conditioned on the predicted class and the true class
-        mat_ones = np.ones((self.n_classes, self.n_classes))
-        self.proba_params_pred = (1. / self.n_classes) * mat_ones
-        self.proba_params_true = (1. / self.n_classes) * mat_ones
+        # Probability parameters conditioned on the predicted class and the true class
+        sz = (self.n_classes, self.n_classes)
+        self.proba_params_pred = np.full(sz, 1. / self.n_classes)
+        self.proba_params_true = np.full(sz, 1. / self.n_classes)
         # Class inclusion mask conditioned on the predicted and the true class
-        self.mask_included_pred = np.zeros((self.n_classes, self.n_classes), dtype=np.bool)
-        self.mask_included_true = np.zeros((self.n_classes, self.n_classes), dtype=np.bool)
+        self.mask_included_pred = np.full(sz, True)
+        self.mask_included_true = np.full(sz, True)
+        # Type of test statistic conditioned on the predicted and true class
+        self.type_test_stat_pred = ['binom'] * self.n_classes
+        self.type_test_stat_true = ['binom'] * self.n_classes
         for i, c in enumerate(self.labels_unique):
             # Index of samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
@@ -338,9 +359,19 @@ class MultinomialScore(TestStatistic):
                 logger.warning("No samples are predicted into class '{}'. Skipping multinomial parameter "
                                "estimation and assigning uniform probabilities.".format(c))
 
-            # Set the classes to include in the test statistic given the predicted class `c`
-            self.mask_included_pred[i, :] = self.set_classes_to_include(self.proba_params_pred[i, :],
-                                                                        self.n_classes, n_classes_multinom, i)
+            # Set the classes to include as distinct classes in test statistic given the predicted class `c`
+            self.mask_included_pred[i, :], num_incl = self.set_classes_to_include(
+                self.proba_params_pred[i, :], i, self.n_classes, n_classes_multinom, combine_low_proba_classes
+            )
+            if self.n_classes == 2 or num_incl == 1:
+                # In the case of two distinct classes, we use a binomial test statistic
+                self.type_test_stat_pred[i] = 'binom'
+            else:
+                self.type_test_stat_pred[i] = 'multi'
+
+            if num_incl < self.n_classes:
+                logger.info("Predicted class {}: {:d} distinct classes. Remaining {:d} classes are grouped "
+                            "into one.".format(c, num_incl, self.n_classes - num_incl))
 
             # Index of samples with class label `c`
             ind = np.where(labels == c)[0]
@@ -354,9 +385,19 @@ class MultinomialScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Skipping multinomial parameter estimation "
                                "and assigning uniform probabilities.".format(c))
 
-            # Set the classes to include in the test statistic givene the true class `c`
-            self.mask_included_true[i, :] = self.set_classes_to_include(self.proba_params_true[i, :],
-                                                                        self.n_classes, n_classes_multinom, i)
+            # Set the classes to include as distinct classes in the test statistic givene the true class `c`
+            self.mask_included_true[i, :], num_incl = self.set_classes_to_include(
+                self.proba_params_true[i, :], i, self.n_classes, n_classes_multinom, combine_low_proba_classes
+            )
+            if self.n_classes == 2 or num_incl == 1:
+                # In the case of two distinct classes, we use a binomial test statistic
+                self.type_test_stat_true[i] = 'binom'
+            else:
+                self.type_test_stat_true[i] = 'multi'
+
+            if num_incl < self.n_classes:
+                logger.info("True class {}: {:d} distinct classes. Remaining {:d} classes are grouped "
+                            "into one.".format(c, num_incl, self.n_classes - num_incl))
 
         # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
         # here are not used
@@ -400,10 +441,18 @@ class MultinomialScore(TestStatistic):
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
-                # Likelihood ratio statistic conditioned on the predicted class `c_hat`
-                scores[ind, 0] = self.multinomial_lrt(
-                    data_counts[ind, :], self.proba_params_pred[i, :], self.mask_included_pred[i, :], self.n_neighbors
-                )
+                if self.type_test_stat_pred[i] == 'multi':
+                    # Likelihood ratio statistic conditioned on the predicted class `c_hat`
+                    scores[ind, 0] = self.multinomial_lrt(
+                        data_counts[ind, :], self.proba_params_pred[i, :], self.mask_included_pred[i, :],
+                        self.n_neighbors
+                    )
+                else:
+                    # Score is the proportion of samples in the neighborhood that have a different label than the
+                    # predicted class `c_hat`
+                    scores[ind, 0] = (1. / self.n_neighbors) * (self.n_neighbors - data_counts[ind, i])
+
+                # Empirical p-value estimates
                 if not is_train:
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
@@ -419,10 +468,16 @@ class MultinomialScore(TestStatistic):
                     break
 
         for i, c in enumerate(self.labels_unique):
-            # Likelihood ratio statistic conditioned on the candidate true class `c`
-            scores[:, i + 1] = self.multinomial_lrt(
-                data_counts, self.proba_params_true[i, :], self.mask_included_true[i, :], self.n_neighbors
-            )
+            if self.type_test_stat_true[i] == 'multi':
+                # Likelihood ratio statistic conditioned on the candidate true class `c`
+                scores[:, i + 1] = self.multinomial_lrt(
+                    data_counts, self.proba_params_true[i, :], self.mask_included_true[i, :], self.n_neighbors
+                )
+            else:
+                # Score is the proportion of samples in the neighborhood that have a different label from `c`
+                scores[:, i + 1] = (1. / self.n_neighbors) * (self.n_neighbors - data_counts[:, i])
+
+            # Empirical p-value estimates
             if not is_train:
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
@@ -440,16 +495,17 @@ class MultinomialScore(TestStatistic):
     def multinomial_lrt(data_counts, proba_params, mask_classes, n_neighbors):
         # Multinomial likelihood ratio test statistic
         if np.all(mask_classes):
+            # All classes are distinct
             mat = data_counts * (np.log(np.clip(data_counts, sys.float_info.epsilon, None)) -
                                  np.log(n_neighbors * proba_params))
         else:
-            # Counts from the selected classes
+            # Counts from the distinct classes
             data_counts_sel = data_counts[:, mask_classes]
             # Adjoin the cumulative count from the remaining classes as a new column
             counts_rem = n_neighbors - np.sum(data_counts_sel, axis=1)
             data_counts_sel = np.hstack((data_counts_sel, counts_rem[:, np.newaxis]))
 
-            # Probability parameters from the selected classes
+            # Probability parameters from the distinct classes
             p = proba_params[mask_classes]
             # Append the cumulative probability from the remaining classes
             p = np.append(p, max(1. - np.sum(p), sys.float_info.epsilon))
@@ -460,12 +516,24 @@ class MultinomialScore(TestStatistic):
         return np.sum(mat, axis=1)
 
     @staticmethod
-    def set_classes_to_include(proba, n_classes, n_classes_multinom, ind_class):
+    def set_classes_to_include(proba, ind_class, n_classes, n_classes_multinom, combine_low_proba_classes):
         if n_classes_multinom is None:
-            # All classes are included for the default value None
-            mask_incl = np.ones(n_classes, dtype=np.bool)
+            if not combine_low_proba_classes:
+                # All classes are kept distinct in the default setting
+                mask_incl = np.ones(n_classes, dtype=np.bool)
+            else:
+                mask_incl = np.zeros(n_classes, dtype=np.bool)
+                # Sort the classes by increasing probability and combine the classes that have a cumulative
+                # probability below `1 / n_classes` into one group
+                tmp_ind = np.argsort(proba)
+                v = np.cumsum(proba[tmp_ind])
+                tmp_ind = tmp_ind[v >= (1. / n_classes)]
+                mask_incl[tmp_ind] = True
+                # class corresponding to `ind_class` is always kept distinct
+                mask_incl[ind_class] = True
         else:
             mask_incl = np.zeros(n_classes, dtype=np.bool)
+            # class corresponding to `ind_class` is always kept distinct
             mask_incl[ind_class] = True
             if n_classes_multinom > 1:
                 # Sort the classes in decreasing order of probability
@@ -475,7 +543,7 @@ class MultinomialScore(TestStatistic):
                 # Include the required number of classes with highest probability
                 mask_incl[tmp_ind[:(n_classes_multinom - 1)]] = True
 
-        return mask_incl
+        return mask_incl, np.sum(mask_incl)
 
 
 class BinomialScore(TestStatistic):

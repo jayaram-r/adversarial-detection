@@ -184,7 +184,7 @@ class DetectorLayerStatistics:
                  layer_statistic='multinomial',
                  score_type='pvalue',
                  ood_detection=False,
-                 pvalue_fusion='harmonic_mean',
+                 pvalue_fusion='fisher',
                  use_top_ranked=False,
                  num_top_ranked=NUM_TOP_RANKED,
                  skip_dim_reduction=False,
