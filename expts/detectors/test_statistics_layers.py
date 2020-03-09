@@ -366,8 +366,6 @@ class MultinomialScore(TestStatistic):
             if self.n_classes == 2 or num_incl == 1:
                 # In the case of two distinct classes, we use a binomial test statistic
                 self.type_test_stat_pred[i] = 'binom'
-            else:
-                self.type_test_stat_pred[i] = 'multi'
 
             if num_incl < self.n_classes:
                 logger.info("Predicted class {}: {:d} distinct class(es). Grouping the remaining {:d} class(es)".
@@ -392,8 +390,6 @@ class MultinomialScore(TestStatistic):
             if self.n_classes == 2 or num_incl == 1:
                 # In the case of two distinct classes, we use a binomial test statistic
                 self.type_test_stat_true[i] = 'binom'
-            else:
-                self.type_test_stat_true[i] = 'multi'
 
             if num_incl < self.n_classes:
                 logger.info("     True class {}: {:d} distinct class(es). Grouping the remaining {:d} class(es)".
