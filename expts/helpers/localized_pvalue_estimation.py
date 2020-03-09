@@ -9,6 +9,9 @@ Advances in neural information processing systems. 2009.
 Qian, Jing, and Venkatesh Saligrama. "New statistic in p-value estimation for anomaly detection."
 IEEE Statistical Signal Processing Workshop (SSP). IEEE, 2012.
 
+TODO:
+- Add option to standardize the input features because they could have different range of values.
+- Implement the U-statistic bootstrap method described in [2].
 """
 import numpy as np
 import sys
@@ -16,31 +19,30 @@ import multiprocessing
 from functools import partial
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
+import logging
 from sklearn.metrics import pairwise_distances
 from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF
 )
+from detectors.test_statistics_layers import pvalue_score
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdsout)
+logger = logging.getLogger(__name__)
 
 
 def helper_distance(data1, data2, nn_indices, metric, metric_kwargs, k, i):
     if metric_kwargs is None:
-        pd = pairwise_distances(
-            data1[i, :].reshape(1, -1),
-            Y=data2[nn_indices[i, :], :],
-            metric=metric,
-            n_jobs=1
-        )
-    else:
-        pd = pairwise_distances(
-            data1[i, :].reshape(1, -1),
-            Y=data2[nn_indices[i, :], :],
-            metric=metric,
-            n_jobs=1,
-            **metric_kwargs
-        )
+        metric_kwargs = dict()
 
+    pd = pairwise_distances(
+        data1[i, :][np.newaxis, :],
+        Y=data2[nn_indices[i, :], :],
+        metric=metric,
+        n_jobs=1,
+        **metric_kwargs
+    )
     # Sort the distances and compute the mean starting from the k-th distance
     pd = np.sort(pd[0, :])
     return np.mean(pd[(k - 1):])
@@ -110,8 +112,9 @@ class averaged_KLPE_anomaly_detection:
         low = self.n_neighbors - int(np.floor(0.5 * (self.n_neighbors - 1)))
         high = self.n_neighbors + int(np.floor(0.5 * self.n_neighbors))
         self.neighborhood_range = (low, high)
-
-        # Build the KNN graphs
+        logger.info("Range of nearest neighbors used for the averaged K-LPE statistic: ({:d}, {:d})".
+                    format(low, high))
+        # Build the KNN graph
         self.index_knn = KNNIndex(
             data, n_neighbors=self.neighborhood_range[1],
             metric=self.metric, metric_kwargs=self.metric_kwargs,
@@ -126,7 +129,7 @@ class averaged_KLPE_anomaly_detection:
 
     def score(self, data_test, exclude_self=False):
         """
-        Calculate the anomaly score (p-value) for a given test data set.
+        Calculate the anomaly score which is the empirical p-value of the distribution of averaged KNN distances.
 
         :param data_test: numpy data array of shape `(N, d)`, where `N` is the number of samples and `d` is the
                           number of dimensions (features).
@@ -135,11 +138,9 @@ class averaged_KLPE_anomaly_detection:
                        are more likely to be anomalous.
         """
         dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
-        score = ((1. / self.dist_stat_nominal.shape[0]) *
-                 np.sum(dist_stat_test[:, np.newaxis] <= self.dist_stat_nominal[np.newaxis, :], axis=1))
 
-        # Negative log of the p-value is returned as the anomaly score
-        return -1.0 * np.log(np.clip(score, sys.float_info.min, None))
+        # Negative log of the empirical p-value is returned as the anomaly score
+        return pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
 
     def distance_statistic(self, data, exclude_self=False):
         """
