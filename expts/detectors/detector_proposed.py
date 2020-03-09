@@ -295,7 +295,7 @@ class DetectorLayerStatistics:
         # Log of the class prior probabilities estimated from the training data labels
         self.log_class_priors = None
 
-    def fit(self, layer_embeddings, labels, labels_pred):
+    def fit(self, layer_embeddings, labels, labels_pred, **kwargs):
         """
         Estimate parameters of the detection method given natural (non-adversarial) input data.
         NOTE: Inputs to this method can be obtained by calling the function `extract_layer_embeddings`.
@@ -306,6 +306,8 @@ class DetectorLayerStatistics:
         :param labels: numpy array of labels for the classification problem addressed by the DNN. Should have shape
                        `(n, )`, where `n` is the number of samples.
         :param labels_pred: numpy array of class predictions made by the DNN. Should have the same shape as `labels`.
+        :param kwargs: dict with additional keyword arguments that can be passed to the `fit` method of the test
+                       statistic class.
 
         :return: Instance of the class with all parameters fit to the data.
         """
@@ -364,6 +366,7 @@ class DetectorLayerStatistics:
 
             logger.info("Parameter estimation and test statistics calculation for layer {:d}:".format(i + 1))
             ts_obj = None
+            kwargs_fit = dict()
             if self.layer_statistic == 'multinomial':
                 ts_obj = MultinomialScore(
                     neighborhood_constant=self.neighborhood_constant,
@@ -376,6 +379,11 @@ class DetectorLayerStatistics:
                     low_memory=self.low_memory,
                     seed_rng=self.seed_rng
                 )
+                if 'combine_low_proba_classes' in kwargs:
+                    kwargs_fit['combine_low_proba_classes'] = kwargs['combine_low_proba_classes']
+                if 'n_classes_multinom' in kwargs:
+                    kwargs_fit['n_classes_multinom'] = kwargs['n_classes_multinom']
+
             elif self.layer_statistic == 'binomial':
                 ts_obj = BinomialScore(
                     neighborhood_constant=self.neighborhood_constant,
@@ -409,7 +417,9 @@ class DetectorLayerStatistics:
                     seed_rng=self.seed_rng
                 )
 
-            scores_temp, pvalues_temp = ts_obj.fit(data_proj, labels, labels_pred, labels_unique=self.labels_unique)
+            scores_temp, pvalues_temp = ts_obj.fit(
+                data_proj, labels, labels_pred, labels_unique=self.labels_unique, **kwargs_fit
+            )
             '''
             - `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
             test statistics for each sample.
