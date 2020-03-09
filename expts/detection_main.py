@@ -137,6 +137,11 @@ def main():
         help="If the option '--use-top-ranked' or '--use-deep-layers' is provided, this option specifies the number "
              "of layers or test statistics to be used by the proposed method"
     )
+    parser.add_argument(
+        '--combine-classes', '--cc', action='store_true', default=False,
+        help="Option that allows low probability classes to be automatically combined into one group for the "
+             "multinomial test statistic used with the proposed method"
+    )
     ################ Optional arguments for the proposed method
     parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
                         help="Which layer to use for the trust score calculation. Choices are: {}".
@@ -443,7 +448,11 @@ def main():
                 seed_rng=args.seed
             )
             # Fit the detector on clean data from the training fold
-            _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
+            if args.combine_classes and (args.test_statistic == 'multinomial'):
+                _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr,
+                                  combine_low_proba_classes=True)
+            else:
+                _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
             scores_adv1 = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te)
