@@ -120,6 +120,7 @@ class averaged_KLPE_anomaly_detection:
         low = self.n_neighbors - int(np.floor(0.5 * (self.n_neighbors - 1)))
         high = self.n_neighbors + int(np.floor(0.5 * self.n_neighbors))
         self.neighborhood_range = (low, high)
+        logger.info("Number of samples: {:d}. Number of features: {:d}".format(N, d))
         logger.info("Range of nearest neighbors used for the averaged K-LPE statistic: ({:d}, {:d})".
                     format(low, high))
         # Build the KNN graph
