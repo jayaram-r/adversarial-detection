@@ -28,6 +28,7 @@ from helpers.density_model_layer_statistics import (
     train_log_normal_mixture,
     score_log_normal_mixture
 )
+from detectors.localized_pvalue_estimation import averaged_KLPE_anomaly_detection
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
@@ -287,13 +288,14 @@ class DetectorLayerStatistics:
         # List of test statistic model instances for each layer
         self.test_stats_models = []
         # dict mapping each class `c` to the joint density model of the test statistics conditioned on predicted
-        # class being `c`
+        # or true class being `c`
         self.density_models_pred = dict()
-        # dict mapping each class `c` to the joint density model of the test statistics conditioned on true
-        # class being `c`
         self.density_models_true = dict()
         # Log of the class prior probabilities estimated from the training data labels
         self.log_class_priors = None
+        # Localized p-value estimation models for the data conditioned on each predicted and true class
+        self.klpe_models_pred = dict()
+        self.klpe_models_true = dict()
 
     def fit(self, layer_embeddings, labels, labels_pred, **kwargs):
         """
@@ -462,6 +464,28 @@ class DetectorLayerStatistics:
                 logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
                 self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
 
+        if self.score_type == 'klpe':
+            for c in self.labels_unique:
+                # Not setting the number of neighbors here. This will be automatically set based on the number of
+                # samples per class
+                kwargs_lpe = {
+                    'neighborhood_constant': self.neighborhood_constant,
+                    'metric': self.metric,
+                    'metric_kwargs': self.metric_kwargs,
+                    'approx_nearest_neighbors': self.approx_nearest_neighbors,
+                    'n_jobs': self.n_jobs,
+                    'seed_rng': self.seed_rng
+                }
+                logger.info("Fitting the localized p-value estimation model for the test statistics conditioned on "
+                            "the predicted class {}:".format(c))
+                self.klpe_models_pred[c] = averaged_KLPE_anomaly_detection(**kwargs_lpe)
+                self.klpe_models_pred[c].fit(test_stats_pred[c])
+
+                logger.info("Fitting the localized p-value estimation model for the test statistics conditioned on "
+                            "the true class {}:".format(c))
+                self.klpe_models_true[c] = averaged_KLPE_anomaly_detection(**kwargs_lpe)
+                self.klpe_models_true[c].fit(test_stats_true[c])
+
         return self
 
     def score(self, layer_embeddings, labels_pred, return_corrected_predictions=False, start_layer=0,
@@ -551,7 +575,10 @@ class DetectorLayerStatistics:
                 return_corrected_predictions=return_corrected_predictions, start_layer=start_layer
             )
         elif self.score_type == 'klpe':
-            pass
+            scores_adver, scores_ood, corrected_classes = self._score_klpe(
+                labels_pred, test_stats_pred, test_stats_true,
+                return_corrected_predictions=return_corrected_predictions
+            )
         else:
             raise ValueError("Invalid score type '{}'".format(self.score_type))
 
@@ -711,6 +738,68 @@ class DetectorLayerStatistics:
             # Corrected class prediction based on the maximum p-value conditioned on the candidate true class
             if return_corrected_predictions:
                 corrected_classes[ind] = [self.labels_unique[j] for j in np.argmax(arr_temp, axis=1)]
+
+            # Break if we have already covered all the test samples
+            cnt_par += n_pred
+            if cnt_par >= n_test:
+                break
+
+        return scores_adver, scores_ood, corrected_classes
+
+    def _score_klpe(self, labels_pred, test_stats_pred, test_stats_true, return_corrected_predictions=False):
+        """
+        Scoring method based on the averaged localized p-value estimation method, which estimates the p-value of
+        the joint (multivariate) distribution of the test statistics across the layers conditioned on the
+        predicted and true class.
+
+        :param labels_pred: Same as the method `score`.
+        :param test_stats_pred: numpy array with the test statistics from the different layers, conditioned on the
+                                predicted class of the test samples. Is a numpy array of shape `(n_test, n_layers)`,
+                                where `n_test` and `n_layers` are the number of test samples and number of layers
+                                respectively.
+        :param test_stats_true: dict with the test statistics from the different layers, conditioned on each candidate
+                                true class (since this is unknown at test time). The class labels are the keys of the
+                                dict and the values are numpy arrays of shape `(n_test, n_layers)` similar to
+                                `test_stats_pred`.
+        :param return_corrected_predictions: Same as the method `score`.
+        :return:
+        """
+        n_test = labels_pred.shape[0]
+        # Log of the multivariate p-value estimate of the test statistics under the distribution of each
+        # candidate true class
+        log_pvalues_true = np.zeros((n_test, self.n_classes))
+        for i, c in enumerate(self.labels_unique):
+            log_pvalues_true[:, i] = -1. * self.klpe_models_true[c].score(test_stats_true[c])
+
+        # Adversarial or OOD scores for the test samples and the corrected class predictions
+        scores_adver = np.zeros(n_test)
+        scores_ood = np.zeros(n_test)
+        corrected_classes = copy.copy(labels_pred)
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred[0]]
+        cnt_par = 0
+        for c in preds_unique:
+            # Scoring samples that are predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            n_pred = ind.shape[0]
+            if n_pred == 0:
+                continue
+
+            # OOD score is the negative log of the multivariate p-value estimate of the test statistics under the
+            # distribution of the predicted class `c`
+            scores_ood[ind] = self.klpe_models_pred[c].score(test_stats_pred[ind, :])
+
+            # Adversarial score
+            # Mask to include all classes, except the predicted class `c`
+            i = np.where(self.labels_unique == c)[0][0]
+            mask_excl = np.ones(self.n_classes, dtype=np.bool)
+            mask_excl[i] = False
+            tmp_arr = log_pvalues_true[ind, :]
+            scores_adver[ind] = np.max(tmp_arr[:, mask_excl], axis=1) + scores_ood[ind]
+
+            # Corrected prediction is the class corresponding to the maximum log p-value conditioned that class
+            # being the true class
+            if return_corrected_predictions:
+                corrected_classes[ind] = [self.labels_unique[j] for j in np.argmax(tmp_arr, axis=1)]
 
             # Break if we have already covered all the test samples
             cnt_par += n_pred

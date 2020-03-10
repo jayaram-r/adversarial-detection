@@ -10,7 +10,6 @@ Qian, Jing, and Venkatesh Saligrama. "New statistic in p-value estimation for an
 IEEE Statistical Signal Processing Workshop (SSP). IEEE, 2012.
 
 TODO:
-- Add option to standardize the input features because they could have different range of values.
 - Implement the U-statistic bootstrap method described in [2].
 """
 import numpy as np
@@ -138,7 +137,7 @@ class averaged_KLPE_anomaly_detection:
 
     def score(self, data_test, exclude_self=False):
         """
-        Calculate the anomaly score which is the empirical p-value of the distribution of averaged KNN distances.
+        Calculate the anomaly score which is the negative log of the empirical p-value of the averaged KNN distance.
 
         :param data_test: numpy data array of shape `(N, d)`, where `N` is the number of samples and `d` is the
                           number of dimensions (features).
@@ -152,8 +151,7 @@ class averaged_KLPE_anomaly_detection:
 
         # Calculate the k-nearest neighbors based distance statistic
         dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
-
-        # Negative log of the empirical p-value of the distance statistic is returned as the anomaly score
+        # Negative log of the empirical p-value
         return pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
 
     def distance_statistic(self, data, exclude_self=False):
