@@ -9,6 +9,8 @@ Advances in neural information processing systems. 2009.
 Qian, Jing, and Venkatesh Saligrama. "New statistic in p-value estimation for anomaly detection."
 IEEE Statistical Signal Processing Workshop (SSP). IEEE, 2012.
 
+TODO:
+- Implement the U-statistic bootstrap method described in [2].
 """
 import numpy as np
 import sys
@@ -16,31 +18,30 @@ import multiprocessing
 from functools import partial
 from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
+import logging
 from sklearn.metrics import pairwise_distances
 from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF
 )
+from detectors.test_statistics_layers import pvalue_score
+
+logging.basicConfig(level=logging.INFO, stream=sys.stdsout)
+logger = logging.getLogger(__name__)
 
 
 def helper_distance(data1, data2, nn_indices, metric, metric_kwargs, k, i):
     if metric_kwargs is None:
-        pd = pairwise_distances(
-            data1[i, :].reshape(1, -1),
-            Y=data2[nn_indices[i, :], :],
-            metric=metric,
-            n_jobs=1
-        )
-    else:
-        pd = pairwise_distances(
-            data1[i, :].reshape(1, -1),
-            Y=data2[nn_indices[i, :], :],
-            metric=metric,
-            n_jobs=1,
-            **metric_kwargs
-        )
+        metric_kwargs = dict()
 
+    pd = pairwise_distances(
+        data1[i, :][np.newaxis, :],
+        Y=data2[nn_indices[i, :], :],
+        metric=metric,
+        n_jobs=1,
+        **metric_kwargs
+    )
     # Sort the distances and compute the mean starting from the k-th distance
     pd = np.sort(pd[0, :])
     return np.mean(pd[(k - 1):])
@@ -49,6 +50,7 @@ def helper_distance(data1, data2, nn_indices, metric, metric_kwargs, k, i):
 class averaged_KLPE_anomaly_detection:
     def __init__(self,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
+                 standardize=True,
                  metric=METRIC_DEF, metric_kwargs=None,
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
@@ -64,6 +66,7 @@ class averaged_KLPE_anomaly_detection:
         :param n_neighbors: None or int value specifying the number of nearest neighbors. If this value is specified,
                             the `neighborhood_constant` is ignored. It is sufficient to specify either
                             `neighborhood_constant` or `n_neighbors`.
+        :param standardize: Set to True to standardize the individual features to the range [-1, 1].
         :param metric: string or a callable that specifies the distance metric.
         :param metric_kwargs: optional keyword arguments required by the distance metric specified in the form of a
                               dictionary.
@@ -80,6 +83,7 @@ class averaged_KLPE_anomaly_detection:
         """
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
+        self.standardize = standardize
         self.metric = metric
         self.metric_kwargs = metric_kwargs
         self.shared_nearest_neighbors = shared_nearest_neighbors
@@ -88,6 +92,7 @@ class averaged_KLPE_anomaly_detection:
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
+        self.scale_data = None
         self.data_train = None
         self.neighborhood_range = None
         self.index_knn = None
@@ -101,7 +106,12 @@ class averaged_KLPE_anomaly_detection:
         :return: None
         """
         N, d = data.shape
-        self.data_train = data
+        if self.standardize:
+            data = self.standardize_data(data)
+
+        if self.shared_nearest_neighbors:
+            self.data_train = data
+
         if self.n_neighbors is None:
             # Set number of nearest neighbors based on the data size and the neighborhood constant
             self.n_neighbors = int(np.ceil(N ** self.neighborhood_constant))
@@ -110,8 +120,9 @@ class averaged_KLPE_anomaly_detection:
         low = self.n_neighbors - int(np.floor(0.5 * (self.n_neighbors - 1)))
         high = self.n_neighbors + int(np.floor(0.5 * self.n_neighbors))
         self.neighborhood_range = (low, high)
-
-        # Build the KNN graphs
+        logger.info("Range of nearest neighbors used for the averaged K-LPE statistic: ({:d}, {:d})".
+                    format(low, high))
+        # Build the KNN graph
         self.index_knn = KNNIndex(
             data, n_neighbors=self.neighborhood_range[1],
             metric=self.metric, metric_kwargs=self.metric_kwargs,
@@ -126,7 +137,7 @@ class averaged_KLPE_anomaly_detection:
 
     def score(self, data_test, exclude_self=False):
         """
-        Calculate the anomaly score (p-value) for a given test data set.
+        Calculate the anomaly score which is the negative log of the empirical p-value of the averaged KNN distance.
 
         :param data_test: numpy data array of shape `(N, d)`, where `N` is the number of samples and `d` is the
                           number of dimensions (features).
@@ -134,12 +145,14 @@ class averaged_KLPE_anomaly_detection:
         :return score: numpy array of shape `(n, 1)` containing the score for each point. Points with higher score
                        are more likely to be anomalous.
         """
-        dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
-        score = ((1. / self.dist_stat_nominal.shape[0]) *
-                 np.sum(dist_stat_test[:, np.newaxis] <= self.dist_stat_nominal[np.newaxis, :], axis=1))
+        # Standardize the data if required
+        if self.standardize:
+            data_test = self.standardize_data(data_test)
 
-        # Negative log of the p-value is returned as the anomaly score
-        return -1.0 * np.log(np.clip(score, sys.float_info.min, None))
+        # Calculate the k-nearest neighbors based distance statistic
+        dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
+        # Negative log of the empirical p-value
+        return pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
 
     def distance_statistic(self, data, exclude_self=False):
         """
@@ -190,3 +203,17 @@ class averaged_KLPE_anomaly_detection:
             pool_obj.join()
 
         return np.array(dist_stat)
+
+    def standardize_data(self, data):
+        # Scale the data to be in the range [-1, 1]
+        if self.scale_data is None:
+            v_min = np.min(data, axis=0)
+            v_max = np.max(data, axis=0)
+            mu = 0.5 * (v_min + v_max)
+            sig = 0.5 * (v_max - v_min)
+            sig[sig < sys.float_info.epsilon] = 1.
+            self.scale_data = (mu, sig)
+        else:
+            mu, sig = self.scale_data
+
+        return (data - mu) / sig

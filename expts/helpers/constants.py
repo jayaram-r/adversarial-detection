@@ -68,7 +68,7 @@ METHOD_NAME_MAP = {
 TEST_STATS_SUPPORTED = ['multinomial', 'binomial', 'lid', 'lle']
 
 # Score type used by the proposed method
-SCORE_TYPES = ['density', 'pvalue']
+SCORE_TYPES = ['density', 'pvalue', 'klpe']
 
 # Layers at which the trust score calculation is supported. 'prelogit' refers to the fully connected layer
 # preceding the logit layer.
