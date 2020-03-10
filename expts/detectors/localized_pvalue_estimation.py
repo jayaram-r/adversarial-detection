@@ -27,7 +27,7 @@ from helpers.constants import (
 )
 from detectors.test_statistics_layers import pvalue_score
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdsout)
+logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
