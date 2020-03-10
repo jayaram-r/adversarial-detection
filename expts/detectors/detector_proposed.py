@@ -499,6 +499,13 @@ class DetectorLayerStatistics:
         if l != self.n_layers:
             raise ValueError("Expecting {:d} layers in the input data, but received {:d}".format(self.n_layers, l))
 
+        # Should bootstrap resampling be used to estimate the p-values at each layer?
+        use_bootstrap = True
+        if self.score_type in ('density', 'klpe'):
+            if not self.use_top_ranked:
+                # The p-values estimated are never used in this case. Therefore, skipping bootstrap to make it faster
+                use_bootstrap = False
+
         # Test statistics at each layer conditioned on the predicted class and candidate true classes
         test_stats_pred = np.zeros((n_test, self.n_layers))
         pvalues_pred = np.zeros((n_test, self.n_layers))
@@ -512,7 +519,8 @@ class DetectorLayerStatistics:
                 data_proj = layer_embeddings[i]
 
             # Test statistics and negative log p-values for layer `i`
-            scores_temp, pvalues_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train)
+            scores_temp, pvalues_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train,
+                                                                        bootstrap=use_bootstrap)
             # `scores_test` and `pvalues_temp` will have shape `(n_test, self.n_classes + 1)`
 
             test_stats_pred[:, i] = scores_temp[:, 0]
@@ -542,6 +550,8 @@ class DetectorLayerStatistics:
                 labels_pred, pvalues_pred, pvalues_true,
                 return_corrected_predictions=return_corrected_predictions, start_layer=start_layer
             )
+        elif self.score_type == 'klpe':
+            pass
         else:
             raise ValueError("Invalid score type '{}'".format(self.score_type))
 

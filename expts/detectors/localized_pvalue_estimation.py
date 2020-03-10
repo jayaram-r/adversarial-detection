@@ -51,6 +51,7 @@ def helper_distance(data1, data2, nn_indices, metric, metric_kwargs, k, i):
 class averaged_KLPE_anomaly_detection:
     def __init__(self,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
+                 standardize=True,
                  metric=METRIC_DEF, metric_kwargs=None,
                  shared_nearest_neighbors=False,
                  approx_nearest_neighbors=True,
@@ -66,6 +67,7 @@ class averaged_KLPE_anomaly_detection:
         :param n_neighbors: None or int value specifying the number of nearest neighbors. If this value is specified,
                             the `neighborhood_constant` is ignored. It is sufficient to specify either
                             `neighborhood_constant` or `n_neighbors`.
+        :param standardize: Set to True to standardize the individual features to the range [-1, 1].
         :param metric: string or a callable that specifies the distance metric.
         :param metric_kwargs: optional keyword arguments required by the distance metric specified in the form of a
                               dictionary.
@@ -82,6 +84,7 @@ class averaged_KLPE_anomaly_detection:
         """
         self.neighborhood_constant = neighborhood_constant
         self.n_neighbors = n_neighbors
+        self.standardize = standardize
         self.metric = metric
         self.metric_kwargs = metric_kwargs
         self.shared_nearest_neighbors = shared_nearest_neighbors
@@ -90,6 +93,7 @@ class averaged_KLPE_anomaly_detection:
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
+        self.scale_data = None
         self.data_train = None
         self.neighborhood_range = None
         self.index_knn = None
@@ -103,7 +107,12 @@ class averaged_KLPE_anomaly_detection:
         :return: None
         """
         N, d = data.shape
-        self.data_train = data
+        if self.standardize:
+            data = self.standardize_data(data)
+
+        if self.shared_nearest_neighbors:
+            self.data_train = data
+
         if self.n_neighbors is None:
             # Set number of nearest neighbors based on the data size and the neighborhood constant
             self.n_neighbors = int(np.ceil(N ** self.neighborhood_constant))
@@ -137,9 +146,14 @@ class averaged_KLPE_anomaly_detection:
         :return score: numpy array of shape `(n, 1)` containing the score for each point. Points with higher score
                        are more likely to be anomalous.
         """
+        # Standardize the data if required
+        if self.standardize:
+            data_test = self.standardize_data(data_test)
+
+        # Calculate the k-nearest neighbors based distance statistic
         dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
 
-        # Negative log of the empirical p-value is returned as the anomaly score
+        # Negative log of the empirical p-value of the distance statistic is returned as the anomaly score
         return pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
 
     def distance_statistic(self, data, exclude_self=False):
@@ -191,3 +205,17 @@ class averaged_KLPE_anomaly_detection:
             pool_obj.join()
 
         return np.array(dist_stat)
+
+    def standardize_data(self, data):
+        # Scale the data to be in the range [-1, 1]
+        if self.scale_data is None:
+            v_min = np.min(data, axis=0)
+            v_max = np.max(data, axis=0)
+            mu = 0.5 * (v_min + v_max)
+            sig = 0.5 * (v_max - v_min)
+            sig[sig < sys.float_info.epsilon] = 1.
+            self.scale_data = (mu, sig)
+        else:
+            mu, sig = self.scale_data
+
+        return (data - mu) / sig
