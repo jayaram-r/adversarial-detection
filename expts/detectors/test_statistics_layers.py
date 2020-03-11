@@ -182,7 +182,7 @@ class TestStatistic(ABC):
         np.random.seed(self.seed_rng)
 
     @abstractmethod
-    def fit(self, features, labels, labels_pred, labels_unique=None):
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -193,6 +193,9 @@ class TestStatistic(ABC):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap here makes it faster.
         :return:
         """
         self.n_train, self.dim = features.shape
@@ -267,7 +270,7 @@ class MultinomialScore(TestStatistic):
         self.type_test_stat_pred = None
         self.type_test_stat_true = None
 
-    def fit(self, features, labels, labels_pred, labels_unique=None,
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False,
             n_classes_multinom=None, combine_low_proba_classes=False):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
@@ -279,6 +282,9 @@ class MultinomialScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap here makes it faster.
 
         The optional arguments below allow you to combine low probability classes into one bigger class while
         calculating the multinomial likelihood ratio test statistic. This can be useful when the dataset has a
@@ -395,9 +401,8 @@ class MultinomialScore(TestStatistic):
                 logger.info("     True class {}: {:d} distinct class(es). Grouping the remaining {:d} class(es)".
                             format(c, num_incl, self.n_classes - num_incl))
 
-        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
-        # here are not used
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
@@ -573,7 +578,7 @@ class BinomialScore(TestStatistic):
         self.indices_true = dict()
         self.indices_pred = dict()
 
-    def fit(self, features, labels, labels_pred, labels_unique=None):
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
         :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
@@ -583,6 +588,10 @@ class BinomialScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap here makes it faster.
+
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
                     number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
@@ -638,9 +647,8 @@ class BinomialScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Skipping binomial parameter estimation "
                                "and setting the probability parameter to 0.5.".format(c))
 
-        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values estimated
-        # here are not used
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
@@ -773,7 +781,7 @@ class LIDScore(TestStatistic):
         self.indices_true = dict()
         self.indices_pred = dict()
 
-    def fit(self, features, labels, labels_pred, labels_unique=None):
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -784,6 +792,9 @@ class LIDScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap here makes it faster.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -832,9 +843,8 @@ class LIDScore(TestStatistic):
             else:
                 logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
 
-        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
-        # here are not used
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
@@ -947,7 +957,7 @@ class LLEScore(TestStatistic):
         # Feature vectors used to build the KNN graph
         self.features_knn = None
 
-    def fit(self, features, labels, labels_pred, labels_unique=None,
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False,
             min_dim_pca=1000, pca_cutoff=0.995, reg_eps=0.001):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
@@ -959,6 +969,9 @@ class LLEScore(TestStatistic):
         :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
                               be supplied as input during repeated calls to avoid having the find the unique
                               labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap her makes it faster.
         :param min_dim_pca: (int) minimum dimension above which PCA pre-processing is applied.
         :param pca_cutoff: float value in (0, 1] specifying the proportion of cumulative data variance to preserve
                            in the projected (dimension-reduced) data.
@@ -1031,9 +1044,8 @@ class LLEScore(TestStatistic):
                 logger.warning("No labeled samples from class '{}'. Setting the median reconstruction error "
                                "to 1.".format(c))
 
-        # Calculate the scores and p-values for each sample. Not using bootstrap because the p-values calculated
-        # here are not used
-        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=False)
+        # Calculate the scores and p-values for each samples
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
         return self.scores_train, p_values
 
     def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):

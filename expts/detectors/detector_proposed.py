@@ -368,7 +368,9 @@ class DetectorLayerStatistics:
 
             logger.info("Parameter estimation and test statistics calculation for layer {:d}:".format(i + 1))
             ts_obj = None
-            kwargs_fit = dict()
+            # Bootstrap p-values are used only if `self.use_top_ranked = True` because in this case the test
+            # statistics across the layers are ranked based on the p-values
+            kwargs_fit = {'bootstrap': self.use_top_ranked}
             if self.layer_statistic == 'multinomial':
                 ts_obj = MultinomialScore(
                     neighborhood_constant=self.neighborhood_constant,
@@ -439,21 +441,20 @@ class DetectorLayerStatistics:
                 test_stats_true[c][:, i] = scores_temp[indices_true[c], j + 1]
                 pvalues_true[c][:, i] = pvalues_temp[indices_true[c], j + 1]
 
-        if self.score_type == 'density':
-            # Learn a joint probability density model for the test statistics
-            for c in self.labels_unique:
-                if self.use_top_ranked:
-                    logger.info("Using the test statistics corresponding to the smallest (largest) {:d} p-values "
-                                "conditioned on the predicted (true) class.".format(self.num_top_ranked))
-                    # For the test statistics conditioned on the predicted class, take the largest
-                    # `self.num_top_ranked` negative log-transformed p-values across the layers
-                    test_stats_pred[c], pvalues_pred[c] = self._get_top_ranked(
-                        test_stats_pred[c], pvalues_pred[c], reverse=True
-                    )
-                    # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
-                    # negative log-transformed p-values across the layers
-                    test_stats_true[c], pvalues_true[c] = self._get_top_ranked(test_stats_true[c], pvalues_true[c])
+        for c in self.labels_unique:
+            if self.use_top_ranked:
+                logger.info("Using the test statistics corresponding to the smallest (largest) {:d} p-values "
+                            "conditioned on the predicted (true) class.".format(self.num_top_ranked))
+                # For the test statistics conditioned on the predicted class, take the largest
+                # `self.num_top_ranked` negative log-transformed p-values across the layers
+                test_stats_pred[c], pvalues_pred[c] = self._get_top_ranked(
+                    test_stats_pred[c], pvalues_pred[c], reverse=True
+                )
+                # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
+                # negative log-transformed p-values across the layers
+                test_stats_true[c], pvalues_true[c] = self._get_top_ranked(test_stats_true[c], pvalues_true[c])
 
+            if self.score_type == 'density':
                 logger.info("Learning a joint probability density model for the test statistics conditioned on the "
                             "predicted class '{}':".format(c))
                 logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_pred[c].shape))
@@ -464,8 +465,7 @@ class DetectorLayerStatistics:
                 logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
                 self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
 
-        if self.score_type == 'klpe':
-            for c in self.labels_unique:
+            if self.score_type == 'klpe':
                 # Not setting the number of neighbors here. This will be automatically set based on the number of
                 # samples per class
                 kwargs_lpe = {
@@ -524,11 +524,11 @@ class DetectorLayerStatistics:
             raise ValueError("Expecting {:d} layers in the input data, but received {:d}".format(self.n_layers, l))
 
         # Should bootstrap resampling be used to estimate the p-values at each layer?
-        use_bootstrap = True
+        bootstrap = True
         if self.score_type in ('density', 'klpe'):
             if not self.use_top_ranked:
                 # The p-values estimated are never used in this case. Therefore, skipping bootstrap to make it faster
-                use_bootstrap = False
+                bootstrap = False
 
         # Test statistics at each layer conditioned on the predicted class and candidate true classes
         test_stats_pred = np.zeros((n_test, self.n_layers))
@@ -544,7 +544,7 @@ class DetectorLayerStatistics:
 
             # Test statistics and negative log p-values for layer `i`
             scores_temp, pvalues_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train,
-                                                                        bootstrap=use_bootstrap)
+                                                                        bootstrap=bootstrap)
             # `scores_test` and `pvalues_temp` will have shape `(n_test, self.n_classes + 1)`
 
             test_stats_pred[:, i] = scores_temp[:, 0]
@@ -558,9 +558,9 @@ class DetectorLayerStatistics:
             # negative log p-values across the layers
             test_stats_pred, pvalues_pred = self._get_top_ranked(test_stats_pred, pvalues_pred, reverse=True)
 
+            # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
+            # negative log p-values across the layers
             for c in self.labels_unique:
-                # For the test statistics conditioned on the true class, take the smallest `self.num_top_ranked`
-                # negative log p-values across the layers
                 test_stats_true[c], pvalues_true[c] = self._get_top_ranked(test_stats_true[c], pvalues_true[c])
 
         # Adversarial or OOD scores for the test samples and the corrected class predictions
