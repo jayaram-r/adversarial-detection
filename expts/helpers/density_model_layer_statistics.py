@@ -187,7 +187,6 @@ def log_pvalue_gmm(data, model, log_transform=True):
     n, d = data.shape
     # number of components
     k = model.n_components
-
     # Component posterior probabilities; shape (n, k)
     post_prob = model.predict_proba(data)
 
