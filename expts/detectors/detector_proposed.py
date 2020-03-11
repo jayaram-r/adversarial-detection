@@ -18,6 +18,7 @@ from helpers.dimension_reduction_methods import (
     transform_data_from_model,
     load_dimension_reduction_models
 )
+from helpers.utils import log_sum_exp
 from detectors.test_statistics_layers import (
     MultinomialScore,
     BinomialScore,
@@ -26,7 +27,8 @@ from detectors.test_statistics_layers import (
 )
 from helpers.density_model_layer_statistics import (
     train_log_normal_mixture,
-    score_log_normal_mixture
+    score_log_normal_mixture,
+    log_pvalue_gmm
 )
 from detectors.localized_pvalue_estimation import averaged_KLPE_anomaly_detection
 
@@ -628,7 +630,8 @@ class DetectorLayerStatistics:
 
             # OOD score:
             # $- log p(t_1, \cdots, t_L | \hat{C} = c)$
-            s1 = score_log_normal_mixture(test_stats_pred[ind, :], self.density_models_pred[c])
+            # s1 = score_log_normal_mixture(test_stats_pred[ind, :], self.density_models_pred[c])
+            s1 = log_pvalue_gmm(test_stats_pred[ind, :], self.density_models_pred[c])
             scores_ood[ind] = -s1
 
             # Adversarial score:
@@ -642,16 +645,20 @@ class DetectorLayerStatistics:
             jj = 0
             for j, k in enumerate(self.labels_unique):
                 if k != c:
-                    s2[:, jj] = score_log_normal_mixture(test_stats_true[k][ind, :], self.density_models_true[k])
+                    # s2[:, jj] = score_log_normal_mixture(test_stats_true[k][ind, :], self.density_models_true[k])
+                    s2[:, jj] = log_pvalue_gmm(test_stats_true[k][ind, :], self.density_models_true[k])
                     if return_corrected_predictions:
-                        logit_scores[:, j] = self.log_class_priors[k] + s2[:, jj]
+                        logit_scores[:, j] = s2[:, jj]
 
                     jj += 1
                 else:
                     if return_corrected_predictions:
-                        logit_scores[:, j] = self.log_class_priors[k] + \
-                                             score_log_normal_mixture(test_stats_true[k][ind, :],
+                        '''
+                        logit_scores[:, j] = score_log_normal_mixture(test_stats_true[k][ind, :], 
                                                                       self.density_models_true[k])
+                        '''
+                        logit_scores[:, j] = log_pvalue_gmm(test_stats_true[k][ind, :],
+                                                            self.density_models_true[k])
 
             # Score for adversarial detection
             scores_adver[ind] = np.max(s2, axis=1) - s1
@@ -704,10 +711,10 @@ class DetectorLayerStatistics:
             # log of the combined p-values
             arr_temp = log_weights + pvalues_pred
             offset = np.log(np.sum(weights[mask_layers]))
-            pvalues_comb_pred = offset - self._log_sum_exp(arr_temp[:, mask_layers])
+            pvalues_comb_pred = offset - log_sum_exp(arr_temp[:, mask_layers])
             for i, c in enumerate(self.labels_unique):
                 arr_temp = log_weights + pvalues_true[c]
-                pvalues_comb_true[:, i] = offset - self._log_sum_exp(arr_temp[:, mask_layers])
+                pvalues_comb_true[:, i] = offset - log_sum_exp(arr_temp[:, mask_layers])
         else:
             raise ValueError("Invalid value '{}' for the input argument 'pvalue_fusion'.".format(self.pvalue_fusion))
 
@@ -807,19 +814,6 @@ class DetectorLayerStatistics:
                 break
 
         return scores_adver, scores_ood, corrected_classes
-
-    @staticmethod
-    def _log_sum_exp(x):
-        # Numerically stable computation of the log-sum-exponential function
-        # `x` is a 2d numpy array
-        if x.shape[1] > 1:
-            col_max = np.max(x, axis=1)
-            v = np.sum(np.exp(x - col_max[:, np.newaxis]), axis=1)
-            return np.log(np.clip(v, sys.float_info.min, None)) + col_max
-        elif x.shape[1] == 1:
-            return x[:, 0]
-        else:
-            return x
 
     def _get_top_ranked(self, test_stats, p_values, reverse=False):
         """

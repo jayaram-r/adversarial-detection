@@ -12,6 +12,8 @@ import numpy as np
 import sys
 import logging
 from sklearn.mixture import GaussianMixture
+from scipy.stats import multivariate_normal, chi2
+from  helpers.utils import log_sum_exp
 from helpers.constants import SEED_DEFAULT
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -151,9 +153,7 @@ def train_log_normal_mixture(data,
 
 def score_log_normal_mixture(data, model, log_transform=True):
     """
-    Calculate the negative log of the probability density of each point in `data` under the model `model`.
-    Points (rows) of `data` which have a low probability under the model will get a high score (more anomalous).
-
+    Calculate the log of the probability density of each point in `data` under the Gaussian mixture model `model`.
     Same as the function `train_log_normal_mixture`.
     :param data:
     :param model:
@@ -167,3 +167,54 @@ def score_log_normal_mixture(data, model, log_transform=True):
         data = log_transform_data(data)
 
     return model.score_samples(data)
+
+
+def log_pvalue_gmm(data, model, log_transform=True):
+    """
+    Log of the p-value of a set of points in `data` relative to a Gaussian mixture model.
+    This is an approximation to the p-value.
+
+    :param data: Numpy array of shape `(n, d)`, where `n` is the number of points and `d` is the dimension.
+    :param model: Trained Gaussian mixture model object.
+    :param log_transform: Set to True in order to log-transform the data prior to analysis.
+
+    :return: numpy array of shape `(n, )` with the log of the p-values for each point in `data`.
+    """
+    if log_transform:
+        data = log_transform_data(data)
+
+    # number of samples `n` and the number of dimensions `d`
+    n, d = data.shape
+    # number of components
+    k = model.n_components
+    # Component posterior probabilities; shape (n, k)
+    post_prob = model.predict_proba(data)
+
+    log_surv_fn = np.zeros((n, k))
+    for j in range(k):
+        # component j
+        mu = model.means_[j, :]
+        if model.covariance_type == 'full':
+            # has shape (k, d, d)
+            cov = model.covariances_[j, :, :]
+        elif model.covariance_type == 'tied':
+            # has shape (d, d)
+            cov = model.covariances_
+        elif model.covariance_type == 'diag':
+            # has shape (k, d)
+            cov = model.covariances_[j, :]
+        else:
+            # has shape (k, )
+            cov = model.covariances_[j]
+
+        # Mahalanobis distance of the points `data` from the mean of component `j` can be calculated from the
+        # log probability density
+        dens = multivariate_normal(mean=mu, cov=cov)
+        dist_mahal = -2. * (dens.logpdf(data) - dens.logpdf(mu))
+
+        # Log of the survival function or `1 - CDF` of the Chi-squared distribution (with `d` degrees of freedom)
+        # evaluated at the mahalanobis distance values
+        log_surv_fn[:, j] = chi2.logsf(dist_mahal, d)
+
+    tmp_arr = np.log(np.clip(post_prob, sys.float_info.min, None)) + log_surv_fn
+    return log_sum_exp(tmp_arr)
