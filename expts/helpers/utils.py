@@ -2,6 +2,7 @@
 import numpy as np
 import torch
 import os
+import sys
 import pickle
 from multiprocessing import cpu_count
 from helpers.generate_data import MFA_model
@@ -233,6 +234,20 @@ def get_predicted_classes(model, device, data_loader=None, data=None, labels=Non
             labels_pred.extend(predicted.detach().cpu().numpy())
 
     return np.array(labels_pred, dtype=np.int)
+
+
+def log_sum_exp(x):
+    # Numerically stable computation of the log-sum-exponential function
+    # `x` is a 2d numpy array
+    # Sum is across the columns of `x`
+    if x.shape[1] > 1:
+        col_max = np.max(x, axis=1)
+        v = np.sum(np.exp(x - col_max[:, np.newaxis]), axis=1)
+        return np.log(np.clip(v, sys.float_info.min, None)) + col_max
+    elif x.shape[1] == 1:
+        return x[:, 0]
+    else:
+        return x
 
 
 def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose=True):
