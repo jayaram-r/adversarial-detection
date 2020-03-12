@@ -190,7 +190,7 @@ def log_pvalue_gmm(data, model, log_transform=True):
     # Component posterior probabilities; shape (n, k)
     post_prob = model.predict_proba(data)
 
-    log_surv_fn = np.zeros((n, k))
+    chi2_cdf = np.zeros((n, k))
     for j in range(k):
         # component j
         mu = model.means_[j, :]
@@ -212,9 +212,8 @@ def log_pvalue_gmm(data, model, log_transform=True):
         dens = multivariate_normal(mean=mu, cov=cov)
         dist_mahal = -2. * (dens.logpdf(data) - dens.logpdf(mu))
 
-        # Log of the survival function or `1 - CDF` of the Chi-squared distribution (with `d` degrees of freedom)
-        # evaluated at the mahalanobis distance values
-        log_surv_fn[:, j] = chi2.logsf(dist_mahal, d)
+        # CDF of the Chi-squared distribution (`d` degrees of freedom) evaluated at the mahalanobis distance values
+        chi2_cdf[:, j] = chi2.cdf(dist_mahal, d)
 
-    tmp_arr = np.log(np.clip(post_prob, sys.float_info.min, None)) + log_surv_fn
-    return log_sum_exp(tmp_arr)
+    tmp_arr = 1. - np.sum(post_prob * chi2_cdf, axis=1)
+    return np.log(np.clip(tmp_arr, sys.float_info.min, None))
