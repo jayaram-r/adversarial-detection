@@ -12,7 +12,8 @@ from helpers.constants import (
     METRIC_DEF,
     NUM_TOP_RANKED,
     TEST_STATS_SUPPORTED,
-    SCORE_TYPES
+    SCORE_TYPES,
+    NUM_RANDOM_SAMPLES
 )
 from helpers.dimension_reduction_methods import (
     transform_data_from_model,
@@ -20,6 +21,7 @@ from helpers.dimension_reduction_methods import (
 )
 from helpers.utils import log_sum_exp
 from detectors.test_statistics_layers import (
+    pvalue_score,
     MultinomialScore,
     BinomialScore,
     LIDScore,
@@ -27,8 +29,7 @@ from detectors.test_statistics_layers import (
 )
 from helpers.density_model_layer_statistics import (
     train_log_normal_mixture,
-    score_log_normal_mixture,
-    log_pvalue_gmm
+    score_log_normal_mixture
 )
 from detectors.localized_pvalue_estimation import averaged_KLPE_anomaly_detection
 
@@ -289,10 +290,13 @@ class DetectorLayerStatistics:
         self.n_samples = None
         # List of test statistic model instances for each layer
         self.test_stats_models = []
-        # dict mapping each class `c` to the joint density model of the test statistics conditioned on predicted
+        # dict mapping each class `c` to the joint density model of the test statistics conditioned on the predicted
         # or true class being `c`
         self.density_models_pred = dict()
         self.density_models_true = dict()
+        # Negative log density values of data randomly sampled from the joint density models of the test statistics
+        self.samples_neg_log_dens_pred = dict()
+        self.samples_neg_log_dens_true = dict()
         # Log of the class prior probabilities estimated from the training data labels
         self.log_class_priors = None
         # Localized p-value estimation models for the data conditioned on each predicted and true class
@@ -462,10 +466,35 @@ class DetectorLayerStatistics:
                 logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_pred[c].shape))
                 self.density_models_pred[c] = train_log_normal_mixture(test_stats_pred[c], seed_rng=self.seed_rng)
 
+                # Negative log density of the data used to fit the model
+                arr1 = -1. * score_log_normal_mixture(test_stats_pred[c], self.density_models_pred[c],
+                                                      log_transform=True)
+                # Generate a large number of random samples from the model
+                test_stats_rand_sample, _ = self.density_models_pred[c].sample(n_samples=NUM_RANDOM_SAMPLES)
+                # Negative log density of the generated random samples. Log transformation is not needed since the
+                # samples are generated from the model
+                arr2 = -1. * score_log_normal_mixture(test_stats_rand_sample, self.density_models_pred[c],
+                                                      log_transform=False)
+                self.samples_neg_log_dens_pred[c] = np.concatenate([arr1, arr2])
+                logger.info("Number of log-density sample values used for estimating p-values: {:d}".
+                            format(self.samples_neg_log_dens_pred[c].shape[0]))
+
                 logger.info("Learning a joint probability density model for the test statistics conditioned on the "
                             "true class '{}':".format(c))
                 logger.info("Number of samples = {:d}, dimension = {:d}".format(*test_stats_true[c].shape))
                 self.density_models_true[c] = train_log_normal_mixture(test_stats_true[c], seed_rng=self.seed_rng)
+
+                # Negative log density of the data used to fit the model
+                arr1 = -1. * score_log_normal_mixture(test_stats_true[c], self.density_models_true[c],
+                                                      log_transform=True)
+                # Generate a large number of random samples from the model
+                test_stats_rand_sample, _ = self.density_models_true[c].sample(n_samples=NUM_RANDOM_SAMPLES)
+                # Negative log density of the generated random samples
+                arr2 = -1. * score_log_normal_mixture(test_stats_rand_sample, self.density_models_true[c],
+                                                      log_transform=False)
+                self.samples_neg_log_dens_true[c] = np.concatenate([arr1, arr2])
+                logger.info("Number of log-density sample values used for estimating p-values: {:d}".
+                            format(self.samples_neg_log_dens_true[c].shape[0]))
 
             if self.score_type == 'klpe':
                 # Not setting the number of neighbors here. This will be automatically set based on the number of
@@ -615,6 +644,15 @@ class DetectorLayerStatistics:
         :return:
         """
         n_test = labels_pred.shape[0]
+        # Log of the multivariate p-value estimate of the test statistics under the distribution of each
+        # candidate true class
+        log_pvalues_true = np.zeros((n_test, self.n_classes))
+        for i, c in enumerate(self.labels_unique):
+            v = -1. * score_log_normal_mixture(test_stats_true[c], self.density_models_true[c])
+            log_pvalues_true[:, i] = np.log(
+                pvalue_score(self.samples_neg_log_dens_true[c], v, log_transform=False, bootstrap=False)
+            )
+
         # Adversarial or OOD scores for the test samples and the corrected class predictions
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
@@ -628,43 +666,23 @@ class DetectorLayerStatistics:
             if n_pred == 0:
                 continue
 
-            # OOD score:
-            # $- log p(t_1, \cdots, t_L | \hat{C} = c)$
-            # s1 = score_log_normal_mixture(test_stats_pred[ind, :], self.density_models_pred[c])
-            s1 = log_pvalue_gmm(test_stats_pred[ind, :], self.density_models_pred[c])
-            scores_ood[ind] = -s1
+            # Score for OOD detection
+            v = -1. * score_log_normal_mixture(test_stats_pred[ind, :], self.density_models_pred[c])
+            # `pvalue_score` returns negative log of the p-values
+            scores_ood[ind] = pvalue_score(self.samples_neg_log_dens_pred[c], v, log_transform=True, bootstrap=False)
 
-            # Adversarial score:
-            # $max_{k \neq c} log p(t_1, \cdots, t_L | C = k) - log p(t_1, \cdots, t_L | \hat{C} = c)$
-            s2 = np.zeros((n_pred, self.n_classes - 1))
-            if return_corrected_predictions:
-                logit_scores = np.zeros((n_pred, self.n_classes))
-            else:
-                logit_scores = None
-
-            jj = 0
-            for j, k in enumerate(self.labels_unique):
-                if k != c:
-                    # s2[:, jj] = score_log_normal_mixture(test_stats_true[k][ind, :], self.density_models_true[k])
-                    s2[:, jj] = log_pvalue_gmm(test_stats_true[k][ind, :], self.density_models_true[k])
-                    if return_corrected_predictions:
-                        logit_scores[:, j] = s2[:, jj]
-
-                    jj += 1
-                else:
-                    if return_corrected_predictions:
-                        '''
-                        logit_scores[:, j] = score_log_normal_mixture(test_stats_true[k][ind, :], 
-                                                                      self.density_models_true[k])
-                        '''
-                        logit_scores[:, j] = log_pvalue_gmm(test_stats_true[k][ind, :],
-                                                            self.density_models_true[k])
-
+            # Mask to include all classes, except the predicted class `c`
+            i = np.where(self.labels_unique == c)[0][0]
+            mask_excl = np.ones(self.n_classes, dtype=np.bool)
+            mask_excl[i] = False
             # Score for adversarial detection
-            scores_adver[ind] = np.max(s2, axis=1) - s1
-            # Corrected class prediction based on the logit scores (for samples predicted into class c)
+            tmp_arr = log_pvalues_true[ind, :]
+            scores_adver[ind] = np.max(tmp_arr[:, mask_excl], axis=1) + scores_ood[ind]
+
+            # Corrected prediction is the class corresponding to the maximum log p-value conditioned that class
+            # being the true class
             if return_corrected_predictions:
-                corrected_classes[ind] = [self.labels_unique[j] for j in np.argmax(logit_scores, axis=1)]
+                corrected_classes[ind] = [self.labels_unique[j] for j in np.argmax(tmp_arr, axis=1)]
 
             # Break if we have already covered all the test samples
             cnt_par += n_pred
