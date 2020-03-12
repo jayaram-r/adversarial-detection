@@ -169,7 +169,7 @@ def score_log_normal_mixture(data, model, log_transform=True):
     return model.score_samples(data)
 
 
-def log_pvalue_gmm(data, model, log_transform=True):
+def log_pvalue_gmm_approx(data, model, log_transform=True):
     """
     Log of the p-value of a set of points in `data` relative to a Gaussian mixture model.
     This is an approximation to the p-value.
