@@ -94,5 +94,5 @@ FPR_THRESH = [0.001, 0.005, 0.01, 0.05, 0.1]
 # Number of random samples used to estimate the p-value by the density method
 NUM_RANDOM_SAMPLES = 20000
 
-COLORS = ['r', 'b', 'g', 'y', 'orange', 'm', 'lawngreen', 'gold', 'c', 'hotpink', 'grey', 'steelblue',
-          'tan', 'lightsalmon', 'navy']
+COLORS = ['r', 'b', 'g', 'y', 'orange', 'm', 'lawngreen', 'steelblue', 'c', 'hotpink', 'grey',
+          'tan', 'lightsalmon', 'navy', 'gold']
