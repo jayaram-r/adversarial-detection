@@ -22,6 +22,7 @@ from helpers.dimension_reduction_methods import (
 from helpers.utils import log_sum_exp
 from detectors.test_statistics_layers import (
     pvalue_score,
+    pvalue_score_all_pairs,
     MultinomialScore,
     BinomialScore,
     LIDScore,
@@ -302,6 +303,10 @@ class DetectorLayerStatistics:
         # Localized p-value estimation models for the data conditioned on each predicted and true class
         self.klpe_models_pred = dict()
         self.klpe_models_true = dict()
+        # Test statistics calculated on the training data passed to the `fit` method. These test statistics follow
+        # the distribution under the null hypothesis of no adversarial or OOD data
+        self.test_stats_pred_null = None
+        self.test_stats_true_null = None
 
     def fit(self, layer_embeddings, labels, labels_pred, **kwargs):
         """
@@ -427,24 +432,24 @@ class DetectorLayerStatistics:
                     seed_rng=self.seed_rng
                 )
 
-            scores_temp, pvalues_temp = ts_obj.fit(
+            test_stats_temp, pvalues_temp = ts_obj.fit(
                 data_proj, labels, labels_pred, labels_unique=self.labels_unique, **kwargs_fit
             )
             '''
-            - `scores_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector of 
-            test statistics for each sample.
-            The first column `scores_temp[:, 0]` gives the scores conditioned on the predicted class.
-            The remaining columns `scores_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on `i - 1`
-            being the candidate true class for the sample.
+            - `test_stats_temp` will be a numpy array of shape `(self.n_samples, self.n_classes + 1)` with a vector 
+            of test statistics for each sample.
+            The first column `test_stats_temp[:, 0]` gives the scores conditioned on the predicted class.
+            The remaining columns `test_stats_temp[:, i]` for `i = 1, 2, . . .` gives the scores conditioned on 
+            `i - 1` being the candidate true class for the sample.
             - `pvalues_temp` is also a numpy array of the same shape with the negative log transformed p-values 
             corresponding to the test statistics.
             '''
             self.test_stats_models.append(ts_obj)
             for j, c in enumerate(self.labels_unique):
                 # Test statistics and negative log p-values from layer `i`
-                test_stats_pred[c][:, i] = scores_temp[indices_pred[c], 0]
+                test_stats_pred[c][:, i] = test_stats_temp[indices_pred[c], 0]
                 pvalues_pred[c][:, i] = pvalues_temp[indices_pred[c], 0]
-                test_stats_true[c][:, i] = scores_temp[indices_true[c], j + 1]
+                test_stats_true[c][:, i] = test_stats_temp[indices_true[c], j + 1]
                 pvalues_true[c][:, i] = pvalues_temp[indices_true[c], j + 1]
 
         for c in self.labels_unique:
@@ -517,10 +522,12 @@ class DetectorLayerStatistics:
                 self.klpe_models_true[c] = averaged_KLPE_anomaly_detection(**kwargs_lpe)
                 self.klpe_models_true[c].fit(test_stats_true[c])
 
+        self.test_stats_pred_null = test_stats_pred
+        self.test_stats_true_null = test_stats_true
         return self
 
     def score(self, layer_embeddings, labels_pred, return_corrected_predictions=False, start_layer=0,
-              is_train=False):
+              test_layer_pairs=True, is_train=False):
         """
         Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
         score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
@@ -538,6 +545,9 @@ class DetectorLayerStatistics:
         :param start_layer: Starting index of the layers to include in the p-value fusion. Set to 0 to include all
                             the layers. Set to negative values such as -1, -2, -3 using the same convention as
                             python indexing. For example, a value of `-3` implies the last 3 layers are included.
+        :param test_layer_pairs: Set to True in order to estimate p-values for test statistics from all pairs of
+                                 layers. These additional p-values are used by the method which combines p-values
+                                 using Fisher's method, harmonic mean of p-values etc.
         :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
 
         :return: (scores [, corrected_classes])
@@ -574,14 +584,14 @@ class DetectorLayerStatistics:
                 data_proj = layer_embeddings[i]
 
             # Test statistics and negative log p-values for layer `i`
-            scores_temp, pvalues_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train,
-                                                                        bootstrap=bootstrap)
-            # `scores_test` and `pvalues_temp` will have shape `(n_test, self.n_classes + 1)`
+            test_stats_temp, pvalues_temp = self.test_stats_models[i].score(data_proj, labels_pred, is_train=is_train,
+                                                                            bootstrap=bootstrap)
+            # `test_stats_temp` and `pvalues_temp` will have shape `(n_test, self.n_classes + 1)`
 
-            test_stats_pred[:, i] = scores_temp[:, 0]
+            test_stats_pred[:, i] = test_stats_temp[:, 0]
             pvalues_pred[:, i] = pvalues_temp[:, 0]
             for j, c in enumerate(self.labels_unique):
-                test_stats_true[c][:, i] = scores_temp[:, j + 1]
+                test_stats_true[c][:, i] = test_stats_temp[:, j + 1]
                 pvalues_true[c][:, i] = pvalues_temp[:, j + 1]
 
         if self.use_top_ranked:
@@ -601,6 +611,26 @@ class DetectorLayerStatistics:
                 return_corrected_predictions=return_corrected_predictions
             )
         elif self.score_type == 'pvalue':
+            if test_layer_pairs:
+                n_pairs = int(0.5 * self.n_layers * (self.n_layers - 1))
+                logger.info("Estimating p-values for the test statistics from {:d} layer pairs.".format(n_pairs))
+                pvalues_pred_pairs = np.zeros((n_test, n_pairs))
+                pvalues_true_pairs = dict()
+                for c in self.labels_unique:
+                    # Samples predicted into class `c`
+                    ind = np.where(labels_pred == c)[0]
+                    pvalues_pred_pairs[ind, :] = pvalue_score_all_pairs(
+                        self.test_stats_pred_null[c], test_stats_pred[ind, :], log_transform=True, bootstrap=bootstrap
+                    )
+                    pvalues_true_pairs[c] = pvalue_score_all_pairs(
+                        self.test_stats_true_null[c], test_stats_true[c], log_transform=True, bootstrap=bootstrap
+                    )
+                    # Append columns corresponding to the p-values from the layer pairs
+                    pvalues_true[c] = np.hstack((pvalues_true[c], pvalues_true_pairs[c]))
+
+                # Append columns corresponding to the p-values from the layer pairs
+                pvalues_pred = np.hstack((pvalues_pred, pvalues_pred_pairs))
+
             scores_adver, scores_ood, corrected_classes = self._score_pvalue_based(
                 labels_pred, pvalues_pred, pvalues_true,
                 return_corrected_predictions=return_corrected_predictions, start_layer=start_layer
@@ -697,10 +727,10 @@ class DetectorLayerStatistics:
         Scoring method based on combining the p-values of the test statistics calculated from the layer embeddings.
 
         :param labels_pred: Same as the method `score`.
-        :param pvalues_pred: numpy array with the negative log p-values from the different layers, conditioned on
-                             the predicted class of the test samples. Is a numpy array of shape `(n_test, n_layers)`,
-                             where `n_test` and `n_layers` are the number of test samples and number of layers
-                             respectively.
+        :param pvalues_pred: numpy array with the negative log p-values from the different layers and layer pairs,
+                             conditioned on the predicted class of the test samples. Is a numpy array of shape
+                             `(n_test, n_layers)`, where `n_test` and `n_layers` are the number of test samples
+                             and number of layers (layer pairs) respectively.
         :param pvalues_true: dict with the negative log p-values from the different layers, conditioned on each
                              candidate true class (since this is unknown at test time). The class labels are the keys
                              of the dict and the values are numpy arrays of shape `(n_test, n_layers)` similar to
@@ -712,7 +742,7 @@ class DetectorLayerStatistics:
         :return:
         """
         n_test, nl = pvalues_pred.shape
-        # Equal weight to all the layers
+        # Equal weight to all the layers or layer pairs
         weights = (1. / nl) * np.ones(nl)
         log_weights = np.log(weights)
         mask_layers = np.zeros(nl, dtype=np.bool)
