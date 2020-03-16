@@ -455,10 +455,10 @@ def main():
                 _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
 
             # Scores on clean data from the test fold
-            scores_adv1 = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te)
+            scores_adv1 = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te, test_layer_pairs=True)
 
             # Scores on adversarial data from the test fold
-            scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv, test_layer_pairs=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
