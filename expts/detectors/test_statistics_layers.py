@@ -26,64 +26,17 @@ from helpers.utils import get_num_jobs
 from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
-    METRIC_DEF
+    METRIC_DEF,
+    NUM_BOOTSTRAP
 )
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 
-def helper_pvalue(scores_null_repl, scores_obs, n_samp, i):
-    scores_null = scores_null_repl[i, :]
-    mask = scores_null[:, np.newaxis] >= scores_obs
-    return mask.sum(axis=0, dtype=np.float) / n_samp
-
-
-# Not using this version since it's slower than the numba version
-def pvalue_score_alt(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=100, n_jobs=1):
-    """
-    Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
-    null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
-
-    :param scores_null: numpy array of shape `(m, )` with the scores from the null distribution.
-    :param scores_obs: numpy array of shape `(n, )` with the observed scores.
-    :param log_transform: set to True to apply negative log transform to the p-values.
-    :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
-    :param n_bootstrap: number of bootstrap resamples to use.
-    :param n_jobs: number of jobs to execute in parallel.
-
-    :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
-    """
-    n_samp = scores_null.shape[0]
-    scores_obs = scores_obs[np.newaxis, :]
-    mask = scores_null[:, np.newaxis] >= scores_obs
-    p = mask.sum(axis=0, dtype=np.float) / n_samp
-    if bootstrap:
-        scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, n_samp), replace=True)
-        if n_jobs == 1:
-            p_repl = [helper_pvalue(scores_null_repl, scores_obs, n_samp, i) for i in range(n_bootstrap)]
-        else:
-            helper_partial = partial(helper_pvalue, scores_null_repl, scores_obs, n_samp)
-            pool_obj = multiprocessing.Pool(processes=n_jobs)
-            p_repl = []
-            _ = pool_obj.map_async(helper_partial, range(n_bootstrap), callback=p_repl.extend)
-            pool_obj.close()
-            pool_obj.join()
-
-        p_repl.append(p)
-        # Average p-value from the bootstrap replications
-        p = np.mean(np.array(p_repl), axis=0)
-
-    p = np.clip(p, sys.float_info.epsilon, None)
-    if log_transform:
-        return -np.log(p)
-    else:
-        return p
-
-
 # numba version
 @njit(parallel=True)
-def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=100):
+def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=NUM_BOOTSTRAP):
     """
     Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
     null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
@@ -98,22 +51,27 @@ def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=True, n
     :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
     """
     eps = 1e-16
-    n_samp = float(scores_null.shape[0])
+    n_samp = scores_null.shape[0]
     n_obs = scores_obs.shape[0]
     p = np.zeros(n_obs)
     for i in prange(n_obs):
-        mask = scores_null >= scores_obs[i]
-        p[i] = mask[mask].shape[0] / n_samp
+        for j in range(n_samp):
+            if scores_null[j] >= scores_obs[i]:
+                p[i] += 1.
+
+        p[i] = p[i] / n_samp
 
     if bootstrap:
-        scores_null_repl = np.random.choice(scores_null, size=(n_bootstrap, scores_null.shape[0]), replace=True)
+        ind_null_repl = np.random.choice(np.arange(n_samp), size=(n_bootstrap, n_samp), replace=True)
         p_sum = p
         for b in prange(n_bootstrap):
-            scores_null_curr = scores_null_repl[b, :]
             p_curr = np.zeros(n_obs)
-            for i in prange(n_obs):
-                mask = scores_null_curr >= scores_obs[i]
-                p_curr[i] = mask[mask].shape[0] / n_samp
+            for i in range(n_obs):
+                for j in ind_null_repl[b, :]:
+                    if scores_null[j] >= scores_obs[i]:
+                        p_curr[i] += 1.
+
+                p_curr[i] = p_curr[i] / n_samp
 
             p_sum += p_curr
 
@@ -128,40 +86,42 @@ def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=True, n
 
 
 @njit(parallel=True)
-def pvalue_score_bivar(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=100):
+def pvalue_score_bivar(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=NUM_BOOTSTRAP):
     """
-    Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
-    null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
+    Calculate the empirical p-values of the bivariate observed scores `scores_obs` with respect to the scores from
+    the null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
 
-    :param scores_null: numpy array of shape `(m, )` with the scores from the null distribution.
-    :param scores_obs: numpy array of shape `(n, )` with the observed scores.
+    :param scores_null: numpy array of shape `(m, 2)` with the scores from the null distribution.
+    :param scores_obs: numpy array of shape `(n, 2)` with the observed scores.
     :param log_transform: set to True to apply negative log transform to the p-values.
     :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
     :param n_bootstrap: number of bootstrap resamples to use.
     :param n_jobs: number of jobs to execute in parallel.
 
-    :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
+    :return: numpy array with the p-values or negative-log-transformed p-values. Has shape `(scores_obs.shape[0], )`.
     """
     eps = 1e-16
-    n_samp = float(scores_null.shape[0])
+    n_samp = scores_null.shape[0]
     n_obs = scores_obs.shape[0]
     p = np.zeros(n_obs)
     for i in prange(n_obs):
-        mask = np.logical_and(scores_null[:, 0] >= scores_obs[i, 0],
-                              scores_null[:, 1] >= scores_obs[i, 1])
-        p[i] = mask[mask].shape[0] / n_samp
+        for j in range(n_samp):
+            if (scores_null[j, 0] >= scores_obs[i, 0]) and (scores_null[j, 1] >= scores_obs[i, 1]):
+                p[i] += 1.
+
+        p[i] = p[i] / n_samp
 
     if bootstrap:
-        ind = np.arange(scores_null.shape[0])
-        ind_null_repl = np.random.choice(ind, size=(n_bootstrap, scores_null.shape[0]), replace=True)
+        ind_null_repl = np.random.choice(np.arange(n_samp), size=(n_bootstrap, n_samp), replace=True)
         p_sum = p
         for b in prange(n_bootstrap):
-            scores_null_curr = scores_null[ind_null_repl[b, :], :]
             p_curr = np.zeros(n_obs)
-            for i in prange(n_obs):
-                mask = np.logical_and(scores_null_curr[:, 0] >= scores_obs[i, 0],
-                                      scores_null_curr[:, 1] >= scores_obs[i, 1])
-                p_curr[i] = mask[mask].shape[0] / n_samp
+            for i in range(n_obs):
+                for j in ind_null_repl[b, :]:
+                    if (scores_null[j, 0] >= scores_obs[i, 0]) and (scores_null[j, 1] >= scores_obs[i, 1]):
+                        p_curr[i] += 1.
+
+                p_curr[i] = p_curr[i] / n_samp
 
             p_sum += p_curr
 
@@ -175,7 +135,7 @@ def pvalue_score_bivar(scores_null, scores_obs, log_transform=False, bootstrap=T
         return p
 
 
-def pvalue_score_all_pairs(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=100):
+def pvalue_score_all_pairs(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=NUM_BOOTSTRAP):
     n_obs, n_feat = scores_obs.shape
     n_pairs = int(0.5 * n_feat * (n_feat - 1))
     p_vals = np.zeros((n_obs, n_pairs))
