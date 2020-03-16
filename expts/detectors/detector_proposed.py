@@ -532,7 +532,7 @@ class DetectorLayerStatistics:
         Given the layer embeddings (including possibly the input itself) and the predicted classes for test data,
         score them on how likely they are to be adversarial or out-of-distribution (OOD). Larger values of the
         scores correspond to a higher probability that the test sample is adversarial or OOD. The scores can be
-        thresholded, with valuess above the threshold declared as adversarial or OOD. The threshold can be set such
+        thresholded, with values above the threshold declared as adversarial or OOD. The threshold can be set such
         that the detector has a target false positive rate.
 
         :param layer_embeddings: list of numpy arrays with the layer embedding data. Length of the list is equal to
