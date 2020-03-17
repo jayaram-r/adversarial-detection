@@ -223,8 +223,8 @@ def main():
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
         # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
-        # if args.test_statistic in ['multinomial', 'binomial']:
-        apply_dim_reduc = True
+        if args.test_statistic in ['multinomial', 'binomial']:
+            apply_dim_reduc = True
 
     elif args.detection_method == 'trust':
         # Append the layer name to the method name
