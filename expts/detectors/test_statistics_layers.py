@@ -843,8 +843,8 @@ class LIDScore(TestStatistic):
         # `fit` method of the super class
         super(LIDScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
-        if features.shape[1] >= min_dim_pca:
-            logger.info("Applying PCA as first-level dimension reduction step.")
+        if self.dim >= min_dim_pca:
+            logger.info("Data dimension = {:d}. Applying PCA as a pre-processing step.".format(self.dim))
             features, self.mean_data, self.transform_pca = pca_wrapper(
                 features, cutoff=pca_cutoff, seed_rng=self.seed_rng
             )
@@ -1066,8 +1066,8 @@ class LLEScore(TestStatistic):
         super(LLEScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
         self.reg_eps = reg_eps
 
-        if features.shape[1] >= min_dim_pca:
-            logger.info("Applying PCA as first-level dimension reduction step.")
+        if self.dim >= min_dim_pca:
+            logger.info("Data dimension = {:d}. Applying PCA as a pre-processing step.".format(self.dim))
             features, self.mean_data, self.transform_pca = pca_wrapper(
                 features, cutoff=pca_cutoff, seed_rng=self.seed_rng
             )
