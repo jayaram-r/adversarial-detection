@@ -18,7 +18,8 @@ import logging
 from helpers.constants import (
     SEED_DEFAULT,
     NEIGHBORHOOD_CONST,
-    CROSS_VAL_SIZE
+    CROSS_VAL_SIZE,
+    METRIC_DEF
 )
 from helpers.knn_index import KNNIndex
 from helpers.lid_estimators import lid_mle_amsaleg
@@ -32,7 +33,7 @@ logger = logging.getLogger(__name__)
 class DetectorLID:
     def __init__(self,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
-                 metric='euclidean', metric_kwargs=None,
+                 metric=METRIC_DEF, metric_kwargs=None,
                  n_cv_folds=CROSS_VAL_SIZE,
                  c_search_values=None,
                  approx_nearest_neighbors=True,
@@ -50,8 +51,7 @@ class DetectorLID:
         :param n_neighbors: None or int value specifying the number of nearest neighbors. If this value is specified,
                             the `neighborhood_constant` is ignored. It is sufficient to specify either
                             `neighborhood_constant` or `n_neighbors`.
-        :param metric: string or a callable that specifies the distance metric to use. Recommended to use 'euclidean'
-                       distance for the LID estimators.
+        :param metric: string or a callable that specifies the distance metric to use.
         :param metric_kwargs: optional keyword arguments required by the distance metric specified in the form of a
                               dictionary.
         :param n_cv_folds: number of cross-validation folds.
