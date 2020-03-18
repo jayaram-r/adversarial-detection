@@ -72,6 +72,8 @@ def id_two_nearest_neighbors(knn_distances):
 def estimate_intrinsic_dimension(data,
                                  method='two_nn',       # method choices are {'two_nn', 'lid_mle'}
                                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
+                                 metric='euclidean',
+                                 metric_kwargs=None,
                                  approx_nearest_neighbors=True,
                                  n_jobs=1,
                                  low_memory=False,
@@ -88,6 +90,8 @@ def estimate_intrinsic_dimension(data,
     :param n_neighbors: None or int value specifying the number of nearest neighbors. If this value is specified,
                         the `neighborhood_constant` is ignored. It is sufficient to specify either
                         `neighborhood_constant` or `n_neighbors`.
+    :param metric: distance metric to use. Euclidean by default.
+    :param metric_kwargs: optional keyword arguments for the distance metric specified as a dict.
     :param approx_nearest_neighbors: Set to True to use an approximate nearest neighbor method. Usually the right
                                      choice unless both the number of samples are features are small.
     :param n_jobs: number of CPU cores to use.
@@ -101,7 +105,7 @@ def estimate_intrinsic_dimension(data,
     index_knn = KNNIndex(data,
                          neighborhood_constant=neighborhood_constant,
                          n_neighbors=n_neighbors,
-                         metric='euclidean',
+                         metric=metric, metric_kwargs=metric_kwargs,
                          shared_nearest_neighbors=False,
                          approx_nearest_neighbors=approx_nearest_neighbors,
                          n_jobs=n_jobs,

@@ -27,7 +27,8 @@ from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
     METRIC_DEF,
-    NUM_BOOTSTRAP
+    NUM_BOOTSTRAP,
+    PCA_CUTOFF
 )
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
@@ -786,7 +787,8 @@ class LIDScore(TestStatistic):
         super(LIDScore, self).__init__(
             neighborhood_constant=kwargs.get('neighborhood_constant', NEIGHBORHOOD_CONST),
             n_neighbors=kwargs.get('n_neighbors', None),
-            metric='euclidean',     # Has to be 'euclidean' for LID estimation
+            metric=kwargs.get('metric', METRIC_DEF),
+            metric_kwargs=kwargs.get('metric_kwargs', None),
             shared_nearest_neighbors=False,     # Intentionally set to False
             approx_nearest_neighbors=kwargs.get('approx_nearest_neighbors', True),
             n_jobs=kwargs.get('n_jobs', 1),
@@ -794,18 +796,25 @@ class LIDScore(TestStatistic):
             seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
         )
 
+        # Feature means and PCA transformation matrix
+        self.mean_data = None
+        self.transform_pca = None
+        # Number of neighbors can be set based on the number of samples per class if `self.n_neighbors = None`
+        self.n_neighbors_pred = dict()
+        self.n_neighbors_true = dict()
+        # KNN indices for the data points from each predicted class and true class
+        self.index_knn_pred = dict()
+        self.index_knn_true = dict()
+        # LID estimates conditioned on different predicted and true classes for the train samples
         self.lid_estimates_train = None
-        # Median LID estimate of the samples predicted into each class
-        self.lid_median_pred = None
-        # Median LID estimate of the samples labeled from each class
-        self.lid_median_true = None
         # Scores for the training data
         self.scores_train = None
         # Index of train samples from each class based on the true class and predicted class
         self.indices_true = dict()
         self.indices_pred = dict()
 
-    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False):
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False,
+            min_dim_pca=1000, pca_cutoff=PCA_CUTOFF):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -819,6 +828,9 @@ class LIDScore(TestStatistic):
         :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
                           The default value is False because the p-values returned by the fit method are usually not
                           used down the line. Not using the bootstrap here makes it faster.
+        :param min_dim_pca: (int) Minimum dimension above which PCA pre-processing is applied.
+        :param pca_cutoff: Float value in (0, 1] specifying the proportion of cumulative data variance to preserve
+                           in the projected (dimension-reduced) data.
 
         :return: (scores, p_values)
             scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
@@ -828,44 +840,83 @@ class LIDScore(TestStatistic):
             p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
                       p-values of the scores.
         """
+        set_n_neighbors = True if (self.n_neighbors is None) else False
+        # `fit` method of the super class
         super(LIDScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
-        logger.info("Building a KNN index for nearest neighbor queries.")
-        self.index_knn = KNNIndex(
-            features, n_neighbors=self.n_neighbors,
-            metric=self.metric, metric_kwargs=self.metric_kwargs,
-            shared_nearest_neighbors=self.shared_nearest_neighbors,
-            approx_nearest_neighbors=self.approx_nearest_neighbors,
-            n_jobs=self.n_jobs,
-            low_memory=self.low_memory,
-            seed_rng=self.seed_rng
-        )
-        # Indices and distances of the nearest neighbors of the points from `features`
-        _, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
+        if self.dim >= min_dim_pca:
+            logger.info("Data dimension = {:d}. Applying PCA as a pre-processing step.".format(self.dim))
+            features, self.mean_data, self.transform_pca = pca_wrapper(
+                features, cutoff=pca_cutoff, seed_rng=self.seed_rng
+            )
+            self.dim = features.shape[1]
 
-        logger.info("Calculating the local intrinsic dimension estimates from the k nearest neighbor distances "
-                    "of each sample.")
-        self.lid_estimates_train = lid_mle_amsaleg(nn_distances)
+        # Column 0 corresponds to the LID estimates conditioned on the predicted class.
+        # Column `i` for `i = 1, 2, . . .` correspond to the LID estimates conditioned on the true class being `i - 1`
+        self.lid_estimates_train = np.zeros((self.n_train, 1 + self.n_classes))
 
-        self.lid_median_pred = np.ones(self.n_classes)
-        self.lid_median_true = np.ones(self.n_classes)
+        logger.info("Building KNN indices for nearest neighbor queries from each predicted and each true class.")
         for i, c in enumerate(self.labels_unique):
-            # LID values of samples predicted into class `c`
+            logger.info("Processing class {}:".format(c))
+            # Samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
             self.indices_pred[c] = ind
-            if ind.shape[0]:
-                self.lid_median_pred[i] = np.median(self.lid_estimates_train[ind])
+            n_pred = ind.shape[0]
+            # Number of neighbors for the samples predicted into class `c`
+            if set_n_neighbors:
+                self.n_neighbors_pred[c] = int(np.ceil(n_pred ** self.neighborhood_constant))
             else:
-                logger.warning("No samples are predicted into class '{}'. Setting the median LID "
-                               "value to 1.".format(c))
+                self.n_neighbors_pred[c] = self.n_neighbors
 
-            # LID values of samples labeled as class `c`
+            if n_pred:
+                # KNN index for the samples predicted into class `c`
+                self.index_knn_pred[c] = KNNIndex(
+                    features[ind, :], n_neighbors=self.n_neighbors_pred[c],
+                    metric=self.metric, metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=self.shared_nearest_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+                # Indices and distances of the nearest neighbors of the points from `features[ind, :]`
+                _, nn_distances = self.index_knn_pred[c].query_self(k=self.n_neighbors_pred[c])
+                # LID estimates from the k nearest neighbor distances of each sample
+                self.lid_estimates_train[ind, 0] = lid_mle_amsaleg(nn_distances)
+            else:
+                raise ValueError("No predicted samples from class '{}'. Cannot proceed.".format(c))
+
+            # Labeled samples from class `c`
             ind = np.where(labels == c)[0]
             self.indices_true[c] = ind
-            if ind.shape[0]:
-                self.lid_median_true[i] = np.median(self.lid_estimates_train[ind])
+            n_true = ind.shape[0]
+            # Number of neighbors for the labeled samples from class `c`
+            if set_n_neighbors:
+                self.n_neighbors_true[c] = int(np.ceil(n_true ** self.neighborhood_constant))
             else:
-                logger.warning("No labeled samples from class '{}'. Setting the median LID value to 1.".format(c))
+                self.n_neighbors_true[c] = self.n_neighbors
+
+            if n_true:
+                # KNN index for the labeled samples from class `c`
+                self.index_knn_true[c] = KNNIndex(
+                    features[ind, :], n_neighbors=self.n_neighbors_true[c],
+                    metric=self.metric, metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=self.shared_nearest_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+                # LID estimates for the labeled samples from class `c`
+                _, nn_distances = self.index_knn_true[c].query_self(k=self.n_neighbors_true[c])
+                self.lid_estimates_train[ind, i + 1] = lid_mle_amsaleg(nn_distances)
+
+                # LID estimates for the samples not labeled as class `c`
+                ind_comp = np.where(labels != c)[0]
+                _, nn_distances = self.index_knn_true[c].query(features[ind_comp, :], k=self.n_neighbors_true[c])
+                self.lid_estimates_train[ind_comp, i + 1] = lid_mle_amsaleg(nn_distances)
+            else:
+                raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
 
         # Calculate the scores and p-values for each sample
         self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
@@ -892,31 +943,32 @@ class LIDScore(TestStatistic):
                       p-values of the scores.
         """
         n_test = labels_pred_test.shape[0]
-        # Query the index of `self.n_neighbors` nearest neighbors of each test sample and find the LID estimates
-        if is_train:
-            lid_estimates = self.lid_estimates_train
-        else:
-            _, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
-            lid_estimates = lid_mle_amsaleg(nn_distances)
+        if (self.transform_pca is not None) and (not is_train):
+            # Apply a PCA transformation to the test features
+            features_test = np.dot(features_test - self.mean_data, self.transform_pca)
 
         scores = np.zeros((n_test, 1 + self.n_classes))
         p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
-            i = self.label_encoder([c_hat])[0]
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
-                # LID scores normalized by the median LID value for the samples predicted into class `c`
-                # scores[ind, 0] = lid_estimates[ind] / self.lid_median_pred[i]
-                scores[ind, 0] = lid_estimates[ind]
                 if not is_train:
+                    # LID estimate relative to the samples predicted into class `c_hat`
+                    _, nn_distances = self.index_knn_pred[c_hat].query(features_test[ind, :],
+                                                                       k=self.n_neighbors_pred[c_hat])
+                    scores[ind, 0] = lid_mle_amsaleg(nn_distances)
+                    # p-value of the LID estimates
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
                         bootstrap=bootstrap
                     )
                 else:
+                    # Precomputed LID estimates
+                    scores[ind, 0] = self.lid_estimates_train[ind, 0]
+                    # p-value of the LID estimates
                     p_values[ind, 0] = pvalue_score(
                         scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
                     )
@@ -926,15 +978,19 @@ class LIDScore(TestStatistic):
                     break
 
         for i, c in enumerate(self.labels_unique):
-            # LID scores normalized by the median LID value for the samples labeled as class `c`
-            # scores[:, i + 1] = lid_estimates / self.lid_median_true[i]
-            scores[:, i + 1] = lid_estimates
             if not is_train:
+                # LID estimates relative to the samples labeled as class `c`
+                _, nn_distances = self.index_knn_true[c].query(features_test, k=self.n_neighbors_true[c])
+                scores[:, i + 1] = lid_mle_amsaleg(nn_distances)
+                # p-value of the LID estimates
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
                     bootstrap=bootstrap
                 )
             else:
+                # Precomputed LID estimates
+                scores[:, i + 1] = self.lid_estimates_train[:, i + 1]
+                # p-value of the LID estimates
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
                     bootstrap=bootstrap
@@ -964,25 +1020,29 @@ class LLEScore(TestStatistic):
             seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
         )
 
+        # Feature means and PCA transformation matrix
         self.mean_data = None
         self.transform_pca = None
         self.reg_eps = 0.001
+        # Number of neighbors can be set based on the number of samples per class if `self.n_neighbors = None`
+        self.n_neighbors_pred = dict()
+        self.n_neighbors_true = dict()
+        # KNN indices for the data points from each predicted class and true class
+        self.index_knn_pred = dict()
+        self.index_knn_true = dict()
         # Norm of the LLE reconstruction errors for the training data
         self.errors_lle_train = None
-        # Median reconstruction error of the samples predicted into each class
-        self.err_median_pred = None
-        # Median reconstruction error of the labeled samples from each class
-        self.err_median_true = None
         # Scores for the training data
         self.scores_train = None
         # Index of train samples from each class based on the true class and predicted class
         self.indices_true = dict()
         self.indices_pred = dict()
-        # Feature vectors used to build the KNN graph
-        self.features_knn = None
+        # Feature vectors used to build the KNN graph for each predicted class and true class
+        self.features_knn_pred = dict()
+        self.features_knn_true = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False,
-            min_dim_pca=1000, pca_cutoff=0.995, reg_eps=0.001):
+            min_dim_pca=1000, pca_cutoff=PCA_CUTOFF, reg_eps=0.001):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -1010,63 +1070,100 @@ class LLEScore(TestStatistic):
             p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
                       p-values of the scores.
         """
+        set_n_neighbors = True if (self.n_neighbors is None) else False
+        # `fit` method of the super class
         super(LLEScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
         self.reg_eps = reg_eps
 
-        if features.shape[1] >= min_dim_pca:
-            logger.info("Applying PCA as first-level dimension reduction step.")
+        if self.dim >= min_dim_pca:
+            logger.info("Data dimension = {:d}. Applying PCA as a pre-processing step.".format(self.dim))
             features, self.mean_data, self.transform_pca = pca_wrapper(
                 features, cutoff=pca_cutoff, seed_rng=self.seed_rng
             )
+            self.dim = features.shape[1]
 
-        # If `self.neighbors > features.shape[1]` (number of neighbors larger than the data dimension), then the
-        # Gram matrix that comes up while solving for the neighborhood weights becomes singular. To avoid this,
-        # we set `self.neighbors = features.shape[1]` or add a small nonzero value to the diagonal elements of the
-        # Gram matrix
-        d = features.shape[1]
-        if self.n_neighbors >= d:
-            k = max(d - 1, 1)
-            logger.info("Reducing the number of neighbors from {:d} to {:d} to avoid singular Gram "
-                        "matrix while solving for neighborhood weights.".format(self.n_neighbors, k))
-            self.n_neighbors = k
+        # Column 0 corresponds to the LLE reconstruction errors conditioned on the predicted class.
+        # Column `i` for `i = 1, 2, . . .` correspond to the LLE reconstruction errors conditioned on the true
+        # class being `i - 1`
+        self.errors_lle_train = np.zeros((self.n_train, 1 + self.n_classes))
 
-        logger.info("Building a KNN index for nearest neighbor queries.")
-        self.features_knn = features
-        self.index_knn = KNNIndex(
-            features, n_neighbors=self.n_neighbors,
-            metric=self.metric, metric_kwargs=self.metric_kwargs,
-            shared_nearest_neighbors=self.shared_nearest_neighbors,
-            approx_nearest_neighbors=self.approx_nearest_neighbors,
-            n_jobs=self.n_jobs,
-            low_memory=self.low_memory,
-            seed_rng=self.seed_rng
-        )
-        # Indices and distances of the nearest neighbors of the points from `features`
-        nn_indices, nn_distances = self.index_knn.query_self(k=self.n_neighbors)
-
-        logger.info("Calculating the optimal LLE reconstruction from the nearest neighbors of each sample.")
-        self.errors_lle_train = self._calc_reconstruction_errors(features, self.features_knn, nn_indices)
-
-        self.err_median_pred = np.ones(self.n_classes)
-        self.err_median_true = np.ones(self.n_classes)
+        logger.info("Building KNN indices for nearest neighbor queries from each predicted and each true class.")
         for i, c in enumerate(self.labels_unique):
-            # Reconstruction error of samples predicted into class `c`
+            logger.info("Processing class {}:".format(c))
+            # Samples predicted into class `c`
             ind = np.where(labels_pred == c)[0]
             self.indices_pred[c] = ind
-            if ind.shape[0]:
-                self.err_median_pred[i] = np.clip(np.median(self.errors_lle_train[ind]), 1e-16, None)
+            n_pred = ind.shape[0]
+            # Number of neighbors for the samples predicted into class `c`
+            if set_n_neighbors:
+                self.n_neighbors_pred[c] = int(np.ceil(n_pred ** self.neighborhood_constant))
             else:
-                logger.warning("No samples are predicted into class '{}'. Setting the median reconstruction error "
-                               "to 1.".format(c))
+                self.n_neighbors_pred[c] = self.n_neighbors
 
-            # Reconstruction error of samples labeled as class `c`
+            # Number of neighbors should not exceed the number of dimensions in order to avoid a singular gram matrix
+            if self.n_neighbors_pred[c] >= self.dim:
+                self.n_neighbors_pred[c] = max(self.dim - 1, 1)
+
+            if n_pred:
+                # KNN index for the samples predicted into class `c`
+                self.features_knn_pred[c] = features[ind, :]
+                self.index_knn_pred[c] = KNNIndex(
+                    self.features_knn_pred[c], n_neighbors=self.n_neighbors_pred[c],
+                    metric=self.metric, metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=self.shared_nearest_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+                # # LLE reconstruction errors of the points from `self.features_knn_pred[c]`
+                nn_indices, _ = self.index_knn_pred[c].query_self(k=self.n_neighbors_pred[c])
+                self.errors_lle_train[ind, 0] = self._calc_reconstruction_errors(
+                    self.features_knn_pred[c], self.features_knn_pred[c], nn_indices
+                )
+            else:
+                raise ValueError("No predicted samples from class '{}'. Cannot proceed.".format(c))
+
+            # Labeled samples from class `c`
             ind = np.where(labels == c)[0]
             self.indices_true[c] = ind
-            if ind.shape[0]:
-                self.err_median_true[i] = np.clip(np.median(self.errors_lle_train[ind]), 1e-16, None)
+            n_true = ind.shape[0]
+            # Number of neighbors for the labeled samples from class `c`
+            if set_n_neighbors:
+                self.n_neighbors_true[c] = int(np.ceil(n_true ** self.neighborhood_constant))
             else:
-                logger.warning("No labeled samples from class '{}'. Setting the median reconstruction error "
-                               "to 1.".format(c))
+                self.n_neighbors_true[c] = self.n_neighbors
+
+            # Number of neighbors should not exceed the number of dimensions in order to avoid a singular gram matrix
+            if self.n_neighbors_true[c] >= self.dim:
+                self.n_neighbors_true[c] = max(self.dim - 1, 1)
+
+            if n_true:
+                # KNN index for the labeled samples from class `c`
+                self.features_knn_true[c] = features[ind, :]
+                self.index_knn_true[c] = KNNIndex(
+                    self.features_knn_true[c], n_neighbors=self.n_neighbors_true[c],
+                    metric=self.metric, metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=self.shared_nearest_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+                # LLE reconstruction errors for the labeled samples from class `c`
+                nn_indices, _ = self.index_knn_true[c].query_self(k=self.n_neighbors_true[c])
+                self.errors_lle_train[ind, i + 1] = self._calc_reconstruction_errors(
+                    self.features_knn_true[c], self.features_knn_true[c], nn_indices
+                )
+                # LLE reconstruction errors for the labeled samples not from class `c`
+                ind_comp = np.where(labels != c)[0]
+                temp_arr = features[ind_comp, :]
+                nn_indices, _ = self.index_knn_true[c].query(temp_arr, k=self.n_neighbors_true[c])
+                self.errors_lle_train[ind_comp, i + 1] = self._calc_reconstruction_errors(
+                    temp_arr, self.features_knn_true[c], nn_indices
+                )
+            else:
+                raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
 
         # Calculate the scores and p-values for each samples
         self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
@@ -1093,38 +1190,34 @@ class LLEScore(TestStatistic):
                       p-values of the scores.
         """
         n_test = labels_pred_test.shape[0]
-        if is_train:
-            errors_lle = self.errors_lle_train
-        else:
-            # Apply a PCA transformation to the test features if required
-            if self.transform_pca is not None:
-                features_test = np.dot(features_test - self.mean_data, self.transform_pca)
-
-            # Query the index of `self.n_neighbors` nearest neighbors of each test sample
-            nn_indices, nn_distances = self.index_knn.query(features_test, k=self.n_neighbors)
-
-            # Find the optimal convex reconstruction of each point from its nearest neighbors and the norm of
-            # the reconstruction errors
-            errors_lle = self._calc_reconstruction_errors(features_test, self.features_knn, nn_indices)
+        if (self.transform_pca is not None) and (not is_train):
+            # Apply a PCA transformation to the test features
+            features_test = np.dot(features_test - self.mean_data, self.transform_pca)
 
         scores = np.zeros((n_test, 1 + self.n_classes))
         p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
         cnt_par = 0
         for c_hat in preds_unique:
-            i = self.label_encoder([c_hat])[0]
             # Index of samples predicted into class `c_hat`
             ind = np.where(labels_pred_test == c_hat)[0]
             if ind.shape[0]:
-                # Reconstruction error scores normalized by the median value for the samples predicted into class `c`
-                # scores[ind, 0] = errors_lle[ind] / self.err_median_pred[i]
-                scores[ind, 0] = errors_lle[ind]
                 if not is_train:
+                    # LLE reconstruction errors relative to the samples predicted into class `c_hat`
+                    temp_arr = features_test[ind, :]
+                    nn_indices, _ = self.index_knn_pred[c_hat].query(temp_arr, k=self.n_neighbors_pred[c_hat])
+                    scores[ind, 0] = self._calc_reconstruction_errors(
+                        temp_arr, self.features_knn_pred[c_hat], nn_indices
+                    )
+                    # p-value of the LLE reconstruction errors
                     p_values[ind, 0] = pvalue_score(
                         self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
                         bootstrap=bootstrap
                     )
                 else:
+                    # Precomputed LLE reconstruction errors
+                    scores[ind, 0] = self.errors_lle_train[ind, 0]
+                    # p-value of the LLE reconstruction errors
                     p_values[ind, 0] = pvalue_score(
                         scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
                     )
@@ -1134,15 +1227,21 @@ class LLEScore(TestStatistic):
                     break
 
         for i, c in enumerate(self.labels_unique):
-            # Reconstruction error scores normalized by the median value for the samples labeled as class `c`
-            # scores[:, i + 1] = errors_lle / self.err_median_true[i]
-            scores[:, i + 1] = errors_lle
             if not is_train:
+                # LLE reconstruction errors relative to the samples labeled as class `c`
+                nn_indices, _ = self.index_knn_true[c].query(features_test, k=self.n_neighbors_true[c])
+                scores[:, i + 1] = self._calc_reconstruction_errors(
+                    features_test, self.features_knn_true[c], nn_indices
+                )
+                # p-value of the LLE reconstruction errors
                 p_values[:, i + 1] = pvalue_score(
                     self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
                     bootstrap=bootstrap
                 )
             else:
+                # Precomputed LLE reconstruction errors
+                scores[:, i + 1] = self.errors_lle_train[:, i + 1]
+                # p-value of the LLE reconstruction errors
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
                     bootstrap=bootstrap
