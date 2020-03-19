@@ -1,3 +1,10 @@
+"""
+Extract layer embeddings of a dataset given a trained DNN, estimate the intrinsic dimensionality of each layer
+embedding, and search for the best projected (reduced) dimension using a dimensionality reduction method such as
+neighborhood preserving projection (NPP) or PCA. The dimensionality reduction model is saved to a pickle file that
+can be loaded and applied to new (test) data samples.
+
+"""
 from __future__ import absolute_import, division, print_function
 import argparse
 import torch
@@ -14,7 +21,10 @@ import numpy as np
 from sklearn.model_selection import StratifiedShuffleSplit
 from helpers.knn_classifier import knn_parameter_search
 from helpers.lid_estimators import estimate_intrinsic_dimension
-from helpers.dimension_reduction_methods import transform_data_from_model
+from helpers.dimension_reduction_methods import (
+    transform_data_from_model,
+    wrapper_data_projection
+)
 from helpers.constants import (
     ROOT,
     NEIGHBORHOOD_CONST,
@@ -33,40 +43,186 @@ except:
     import pickle
 
 
+def search_dimension_and_neighbors(embeddings, labels, embeddings_test, labels_test, indices_sample, model_file,
+                                   output_file, n_jobs):
+    num_k_values = 10
+    num_dim_values = 20
+    dim_min = 50
+    dim_min_pca = 1000
+
+    n_layers = len(embeddings)
+    print("\nNumber of layers = {}".format(n_layers))
+    # Projection model from the different layers
+    model_projection_layers = []
+    # Projected (dimension reduced) training and test data from the different layers
+    # data_train_layers = []
+    # data_test_layers = []
+    for i in range(n_layers):
+        lines = []
+        mode = 'w' if i == 0 else 'a'
+        output_fp = open(output_file, mode)
+        str0 = "\nLayer: {:d}".format(i + 1)
+        print(str0)
+        lines.append(str0 + '\n')
+
+        # Embeddings from layer i
+        data = embeddings[i]
+        data_test = embeddings_test[i]
+        if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
+            raise ValueError("Mismatch in the size of the data and labels array!")
+
+        # Random stratified sample from the training portion of the data
+        data_sample = data[indices_sample, :]
+        labels_sample = labels[indices_sample]
+        dim_orig = data_sample.shape[1]
+        n_samples = labels_sample.shape[0]
+        str0 = ("Original dimension = {:d}. Train data size = {:d}. Test data size = {:d}. Sub-sample size used "
+                "for dimension reduction = {:d}".format(dim_orig, labels.shape[0], labels_test.shape[0],
+                                                        n_samples))
+        print(str0)
+        lines.append(str0 + '\n')
+
+        d = estimate_intrinsic_dimension(data_sample, method=METHOD_INTRINSIC_DIM, n_jobs=n_jobs)
+        d = min(int(np.ceil(d)), dim_orig)
+        str0 = "Intrinsic dimensionality: {:d}".format(d)
+        print(str0)
+        lines.append(str0 + '\n')
+
+        # Search values for the number of neighbors `k`
+        k_max = int(n_samples ** NEIGHBORHOOD_CONST)
+        k_range = np.unique(np.linspace(1, k_max, num=num_k_values, dtype=np.int))
+        if dim_orig > dim_min:
+            print("\nSearching for the best number of neighbors (k) and projected dimension.")
+            d_max = min(10 * d, dim_orig)
+            dim_proj_range = np.unique(np.linspace(d, d_max, num=num_dim_values, dtype=np.int))
+            # Apply PCA pre-processing prior to NPP only if the data dimension exceeds 1000
+            pc = 1.0 if (dim_orig < dim_min_pca) else PCA_CUTOFF
+
+            k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
+                data_sample, labels_sample, k_range,
+                dim_proj_range=dim_proj_range,
+                method_proj=METHOD_DIM_REDUCTION,
+                metric=METRIC_DEF,
+                pca_cutoff=pc,
+                n_jobs=n_jobs
+            )
+        else:
+            print("\nSkipping dimensionality reduction for this layer. Searching for the best number of "
+                  "neighbors (k).")
+            k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
+                data_sample, labels_sample, k_range,
+                metric=METRIC_DEF,
+                skip_preprocessing=True,
+                n_jobs=n_jobs
+            )
+
+        model_projection_layers.append(model_projection)
+        str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
+                    "error_rate_cv = {:.6f}".format(error_rate_cv)]
+        str0 = '\n'.join(str_list)
+        print(str0)
+        lines.append(str0 + '\n')
+        output_fp.writelines(lines)
+        output_fp.close()
+
+        # print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
+        # data_train_layers.append(transform_data_from_model(data, model_projection))
+        # data_test_layers.append(transform_data_from_model(data_test, model_projection))
+
+    with open(model_file, 'wb') as fp:
+        pickle.dump(model_projection_layers, fp)
+
+    print("\nOutputs saved to the file: {}".format(output_file))
+    print("Dimension reduction models saved to the file: {}".format(model_file))
+
+
+def project_fixed_dimension(embeddings, labels, embeddings_test, labels_test, dim_proj, indices_sample,
+                            model_file, output_file, n_jobs):
+    n_layers = len(embeddings)
+    print("\nNumber of layers = {}".format(n_layers))
+    # Projection model from the different layers
+    model_projection_layers = []
+    lines = []
+    for i in range(n_layers):
+        str0 = "\nLayer: {:d}".format(i + 1)
+        print(str0)
+        lines.append(str0 + '\n')
+
+        # Embeddings from layer i
+        data = embeddings[i]
+        data_test = embeddings_test[i]
+        if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
+            raise ValueError("Mismatch in the size of the data and labels array!")
+
+        dim_orig = data.shape[1]
+        if dim_orig <= dim_proj:
+            str0 = "Original dimension = {:d}. Skipping dimensionality reduction for this layer".format(dim_orig)
+            print(str0)
+            lines.append(str0 + '\n')
+            model_projection = None
+        else:
+            # Random stratified sample from the training portion of the data
+            data_sample = data[indices_sample, :]
+            labels_sample = labels[indices_sample]
+            str0 = ("Original dimension = {:d}. Train data size = {:d}. Test data size = {:d}. Sub-sample size used "
+                    "for dimension reduction = {:d}".format(dim_orig, labels.shape[0], labels_test.shape[0],
+                                                            labels_sample.shape[0]))
+            print(str0)
+            lines.append(str0 + '\n')
+            model_projection, _ = wrapper_data_projection(
+                data_sample,
+                METHOD_DIM_REDUCTION,
+                dim_proj=dim_proj,
+                metric=METRIC_DEF,
+                pca_cutoff=PCA_CUTOFF,
+                n_jobs=n_jobs
+            )
+
+        model_projection_layers.append(model_projection)
+
+    with open(output_file, 'w') as fp:
+        fp.writelines(lines)
+    with open(model_file, 'wb') as fp:
+        pickle.dump(model_projection_layers, fp)
+
+    print("\nOutputs saved to the file: {}".format(output_file))
+    print("Dimension reduction models saved to the file: {}".format(model_file))
+
+
 def main():
-    # Training settings
     parser = argparse.ArgumentParser(description='Arguments')
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
-    parser.add_argument('--batch-size', '-b', type=int, default=64, metavar='N',
+    parser.add_argument('--fixed-dimension', '--fd', type=int, default=0,
+                        help='Use this option to project the layer embeddings to a fixed dimension, if a layer '
+                             'dimension exceeds this value. Zero or a negative value disables this option.')
+    parser.add_argument('--batch-size', '-b', type=int, default=64,
                         help='input batch size for training (default: 64)')
-    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
+    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000,
                         help='input batch size for testing (default: 1000)')
-    parser.add_argument('--epochs', '-e', type=int, default=10, metavar='N',
-                        help='number of epochs to train (default: 10)')
-    parser.add_argument('--lr', type=float, default=1.0, metavar='LR', help='learning rate (default: 1.0)')
-    parser.add_argument('--gamma', '-g', type=float, default=0.7, metavar='M',
-                        help='Learning rate step gamma (default: 0.7)')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
-    parser.add_argument('--seed', '-s', type=int, default=1, metavar='S', help='random seed (default: 1)')
+    parser.add_argument('--seed', '-s', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
-    # parser.add_argument('--save-model', action='store_true', default=True, help='For Saving the current Model')
-    # parser.add_argument('--train', '-t', action='store_true', default=False, help='commence training')
-    # parser.add_argument('--ckpt', action='store_true', default=True, help='Use the saved model checkpoint')
-    parser.add_argument('--gpu', type=str, default='1', help='gpus to execute code on')
-    parser.add_argument('--output', '-o', type=str, default='output_layer_extraction.txt',
-                        help='output file basename')
+    parser.add_argument('--gpu', type=str, default='2', help='gpus to execute code on')
+    parser.add_argument('--output-dir', '-o', type=str, default='', help='output directory path')
     args = parser.parse_args()
+
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
-
     device = torch.device("cuda" if use_cuda else "cpu")
-
     kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-
     n_jobs = get_num_jobs(args.n_jobs)
+
+    # Output directory
+    if args.output_dir:
+        output_dir = args.output_dir
+    else:
+        output_dir = os.path.join(ROOT, 'outputs', args.model_type)
+
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
 
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
@@ -138,101 +294,18 @@ def main():
     else:
         indices_sample = np.arange(ns)
 
-    n_layers = len(embeddings)
-    print("\nNumber of layers = {}".format(n_layers))
-    output_dir = os.path.join(ROOT, 'outputs', args.model_type)
-    if not os.path.isdir(output_dir):
-        os.makedirs(output_dir)
-
-    output_file = os.path.join(output_dir, args.output)
-    # Projection model from the different layers
-    model_projection_layers = []
-    # Projected (dimension reduced) training and test data from the different layers
-    # data_train_layers = []
-    # data_test_layers = []
-    for i in range(n_layers):    # number of layers in the CNN
-        lines = []
-        mode = 'w' if i == 0 else 'a'
-        output_fp = open(output_file, mode)
-        str0 = "\nLayer: {:d}".format(i + 1)
-        print(str0)
-        lines.append(str0 + '\n')
-
-        # Embeddings from layer i
-        data = embeddings[i]
-        data_test = embeddings_test[i]
-
-        if (labels.shape[0] != data.shape[0]) or (labels_test.shape[0] != data_test.shape[0]):
-            raise ValueError("Mismatch in the size of the data and labels array!")
-
-        # Random stratified sample from the training portion of the data
-        data_sample = data[indices_sample, :]
-        labels_sample = labels[indices_sample]
-
-        dim_orig = data_sample.shape[1]
-        N_samples = data_sample.shape[0]
-        str0 = ("Original dimension = {:d}. Train data size = {:d}. Test data size = {:d}. Sub-sample size used "
-                "for dimension reduction = {:d}".format(dim_orig, labels.shape[0], labels_test.shape[0],
-                                                        labels_sample.shape[0]))
-        print(str0)
-        lines.append(str0 + '\n')
-
-        d = estimate_intrinsic_dimension(data_sample, method=METHOD_INTRINSIC_DIM, n_jobs=n_jobs)
-        d = min(int(np.ceil(d)), dim_orig)
-        str0 = "Intrinsic dimensionality: {:d}".format(d)
-        print(str0)
-        lines.append(str0 + '\n')
-
-        k_max = int(N_samples ** NEIGHBORHOOD_CONST)
-        k_range = np.unique(np.linspace(1, k_max, num=10, dtype=np.int))
-        if dim_orig > 50:
-            print("\nSearching for the best number of neighbors (k) and projected dimension.")
-            d_max = min(10 * d, dim_orig)
-            dim_proj_range = np.unique(np.linspace(d, d_max, num=20, dtype=np.int))
-            # Apply PCA preprocessing prior to NPP only if the data dimension exceeds 1000
-            if dim_orig < 1000:
-                pc = 1.0
-            else:
-                pc = PCA_CUTOFF
-
-            k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
-                data_sample, labels_sample, k_range,
-                dim_proj_range=dim_proj_range,
-                method_proj=METHOD_DIM_REDUCTION,
-                metric=METRIC_DEF,
-                pca_cutoff=pc,
-                n_jobs=n_jobs
-            )
-        else:
-            print("\nSkipping dimensionality reduction for this layer. Searching for the best number of "
-                  "neighbors (k).")
-            k_best, dim_best, error_rate_cv, _, model_projection = knn_parameter_search(
-                data_sample, labels_sample, k_range,
-                metric=METRIC_DEF,
-                skip_preprocessing=True,
-                n_jobs=n_jobs
-            )
-
-        model_projection_layers.append(model_projection)
-        str_list = ["k_best: {:d}".format(k_best), "dim_best: {:d}".format(dim_best),
-                    "error_rate_cv = {:.6f}".format(error_rate_cv)]
-        str0 = '\n'.join(str_list)
-        print(str0)
-        lines.append(str0 + '\n')
-
-        # print("\nProjecting the entire train and test data to {:d} dimensions:".format(dim_best))
-        # data_train_layers.append(transform_data_from_model(data, model_projection))
-        # data_test_layers.append(transform_data_from_model(data_test, model_projection))
-
-        output_fp.writelines(lines)
-        output_fp.close()
-
-    print("\nOutputs saved to the file: {}".format(output_file))
-    fname = os.path.join(output_dir, 'models_dimension_reduction.pkl')
-    with open(fname, 'wb') as fp:
-        pickle.dump(model_projection_layers, fp)
-
-    print("Dimension reduction models saved to the file: {}".format(fname))
+    if args.fixed_dimension < 1:
+        output_file = os.path.join(output_dir, 'output_layer_extraction.txt')
+        model_file = os.path.join(output_dir, 'models_dimension_reduction.pkl')
+        # Search for the best number of dimensions and number of neighbors and save the corresponding projection model
+        search_dimension_and_neighbors(embeddings, labels, embeddings_test, labels_test, indices_sample, model_file,
+                                       output_file, n_jobs)
+    else:
+        output_file = os.path.join(output_dir, "output_fixed_dimension_{:d}.txt".format(args.fixed_dimension))
+        model_file = os.path.join(output_dir, "models_fixed_dimension_{:d}.pkl".format(args.fixed_dimension))
+        # Project the embeddings from each layer to the specified fixed dimension, if it exceeds the fixed dimension
+        project_fixed_dimension(embeddings, labels, embeddings_test, labels_test, args.fixed_dimension,
+                                indices_sample, model_file, output_file, n_jobs)
 
 
 if __name__ == '__main__':
