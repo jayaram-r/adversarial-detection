@@ -36,7 +36,7 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.detector_lid_paper import DetectorLID
+from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
@@ -368,7 +368,7 @@ def main():
         # Adversarial data loader for the test fold
         adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size,
                                                  device=device)
-        if args.detection_method == 'lid':
+        if args.detection_method in ['lid', 'lid_class_cond']:
             # Needed only for the LID method
             print("\nCalculating the layer embeddings and DNN predictions for the adversarial train data split:")
             layer_embeddings_tr_adv, labels_pred_tr_adv = helper_layer_embeddings(
@@ -417,6 +417,32 @@ def main():
 
             # Scores on adversarial data from the test fold
             scores_adv2 = model_det.score(layer_embeddings_te_adv)
+
+            scores_adv = np.concatenate([scores_adv1, scores_adv2])
+
+        elif args.detection_method == 'lid_class_cond':
+            # TODO: generate noisy data from the clean training fold data. Setting this to `None` will inform
+            # the detector to skip noisy data
+            layer_embeddings_tr_noisy = None
+            labels_pred_tr_noisy = None
+
+            model_det = DetectorLIDClassCond(
+                n_neighbors=n_neighbors,
+                max_iter=200,
+                balanced_classification=True,
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            # Fit the detector on clean, noisy, and adversarial data from the training fold
+            _ = model_det.fit(layer_embeddings_tr, labels_tr, labels_pred_tr,
+                              layer_embeddings_tr_adv, labels_pred_tr_adv,
+                              layer_embeddings_noisy=layer_embeddings_tr_noisy,
+                              labels_pred_noisy=labels_pred_tr_noisy)
+            # Scores on clean data from the test fold
+            scores_adv1 = model_det.score(layer_embeddings_te, labels_pred_te)
+
+            # Scores on adversarial data from the test fold
+            scores_adv2 = model_det.score(layer_embeddings_te_adv, labels_pred_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
