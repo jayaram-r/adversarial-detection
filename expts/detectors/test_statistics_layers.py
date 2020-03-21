@@ -787,7 +787,7 @@ class LIDScore(TestStatistic):
         super(LIDScore, self).__init__(
             neighborhood_constant=kwargs.get('neighborhood_constant', NEIGHBORHOOD_CONST),
             n_neighbors=kwargs.get('n_neighbors', None),
-            metric=kwargs.get('metric', METRIC_DEF),
+            metric=kwargs.get('metric', 'euclidean'),       # use 'euclidean' metric for LID estimation
             metric_kwargs=kwargs.get('metric_kwargs', None),
             shared_nearest_neighbors=False,     # Intentionally set to False
             approx_nearest_neighbors=kwargs.get('approx_nearest_neighbors', True),
@@ -814,7 +814,7 @@ class LIDScore(TestStatistic):
         self.indices_pred = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False,
-            min_dim_pca=1000, pca_cutoff=PCA_CUTOFF):
+            min_dim_pca=10000, pca_cutoff=PCA_CUTOFF):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 
@@ -1042,7 +1042,7 @@ class LLEScore(TestStatistic):
         self.features_knn_true = dict()
 
     def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False,
-            min_dim_pca=1000, pca_cutoff=PCA_CUTOFF, reg_eps=0.001):
+            min_dim_pca=10000, pca_cutoff=PCA_CUTOFF, reg_eps=0.001):
         """
         Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
 

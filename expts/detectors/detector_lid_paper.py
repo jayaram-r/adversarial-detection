@@ -21,6 +21,10 @@ from helpers.constants import (
     CROSS_VAL_SIZE,
     METRIC_DEF
 )
+from helpers.dimension_reduction_methods import (
+    transform_data_from_model,
+    load_dimension_reduction_models
+)
 from helpers.knn_index import KNNIndex, helper_knn_distance
 from helpers.lid_estimators import lid_mle_amsaleg
 from helpers.utils import get_num_jobs
@@ -37,6 +41,8 @@ class DetectorLID:
                  n_cv_folds=CROSS_VAL_SIZE,
                  c_search_values=None,
                  approx_nearest_neighbors=True,
+                 skip_dim_reduction=True,
+                 model_dim_reduction=None,
                  n_jobs=1,
                  max_iter=200,
                  balanced_classification=True,
@@ -60,6 +66,11 @@ class DetectorLID:
         :param approx_nearest_neighbors: Set to True in order to use an approximate nearest neighbor algorithm to
                                          find the nearest neighbors. The NN-descent method is used for approximate
                                          nearest neighbor searches.
+        :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
+        :param model_dim_reduction: 1. None if dimension reduction is not required; (OR)
+                                    2. Path to a file containing the saved dimension reduction model. This will be
+                                       a pickle file that loads into a list of model dictionaries; (OR)
+                                    3. The dimension reduction model loaded into memory from the pickle file.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
         :param max_iter: Maximum number of iterations for the optimization of the logistic classifier. The default
                          value set by the scikit-learn library is 100, but sometimes this does not allow for
@@ -79,6 +90,7 @@ class DetectorLID:
         self.n_cv_folds = n_cv_folds
         self.c_search_values = c_search_values
         self.approx_nearest_neighbors = approx_nearest_neighbors
+        self.skip_dim_reduction = skip_dim_reduction
         self.n_jobs = get_num_jobs(n_jobs)
         self.max_iter = max_iter
         self.balanced_classification = balanced_classification
@@ -86,6 +98,20 @@ class DetectorLID:
         self.seed_rng = seed_rng
 
         np.random.seed(self.seed_rng)
+        # Load the dimension reduction models per-layer if required
+        self.transform_models = None
+        if not self.skip_dim_reduction:
+            if model_dim_reduction is None:
+                raise ValueError("Model file for dimension reduction is required but not specified as input.")
+            elif isinstance(model_dim_reduction, str):
+                # Pickle file is specified
+                self.transform_models = load_dimension_reduction_models(model_dim_reduction)
+            elif isinstance(model_dim_reduction, list):
+                # Model already loaded from pickle file
+                self.transform_models = model_dim_reduction
+            else:
+                raise ValueError("Invalid format for the dimension reduction model input.")
+
         if self.c_search_values is None:
             # Default search values for the `C` parameter of logistic regression
             self.c_search_values = np.logspace(-4, 4, num=10)
@@ -162,10 +188,30 @@ class DetectorLID:
         features_lid_adversarial = np.zeros((self.n_samples[2], self.n_layers))
         for i in range(self.n_layers):
             logger.info("Processing layer {:d}:".format(i + 1))
+            if self.transform_models:
+                data_normal = transform_data_from_model(layer_embeddings_normal[i], self.transform_models[i])
+                data_adver = transform_data_from_model(layer_embeddings_adversarial[i], self.transform_models[i])
+                if noisy_data:
+                    data_noisy = transform_data_from_model(layer_embeddings_noisy[i], self.transform_models[i])
+                else:
+                    data_noisy = None
+
+                d1 = layer_embeddings_normal[i].shape[1]
+                d2 = data_normal.shape[1]
+                if d2 < d1:
+                    logger.info("Input dimension = {:d}, projected dimension = {:d}".format(d1, d2))
+            else:
+                data_normal = layer_embeddings_normal[i]
+                data_adver = layer_embeddings_adversarial[i]
+                if noisy_data:
+                    data_noisy = layer_embeddings_noisy[i]
+                else:
+                    data_noisy = None
+
             logger.info("Building a KNN index on the feature embeddings of normal samples.")
             # Build a KNN index on the set of feature embeddings from normal samples from layer `i`
             self.index_knn[i] = KNNIndex(
-                layer_embeddings_normal[i], n_neighbors=self.n_neighbors,
+                data_normal, n_neighbors=self.n_neighbors,
                 metric=self.metric, metric_kwargs=self.metric_kwargs,
                 approx_nearest_neighbors=self.approx_nearest_neighbors,
                 n_jobs=self.n_jobs,
@@ -181,13 +227,13 @@ class DetectorLID:
             if noisy_data:
                 logger.info("Calculating LID estimates for the feature embeddings of noisy samples.")
                 # Nearest neighbors of the noisy feature embeddings from this layer
-                nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings_noisy[i], k=self.n_neighbors)
+                nn_indices, nn_distances = self.index_knn[i].query(data_noisy, k=self.n_neighbors)
                 # LID estimates of the noisy feature embeddings from this layer
                 features_lid_noisy[:, i] = lid_mle_amsaleg(nn_distances)
 
             logger.info("Calculating LID estimates for the feature embeddings of adversarial samples.")
             # Nearest neighbors of the adversarial feature embeddings from this layer
-            nn_indices, nn_distances = self.index_knn[i].query(layer_embeddings_adversarial[i], k=self.n_neighbors)
+            nn_indices, nn_distances = self.index_knn[i].query(data_adver, k=self.n_neighbors)
             # LID estimates of the adversarial feature embeddings from this layer
             features_lid_adversarial[:, i] = lid_mle_amsaleg(nn_distances)
 
@@ -268,7 +314,13 @@ class DetectorLID:
         features_lid = np.zeros((n_test, self.n_layers))
         for i in range(self.n_layers):
             logger.info("Calculating LID features for layer {:d}".format(i + 1))
-            _, nn_distances = self.index_knn[i].query(layer_embeddings[i], k=self.n_neighbors)
+            if self.transform_models:
+                # Dimension reduction
+                data_proj = transform_data_from_model(layer_embeddings[i], self.transform_models[i])
+            else:
+                data_proj = layer_embeddings[i]
+
+            _, nn_distances = self.index_knn[i].query(data_proj, k=self.n_neighbors)
             features_lid[:, i] = lid_mle_amsaleg(nn_distances)
 
         return self.model_logistic.decision_function(features_lid)
@@ -281,6 +333,8 @@ class DetectorLIDClassCond:
                  n_cv_folds=CROSS_VAL_SIZE,
                  c_search_values=None,
                  approx_nearest_neighbors=True,
+                 skip_dim_reduction=True,
+                 model_dim_reduction=None,
                  n_jobs=1,
                  max_iter=200,
                  balanced_classification=True,
@@ -304,6 +358,11 @@ class DetectorLIDClassCond:
         :param approx_nearest_neighbors: Set to True in order to use an approximate nearest neighbor algorithm to
                                          find the nearest neighbors. The NN-descent method is used for approximate
                                          nearest neighbor searches.
+        :param skip_dim_reduction: Set to True in order to skip dimension reduction of the layer embeddings.
+        :param model_dim_reduction: 1. None if dimension reduction is not required; (OR)
+                                    2. Path to a file containing the saved dimension reduction model. This will be
+                                       a pickle file that loads into a list of model dictionaries; (OR)
+                                    3. The dimension reduction model loaded into memory from the pickle file.
         :param n_jobs: Number of parallel jobs or processes. Set to -1 to use all the available cpu cores.
         :param max_iter: Maximum number of iterations for the optimization of the logistic classifier. The default
                          value set by the scikit-learn library is 100, but sometimes this does not allow for
@@ -323,6 +382,7 @@ class DetectorLIDClassCond:
         self.n_cv_folds = n_cv_folds
         self.c_search_values = c_search_values
         self.approx_nearest_neighbors = approx_nearest_neighbors
+        self.skip_dim_reduction = skip_dim_reduction
         self.n_jobs = get_num_jobs(n_jobs)
         self.max_iter = max_iter
         self.balanced_classification = balanced_classification
@@ -330,6 +390,20 @@ class DetectorLIDClassCond:
         self.seed_rng = seed_rng
 
         np.random.seed(self.seed_rng)
+        # Load the dimension reduction models per-layer if required
+        self.transform_models = None
+        if not self.skip_dim_reduction:
+            if model_dim_reduction is None:
+                raise ValueError("Model file for dimension reduction is required but not specified as input.")
+            elif isinstance(model_dim_reduction, str):
+                # Pickle file is specified
+                self.transform_models = load_dimension_reduction_models(model_dim_reduction)
+            elif isinstance(model_dim_reduction, list):
+                # Model already loaded from pickle file
+                self.transform_models = model_dim_reduction
+            else:
+                raise ValueError("Invalid format for the dimension reduction model input.")
+
         if self.c_search_values is None:
             # Default search values for the `C` parameter of logistic regression
             self.c_search_values = np.logspace(-4, 4, num=10)
@@ -452,12 +526,33 @@ class DetectorLIDClassCond:
         features_lid_noisy = np.zeros((self.n_samples[1], self.n_layers))
         features_lid_adversarial = np.zeros((self.n_samples[2], self.n_layers))
         for i in range(self.n_layers):
+            logger.info("Processing layer {:d}:".format(i + 1))
+            # Dimensionality reduction of the layer embeddings, if required
+            if self.transform_models:
+                data_normal = transform_data_from_model(layer_embeddings_normal[i], self.transform_models[i])
+                data_adver = transform_data_from_model(layer_embeddings_adversarial[i], self.transform_models[i])
+                if noisy_data:
+                    data_noisy = transform_data_from_model(layer_embeddings_noisy[i], self.transform_models[i])
+                else:
+                    data_noisy = None
+
+                d1 = layer_embeddings_normal[i].shape[1]
+                d2 = data_normal.shape[1]
+                if d2 < d1:
+                    logger.info("Input dimension = {:d}, projected dimension = {:d}".format(d1, d2))
+            else:
+                data_normal = layer_embeddings_normal[i]
+                data_adver = layer_embeddings_adversarial[i]
+                if noisy_data:
+                    data_noisy = layer_embeddings_noisy[i]
+                else:
+                    data_noisy = None
+
             for c in self.labels_unique:
-                logger.info("Processing layer {:d}, class {}:".format(i + 1, c))
-                logger.info("Building a KNN index on the feature embeddings of normal samples from this class.")
-                features_temp = layer_embeddings_normal[i][self.indices_true[c], :]
+                logger.info("Building a KNN index on the feature embeddings of normal samples from class {}".
+                            format(c))
                 self.index_knn[i][c] = KNNIndex(
-                    features_temp, n_neighbors=self.n_neighbors_per_class[c],
+                    data_normal[self.indices_true[c], :], n_neighbors=self.n_neighbors_per_class[c],
                     metric=self.metric, metric_kwargs=self.metric_kwargs,
                     approx_nearest_neighbors=self.approx_nearest_neighbors,
                     n_jobs=self.n_jobs,
@@ -476,7 +571,7 @@ class DetectorLIDClassCond:
                 else:
                     n_pred_noisy = 0
 
-                if n_pred_normal > 0:
+                if n_pred_normal:
                     # Distance to nearest neighbors of samples predicted into class `c` that are also labeled as
                     # class `c`. These samples will be a part of the KNN index
                     nn_distances = helper_knn_distance(self.indices_pred_normal[c], self.indices_true[c],
@@ -486,21 +581,21 @@ class DetectorLIDClassCond:
                         # Distance to nearest neighbors of samples predicted into class `c` that are not labeled as
                         # class `c`. These samples will not be a part of the KNN index
                         ind_comp = self.indices_pred_normal[c][mask]
-                        _, nn_distances[mask] = self.index_knn[i][c].query(layer_embeddings_normal[i][ind_comp, :],
+                        _, nn_distances[mask] = self.index_knn[i][c].query(data_normal[ind_comp, :],
                                                                            k=self.n_neighbors_per_class[c])
 
                     # LID estimates for the normal feature embeddings predicted into class `c`
                     features_lid_normal[self.indices_pred_normal[c], i] = lid_mle_amsaleg(nn_distances)
 
                 # LID estimates for the noisy feature embeddings predicted into class `c`
-                if n_pred_noisy > 0:
-                    temp_arr = layer_embeddings_noisy[i][self.indices_pred_noisy[c], :]
+                if n_pred_noisy:
+                    temp_arr = data_noisy[self.indices_pred_noisy[c], :]
                     _, nn_distances = self.index_knn[i][c].query(temp_arr, k=self.n_neighbors_per_class[c])
                     features_lid_noisy[self.indices_pred_noisy[c], i] = lid_mle_amsaleg(nn_distances)
 
                 # LID estimates for the adversarial feature embeddings predicted into class `c`
-                if n_pred_adver > 0:
-                    temp_arr = layer_embeddings_adversarial[i][self.indices_pred_adver[c], :]
+                if n_pred_adver:
+                    temp_arr = data_adver[self.indices_pred_adver[c], :]
                     _, nn_distances = self.index_knn[i][c].query(temp_arr, k=self.n_neighbors_per_class[c])
                     features_lid_adversarial[self.indices_pred_adver[c], i] = lid_mle_amsaleg(nn_distances)
 
@@ -581,11 +676,16 @@ class DetectorLIDClassCond:
         features_lid = np.zeros((n_test, self.n_layers))
         for i in range(self.n_layers):
             logger.info("Calculating LID features for layer {:d}".format(i + 1))
+            if self.transform_models:
+                # Dimension reduction
+                data_proj = transform_data_from_model(layer_embeddings[i], self.transform_models[i])
+            else:
+                data_proj = layer_embeddings[i]
+
             for c in self.labels_unique:
                 ind = np.where(labels_pred == c)[0]
                 if ind.shape[0]:
-                    _, nn_distances = self.index_knn[i][c].query(layer_embeddings[i][ind, :],
-                                                                 k=self.n_neighbors_per_class[c])
+                    _, nn_distances = self.index_knn[i][c].query(data_proj[ind, :], k=self.n_neighbors_per_class[c])
                     features_lid[ind, i] = lid_mle_amsaleg(nn_distances)
 
         return self.model_logistic.decision_function(features_lid)

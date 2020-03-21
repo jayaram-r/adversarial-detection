@@ -222,9 +222,7 @@ def main():
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
-        # Dimension reduction is not applied when the test statistic is 'lid' or 'lle'
-        if args.test_statistic in ['multinomial', 'binomial']:
-            apply_dim_reduc = True
+        apply_dim_reduc = True
 
     elif args.detection_method == 'trust':
         # Append the layer name to the method name
@@ -243,14 +241,20 @@ def main():
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
+    elif args.detection_method in ['lid', 'lid_class_cond']:
+        apply_dim_reduc = True
+        # If `n_neighbors` is specified, append that value to the name string
+        if n_neighbors is not None:
+            method_name = '{}_k{:d}'.format(method_name, n_neighbors)
+
     # Model file for dimension reduction, if required
     model_dim_reduc = None
     if apply_dim_reduc:
         if args.modelfile_dim_reduc:
             fname = args.modelfile_dim_reduc
         else:
-            # Default path to the dimension reduction model file
-            fname = get_path_dr_models(args.model_type)
+            # Path to the dimension reduction model file
+            fname = get_path_dr_models(args.model_type, args.detection_method, test_statistic=args.test_statistic)
 
         if not os.path.isfile(fname):
             raise ValueError("Model file for dimension reduction is required, but does not exist: {}".format(fname))
@@ -404,6 +408,8 @@ def main():
 
             model_det = DetectorLID(
                 n_neighbors=n_neighbors,
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_dim_reduction=model_dim_reduc,
                 max_iter=200,
                 balanced_classification=True,
                 n_jobs=args.n_jobs,
@@ -428,6 +434,8 @@ def main():
 
             model_det = DetectorLIDClassCond(
                 n_neighbors=n_neighbors,
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_dim_reduction=model_dim_reduc,
                 max_iter=200,
                 balanced_classification=True,
                 n_jobs=args.n_jobs,

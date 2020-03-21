@@ -415,8 +415,8 @@ class DetectorLayerStatistics:
                 ts_obj = LIDScore(
                     neighborhood_constant=self.neighborhood_constant,
                     n_neighbors=self.n_neighbors,
-                    metric=self.metric,
-                    metric_kwargs=self.metric_kwargs,
+                    metric='euclidean',     # use 'euclidean' metric for LID estimation
+                    metric_kwargs=None,
                     approx_nearest_neighbors=self.approx_nearest_neighbors,
                     n_jobs=self.n_jobs,
                     low_memory=self.low_memory,

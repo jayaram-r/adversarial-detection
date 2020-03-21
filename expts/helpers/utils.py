@@ -126,11 +126,28 @@ def save_model_checkpoint(model, model_type, epoch=None):
     torch.save(model.state_dict(), model_path)
 
 
-def get_path_dr_models(model_type):
-    # Default path to the dimensionality reduction model files
-    return os.path.join(
+def get_path_dr_models(model_type, method_detection, test_statistic=None):
+    # Path to the dimensionality reduction model files
+    fname1 = os.path.join(
         ROOT, 'models', 'models_dimension_reduction', model_type, 'models_dimension_reduction.pkl'
     )
+    fname2 = os.path.join(
+        ROOT, 'models', 'models_dimension_reduction', model_type, 'models_fixed_dimension_1000.pkl'
+    )
+    fname = fname1
+    if method_detection == 'proposed':
+        if test_statistic in ['lid', 'lle']:
+            fname = fname2
+        else:
+            fname = fname1
+
+    elif method_detection in ['lid', 'lid_class_cond']:
+        # This method uses more layers
+        fname = fname2
+    else:
+        fname = fname1
+
+    return fname
 
 
 def get_clean_data_path(model_type, fold):
