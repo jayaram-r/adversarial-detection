@@ -80,6 +80,7 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
     labels = []
     labels_pred = []
     embeddings = []
+    n_layers = 0
     num_samples_partial = 0
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(data_loader):
@@ -106,9 +107,11 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
                 raise ValueError("Invalid value '{}' for input 'method'".format(method))
 
             if batch_idx > 0:
-                for i in range(len(outputs_layers)):    # each layer
+                for i in range(n_layers):
                     embeddings[i].append(outputs_layers[i].detach().cpu().numpy())
             else:
+                # First batch
+                n_layers = len(outputs_layers)
                 embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
             if num_samples:
@@ -121,7 +124,10 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
     `embeddings[i][j]` will be an array of shape `(b, d1, d2, d3)` or `(b, d1)` where `b` is the batch size
      and the rest are dimensions.
     '''
-    embeddings = [combine_and_vectorize(v) for v in embeddings]
+    # This takes up more memory
+    # embeddings = [combine_and_vectorize(v) for v in embeddings]
+    for i in range(n_layers):
+        embeddings[i] = combine_and_vectorize(embeddings[i])
 
     labels = np.array(labels, dtype=np.int)
     labels_pred = np.array(labels_pred, dtype=np.int)
