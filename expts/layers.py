@@ -304,8 +304,14 @@ def main():
         search_dimension_and_neighbors(embeddings, labels, embeddings_test, labels_test, indices_sample, model_file,
                                        output_file, n_jobs)
     else:
-        output_file = os.path.join(output_dir, "output_fixed_dimension_{:d}.txt".format(args.fixed_dimension))
-        model_file = os.path.join(output_dir, "models_fixed_dimension_{:d}.pkl".format(args.fixed_dimension))
+        if args.detection_method in ['lid', 'lid_class_cond']:
+            # This method uses a different (larger) number of layer embeddings
+            output_file = os.path.join(output_dir, "output_fixed_dimension_{:d}_lid.txt".format(args.fixed_dimension))
+            model_file = os.path.join(output_dir, "models_fixed_dimension_{:d}_lid.pkl".format(args.fixed_dimension))
+        else:
+            output_file = os.path.join(output_dir, "output_fixed_dimension_{:d}.txt".format(args.fixed_dimension))
+            model_file = os.path.join(output_dir, "models_fixed_dimension_{:d}.pkl".format(args.fixed_dimension))
+
         # Project the embeddings from each layer to the specified fixed dimension, if it exceeds the fixed dimension
         project_fixed_dimension(embeddings, labels, embeddings_test, labels_test, args.fixed_dimension,
                                 indices_sample, model_file, output_file, n_jobs)
