@@ -43,6 +43,7 @@ def main():
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
+    parser.add_argument('--generate-attacks', type=bool, default=True, help='should attack samples be generated/not (default:True)')
     parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW'], default='PGD',
                         help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
@@ -60,6 +61,8 @@ def main():
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+
+    generate_attacks = args.generate_attacks
 
     if not args.output_dir:
         output_dir = os.path.join(ROOT, 'numpy_data', args.model_type)
@@ -159,93 +162,101 @@ def main():
         else:
             labels_te = np.load(os.path.join(numpy_save_path, "labels_te.npy"))
 
-        # data loader for the training and test data split
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
-        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size)
+        # if attack samples are to be generated
+        if generate_attacks:
 
-        adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
-        if not os.path.isdir(adv_save_path):
-            os.makedirs(adv_save_path)
+            # data loader for the training and test data split
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
+            train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size)
 
-        #setting adv. attack parameters
-        stepsize = args.stepsize
-        confidence = args.confidence
-        epsilon = args.epsilon
-        max_iterations = args.max_iterations
-        iterations = args.iterations
-        max_epsilon = args.max_epsilon
+            adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
+            if not os.path.isdir(adv_save_path):
+                os.makedirs(adv_save_path)
 
-        print("parameter choices")
-        print("stepsize:", stepsize, type(stepsize))
-        print("confidence:", confidence, type(confidence))
-        print("max_iterations:", max_iterations, type(max_iterations))
-        print("iterations:", iterations, type(iterations))
-        print("max_epsilon:", max_epsilon, type(max_epsilon))
-        print("epsilon:", epsilon, type(epsilon))
+            #setting adv. attack parameters
+            stepsize = args.stepsize
+            confidence = args.confidence
+            epsilon = args.epsilon
+            max_iterations = args.max_iterations
+            iterations = args.iterations
+            max_epsilon = args.max_epsilon
 
-        #create path based on attack configs
-        params_list = [('stepsize', stepsize), ('confidence', confidence), ('epsilon', epsilon),
-                      ('maxiterations', max_iterations), ('iterations', iterations), ('maxepsilon', max_epsilon),
-                      ('pnorm', args.p_norm)]
-        param_path = ''.join(['{}_{}'.format(a, str(b)) for a, b in params_list])
+            print("parameter choices")
+            print("stepsize:", stepsize, type(stepsize))
+            print("confidence:", confidence, type(confidence))
+            print("max_iterations:", max_iterations, type(max_iterations))
+            print("iterations:", iterations, type(iterations))
+            print("max_epsilon:", max_epsilon, type(max_epsilon))
+            print("epsilon:", epsilon, type(epsilon))
+
+            #create path based on attack configs
+            params_list = [('stepsize', stepsize), ('confidence', confidence), ('epsilon', epsilon),
+                        ('maxiterations', max_iterations), ('iterations', iterations), ('maxepsilon', max_epsilon),
+                        ('pnorm', args.p_norm)]
+            param_path = ''.join(['{}_{}'.format(a, str(b)) for a, b in params_list])
         
-        adv_path = os.path.join(adv_save_path, param_path)
-        if not os.path.isdir(adv_path):
-            os.makedirs(adv_path)
+            adv_path = os.path.join(adv_save_path, param_path)
+            if not os.path.isdir(adv_path):
+                os.makedirs(adv_path)
 
-        #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
-               	model,
-               	device, 
-               	test_fold_loader,
-               	loader_type="test",
-               	loader_batch_size=args.batch_size,
-               	bounds=bounds, 
-               	num_classes=num_classes, 
-               	dataset=args.model_type,
-               	fold_num=i,
-               	p_norm=args.p_norm, 
-               	adv_attack=args.adv_attack, 
-               	stepsize=stepsize,
-               	confidence=confidence,
-               	epsilon=epsilon,
-               	max_iterations=max_iterations,
-               	iterations=iterations,
-               	max_epsilon=max_epsilon
-        )
-        #save test fold's adv. examples
-        np.save(os.path.join(adv_path, 'data_te_adv.npy'), adv_inputs)
-        np.save(os.path.join(adv_path, 'labels_te_adv.npy'), adv_labels)
-        np.save(os.path.join(adv_path, 'data_te_clean.npy'), clean_inputs)
-        np.save(os.path.join(adv_path, 'labels_te_clean.npy'), clean_labels)
-        print("saved adv. examples generated from the test data for fold:", i)
+            #use dataloader to create adv. examples; adv_inputs is an ndarray
+            adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
+               	    model,
+               	    device, 
+               	    test_fold_loader,
+               	    loader_type="test",
+               	    loader_batch_size=args.batch_size,
+               	    bounds=bounds, 
+               	    num_classes=num_classes, 
+               	    dataset=args.model_type,
+               	    fold_num=i,
+               	    p_norm=args.p_norm, 
+               	    adv_attack=args.adv_attack, 
+               	    stepsize=stepsize,
+               	    confidence=confidence,
+               	    epsilon=epsilon,
+               	    max_iterations=max_iterations,
+               	    iterations=iterations,
+               	    max_epsilon=max_epsilon
+            )
+        
+            #save test fold's adv. examples
+            np.save(os.path.join(adv_path, 'data_te_adv.npy'), adv_inputs)
+            np.save(os.path.join(adv_path, 'labels_te_adv.npy'), adv_labels)
+            np.save(os.path.join(adv_path, 'data_te_clean.npy'), clean_inputs)
+            np.save(os.path.join(adv_path, 'labels_te_clean.npy'), clean_labels)
+            print("saved adv. examples generated from the test data for fold:", i)
 
-        #use dataloader to create adv. examples; adv_inputs is an ndarray
-        adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
-               	model,
-               	device, 
-               	train_fold_loader,
-               	loader_type="train",
-               	loader_batch_size=args.batch_size,
-               	bounds=bounds, 
-               	num_classes=num_classes, 
-               	dataset=args.model_type,
-               	fold_num=i,
-               	p_norm=args.p_norm, 
-               	adv_attack=args.adv_attack,
-               	stepsize=stepsize,
-               	confidence=confidence,
-               	epsilon=epsilon,
-               	max_iterations=max_iterations,
-               	iterations=iterations,
-               	max_epsilon=max_epsilon
-        )
-        #save train_fold's adv. examples
-        np.save(os.path.join(adv_path, 'data_tr_adv.npy'), adv_inputs)
-        np.save(os.path.join(adv_path, 'labels_tr_adv.npy'), adv_labels)
-        np.save(os.path.join(adv_path, 'data_tr_clean.npy'), clean_inputs)
-        np.save(os.path.join(adv_path, 'labels_tr_clean.npy'), clean_labels)
-        print("saved adv. examples generated from the train data for fold:", i)
+            #use dataloader to create adv. examples; adv_inputs is an ndarray
+            adv_inputs, adv_labels, clean_inputs, clean_labels = foolbox_attack(
+               	    model,
+               	    device, 
+               	    train_fold_loader,
+               	    loader_type="train",
+               	    loader_batch_size=args.batch_size,
+               	    bounds=bounds, 
+               	    num_classes=num_classes, 
+               	    dataset=args.model_type,
+               	    fold_num=i,
+               	    p_norm=args.p_norm, 
+               	    adv_attack=args.adv_attack,
+               	    stepsize=stepsize,
+               	    confidence=confidence,
+               	    epsilon=epsilon,
+               	    max_iterations=max_iterations,
+               	    iterations=iterations,
+               	    max_epsilon=max_epsilon
+            )
+        
+            #save train_fold's adv. examples
+            np.save(os.path.join(adv_path, 'data_tr_adv.npy'), adv_inputs)
+            np.save(os.path.join(adv_path, 'labels_tr_adv.npy'), adv_labels)
+            np.save(os.path.join(adv_path, 'data_tr_clean.npy'), clean_inputs)
+            np.save(os.path.join(adv_path, 'labels_tr_clean.npy'), clean_labels)
+            print("saved adv. examples generated from the train data for fold:", i)
+        
+        else:
+            print("generated original data split for fold : ", i)
 
         i = i + 1
 
