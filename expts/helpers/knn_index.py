@@ -33,6 +33,20 @@ from numba import NumbaPendingDeprecationWarning
 warnings.filterwarnings('ignore', '', NumbaPendingDeprecationWarning)
 
 
+def helper_knn_distance(indices1, indices2, distances2, val_def=-1.0):
+    """
+
+    :param indices1: integer numpy array of sample indices.
+    :param indices2: integer numpy array of sample indices.
+    :param distances2: float numpy array of nearest neighbor distances.
+    :param val_def: default distance value.
+
+    :return: float numpy array of length equal to `indices1`.
+    """
+    ind_dist_map = dict(zip(indices2, distances2))
+    return np.array([ind_dist_map.get(i, val_def) for i in indices1], dtype=distances2.dtype)
+
+
 class KNNIndex:
     """
     Class for construction of a K nearest neighbors index with support for custom distance metrics and

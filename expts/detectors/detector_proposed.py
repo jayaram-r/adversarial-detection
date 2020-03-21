@@ -100,7 +100,7 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
                 outputs_layers = model.layer_wise(data)
             elif method == 'odds':
                 outputs_layers = model.layer_wise_odds_are_odd(data)
-            elif method == 'lid':
+            elif method in ['lid', 'lid_class_cond']:
                 outputs_layers = model.layer_wise_lid_method(data)
             else:
                 raise ValueError("Invalid value '{}' for input 'method'".format(method))
@@ -415,8 +415,8 @@ class DetectorLayerStatistics:
                 ts_obj = LIDScore(
                     neighborhood_constant=self.neighborhood_constant,
                     n_neighbors=self.n_neighbors,
-                    metric=self.metric,
-                    metric_kwargs=self.metric_kwargs,
+                    metric='euclidean',     # use 'euclidean' metric for LID estimation
+                    metric_kwargs=None,
                     approx_nearest_neighbors=self.approx_nearest_neighbors,
                     n_jobs=self.n_jobs,
                     low_memory=self.low_memory,
