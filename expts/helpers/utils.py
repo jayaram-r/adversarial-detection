@@ -134,6 +134,9 @@ def get_path_dr_models(model_type, method_detection, test_statistic=None):
     fname2 = os.path.join(
         ROOT, 'models', 'models_dimension_reduction', model_type, 'models_fixed_dimension_1000.pkl'
     )
+    fname3 = os.path.join(
+        ROOT, 'models', 'models_dimension_reduction', model_type, 'models_fixed_dimension_1000_lid.pkl'
+    )
     fname = fname1
     if method_detection == 'proposed':
         if test_statistic in ['lid', 'lle']:
@@ -143,7 +146,7 @@ def get_path_dr_models(model_type, method_detection, test_statistic=None):
 
     elif method_detection in ['lid', 'lid_class_cond']:
         # This method uses more layers
-        fname = fname2
+        fname = fname3
     else:
         fname = fname1
 
