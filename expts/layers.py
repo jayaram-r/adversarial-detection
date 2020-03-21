@@ -186,7 +186,7 @@ def main():
     parser.add_argument('--fixed-dimension', '--fd', type=int, default=0,
                         help='Use this option to project the layer embeddings to a fixed dimension, if a layer '
                              'dimension exceeds this value. Zero or a negative value disables this option.')
-    parser.add_argument('--batch-size', '-b', type=int, default=512, help='batch size for the data loader')
+    parser.add_argument('--batch-size', '-b', type=int, default=256, help='batch size for the data loader')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
     parser.add_argument('--seed', '-s', type=int, default=1, help='random seed (default: 1)')
     parser.add_argument('--n-jobs', type=int, default=8, help='number of parallel jobs to use for multiprocessing')
