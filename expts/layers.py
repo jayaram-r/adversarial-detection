@@ -33,7 +33,8 @@ from helpers.constants import (
     METHOD_INTRINSIC_DIM,
     METHOD_DIM_REDUCTION,
     NORMALIZE_IMAGES,
-    MAX_SAMPLES_DIM_REDUCTION
+    MAX_SAMPLES_DIM_REDUCTION,
+    DETECTION_METHODS
 )
 from helpers.utils import load_model_checkpoint, get_num_jobs
 from detectors.detector_proposed import extract_layer_embeddings
@@ -193,6 +194,8 @@ def main():
     parser = argparse.ArgumentParser(description='Arguments')
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
+    parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
+                        help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
     parser.add_argument('--fixed-dimension', '--fd', type=int, default=0,
                         help='Use this option to project the layer embeddings to a fixed dimension, if a layer '
                              'dimension exceeds this value. Zero or a negative value disables this option.')
@@ -275,11 +278,11 @@ def main():
     # Get the feature embeddings from all the layers and the labels
     print("Calculating layer embeddings for the train data:")
     embeddings, labels, labels_pred, counts = extract_layer_embeddings(
-        model, device, train_loader, method='proposed'
+        model, device, train_loader, method=args.detection_method
     )
     print("\nCalculating layer embeddings for the test data:")
     embeddings_test, labels_test, labels_pred_test, counts_test = extract_layer_embeddings(
-        model, device, test_loader, method='proposed'
+        model, device, test_loader, method=args.detection_method
     )
     accu_test = np.sum(labels_test == labels_pred_test) / float(labels_test.shape[0])
     print("\nTest set accuracy = {:.4f}".format(accu_test))
