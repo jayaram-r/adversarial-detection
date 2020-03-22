@@ -911,10 +911,14 @@ class LIDScore(TestStatistic):
                 _, nn_distances = self.index_knn_true[c].query_self(k=self.n_neighbors_true[c])
                 self.lid_estimates_train[ind, i + 1] = lid_mle_amsaleg(nn_distances)
 
+                # Commenting this block out to avoid unneccessary computation.
+                # The reconstruction errors for these samples are not used anywhere else.
+                '''
                 # LID estimates for the samples not labeled as class `c`
                 ind_comp = np.where(labels != c)[0]
                 _, nn_distances = self.index_knn_true[c].query(features[ind_comp, :], k=self.n_neighbors_true[c])
                 self.lid_estimates_train[ind_comp, i + 1] = lid_mle_amsaleg(nn_distances)
+                '''
             else:
                 raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
 
@@ -1155,6 +1159,9 @@ class LLEScore(TestStatistic):
                 self.errors_lle_train[ind, i + 1] = self._calc_reconstruction_errors(
                     self.features_knn_true[c], self.features_knn_true[c], nn_indices
                 )
+                # Commenting this block out to avoid unneccessary computation.
+                # The reconstruction errors for these samples are not used anywhere else.
+                '''
                 # LLE reconstruction errors for the labeled samples not from class `c`
                 ind_comp = np.where(labels != c)[0]
                 temp_arr = features[ind_comp, :]
@@ -1162,6 +1169,7 @@ class LLEScore(TestStatistic):
                 self.errors_lle_train[ind_comp, i + 1] = self._calc_reconstruction_errors(
                     temp_arr, self.features_knn_true[c], nn_indices
                 )
+                '''
             else:
                 raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
 
