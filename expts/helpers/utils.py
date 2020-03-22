@@ -127,7 +127,7 @@ def save_model_checkpoint(model, model_type, epoch=None):
 
 
 def get_path_dr_models(model_type, method_detection, test_statistic=None):
-    # Path to the dimensionality reduction model files
+    # Path to the dimensionality reduction model files. Different models are used depending on the method
     fname1 = os.path.join(
         ROOT, 'models', 'models_dimension_reduction', model_type, 'models_dimension_reduction.pkl'
     )
@@ -140,7 +140,7 @@ def get_path_dr_models(model_type, method_detection, test_statistic=None):
     fname = fname1
     if method_detection == 'proposed':
         if test_statistic in ['lid', 'lle']:
-            fname = fname2
+            fname = fname1
         else:
             fname = fname1
 
@@ -175,6 +175,8 @@ def get_output_path(model_type):
 def list_all_adversarial_subdirs(model_type, fold, attack_type):
     # List all sub-directories corresponding to an adversarial attack
     d = os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type)
+    # Temporary hack to use backup data directory
+    d = d.replace('varun', 'jayaram', 1)
     if not os.path.isdir(d):
         raise ValueError("Directory '{}' does not exist.".format(d))
 
