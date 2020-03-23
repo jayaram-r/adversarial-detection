@@ -576,13 +576,14 @@ class DetectorLIDClassCond:
                     # class `c`. These samples will be a part of the KNN index
                     nn_distances = helper_knn_distance(self.indices_pred_normal[c], self.indices_true[c],
                                                        nn_distances_temp)
-                    mask = (nn_distances < 0.)
+                    mask = (nn_distances[:, 0] < 0.)
                     if np.any(mask):
                         # Distance to nearest neighbors of samples predicted into class `c` that are not labeled as
                         # class `c`. These samples will not be a part of the KNN index
                         ind_comp = self.indices_pred_normal[c][mask]
-                        _, nn_distances[mask] = self.index_knn[i][c].query(data_normal[ind_comp, :],
-                                                                           k=self.n_neighbors_per_class[c])
+                        _, temp_arr = self.index_knn[i][c].query(data_normal[ind_comp, :],
+                                                                 k=self.n_neighbors_per_class[c])
+                        nn_distances[mask, :] = temp_arr
 
                     # LID estimates for the normal feature embeddings predicted into class `c`
                     features_lid_normal[self.indices_pred_normal[c], i] = lid_mle_amsaleg(nn_distances)

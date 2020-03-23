@@ -33,18 +33,19 @@ from numba import NumbaPendingDeprecationWarning
 warnings.filterwarnings('ignore', '', NumbaPendingDeprecationWarning)
 
 
-def helper_knn_distance(indices1, indices2, distances2, val_def=-1.0):
+def helper_knn_distance(indices1, indices2, distances2):
     """
+    :param indices1: integer numpy array of sample indices of shape `(n1, )`
+    :param indices2: integer numpy array of sample indices of shape `(n2, )`
+    :param distances2: float numpy array of `k` nearest neighbor distances. Has shape `(n2, k)`
 
-    :param indices1: integer numpy array of sample indices.
-    :param indices2: integer numpy array of sample indices.
-    :param distances2: float numpy array of nearest neighbor distances.
-    :param val_def: default distance value.
-
-    :return: float numpy array of length equal to `indices1`.
+    :return: numpy array of `k` nearest neighbor distance corresponding to `indices1`. Has shape `(n1, k)`.
+             Distances are set to -1 when they are not available in `distances2`.
     """
-    ind_dist_map = dict(zip(indices2, distances2))
-    return np.array([ind_dist_map.get(i, val_def) for i in indices1], dtype=distances2.dtype)
+    n, k = distances2.shape
+    ind_dist_map = {indices2[j]: distances2[j, :] for j in range(n)}
+    val_def = -1 * np.ones(k)
+    return np.array([ind_dist_map.get(i, val_def) for i in indices1])
 
 
 class KNNIndex:
