@@ -242,7 +242,7 @@ def main():
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
     elif args.detection_method in ['lid', 'lid_class_cond']:
-        apply_dim_reduc = True
+        apply_dim_reduc = False
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
