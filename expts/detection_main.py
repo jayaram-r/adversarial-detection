@@ -443,6 +443,7 @@ def main():
                 max_iter=200,
                 balanced_classification=True,
                 n_jobs=args.n_jobs,
+                save_knn_indices_to_file=True,
                 seed_rng=args.seed
             )
             # Fit the detector on clean, noisy, and adversarial data from the training fold
@@ -451,10 +452,10 @@ def main():
                               layer_embeddings_noisy=layer_embeddings_tr_noisy,
                               labels_pred_noisy=labels_pred_tr_noisy)
             # Scores on clean data from the test fold
-            scores_adv1 = model_det.score(layer_embeddings_te, labels_pred_te)
+            scores_adv1 = model_det.score(layer_embeddings_te, labels_pred_te, cleanup=False)
 
             # Scores on adversarial data from the test fold
-            scores_adv2 = model_det.score(layer_embeddings_te_adv, labels_pred_te_adv)
+            scores_adv2 = model_det.score(layer_embeddings_te_adv, labels_pred_te_adv, cleanup=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 

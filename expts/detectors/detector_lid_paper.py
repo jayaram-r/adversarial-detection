@@ -379,9 +379,10 @@ class DetectorLIDClassCond:
                                         problem separating adversarial from non-adversarial samples.
         :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
                            is likely to increase the running time.
-        :param save_knn_indices_to_file: Set to True to save the KNN indices for each layer and for each class to
-                                         a file to reduce memory usage. This may not be needed when the data size is
-                                         small and/or when the number of layers is small.
+        :param save_knn_indices_to_file: Set to True in order to save the KNN indices from each layer and from each
+                                         class to a pickle file to reduce memory usage. This may not be needed when
+                                         the data size and/or the number of layers is small. It avoids potential
+                                         out-of-memory errors at the expense of time taken to write and read the files.
         :param seed_rng: int value specifying the seed for the random number generator. This is passed around to
                          all the classes/functions that require random number generation. Set this to a fixed value
                          for reproducible results.
@@ -694,7 +695,8 @@ class DetectorLIDClassCond:
                                  embeddings at layer `i`.
         :param labels_pred: numpy array with the predicted class labels for the samples in `layer_embeddings`.
         :param cleanup: If set to True, the temporary directory where the KNN index files are saved will be deleted
-                        after scoring. Set this to `False` in order to call this method multiple times.
+                        after scoring. If this method is to be called multiple times, set `cleanup = False` for all
+                        calls except the last one.
         :return:
             - numpy array of detection scores for the test samples. Has shape `(n, )` where `n` is the number of
               samples. Larger values correspond to a higher confidence that the sample is adversarial.
