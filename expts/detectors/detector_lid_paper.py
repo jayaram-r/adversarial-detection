@@ -17,7 +17,7 @@ import sys
 import logging
 import os
 import tempfile
-import shutil
+import subprocess
 from helpers.constants import (
     SEED_DEFAULT,
     NEIGHBORHOOD_CONST,
@@ -732,6 +732,6 @@ class DetectorLIDClassCond:
                 self.index_knn[i] = None
 
         if cleanup and self.save_knn_indices_to_file:
-            shutil.rmtree(self.temp_direc)
+            _ = subprocess.check_call(['rm', '-rf', self.temp_direc])
 
         return self.model_logistic.decision_function(features_lid)
