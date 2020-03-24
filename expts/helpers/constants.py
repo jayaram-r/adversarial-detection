@@ -98,5 +98,5 @@ NUM_RANDOM_SAMPLES = 20000
 # Number of bootstrap resamples
 NUM_BOOTSTRAP = 100
 
-COLORS = ['r', 'b', 'g', 'y', 'orange', 'm', 'lawngreen', 'steelblue', 'c', 'hotpink', 'grey',
+COLORS = ['r', 'b', 'g', 'y', 'orange', 'm', 'lawngreen', 'hotpink', 'c', 'grey', 'steelblue',
           'tan', 'lightsalmon', 'navy', 'gold']
