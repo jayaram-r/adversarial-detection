@@ -717,7 +717,7 @@ class DetectorLIDClassCond:
                 data_proj = layer_embeddings[i]
 
             if self.save_knn_indices_to_file:
-                logger.info("Loading the KNN indices per class from file")
+                # logger.info("Loading the KNN indices per class from file")
                 with open(self.temp_knn_files[i], 'rb') as fp:
                     self.index_knn[i] = pickle.load(fp)
 
