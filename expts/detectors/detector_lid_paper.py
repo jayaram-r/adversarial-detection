@@ -15,6 +15,9 @@ neighbors method for fast querying of neighbors from the full set of normal data
 import numpy as np
 import sys
 import logging
+import os
+import tempfile
+import subprocess
 from helpers.constants import (
     SEED_DEFAULT,
     NEIGHBORHOOD_CONST,
@@ -29,6 +32,10 @@ from helpers.knn_index import KNNIndex, helper_knn_distance
 from helpers.lid_estimators import lid_mle_amsaleg
 from helpers.utils import get_num_jobs
 from sklearn.linear_model import LogisticRegressionCV
+try:
+    import cPickle as pickle
+except:
+    import pickle
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
@@ -339,6 +346,7 @@ class DetectorLIDClassCond:
                  max_iter=200,
                  balanced_classification=True,
                  low_memory=False,
+                 save_knn_indices_to_file=True,
                  seed_rng=SEED_DEFAULT):
         """
 
@@ -371,6 +379,10 @@ class DetectorLIDClassCond:
                                         problem separating adversarial from non-adversarial samples.
         :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
                            is likely to increase the running time.
+        :param save_knn_indices_to_file: Set to True in order to save the KNN indices from each layer and from each
+                                         class to a pickle file to reduce memory usage. This may not be needed when
+                                         the data size and/or the number of layers is small. It avoids potential
+                                         out-of-memory errors at the expense of time taken to write and read the files.
         :param seed_rng: int value specifying the seed for the random number generator. This is passed around to
                          all the classes/functions that require random number generation. Set this to a fixed value
                          for reproducible results.
@@ -387,6 +399,7 @@ class DetectorLIDClassCond:
         self.max_iter = max_iter
         self.balanced_classification = balanced_classification
         self.low_memory = low_memory
+        self.save_knn_indices_to_file = save_knn_indices_to_file
         self.seed_rng = seed_rng
 
         np.random.seed(self.seed_rng)
@@ -422,6 +435,9 @@ class DetectorLIDClassCond:
         self.index_knn = None
         # Logistic classification model for normal vs. adversarial
         self.model_logistic = None
+        # Temporary directory to save the KNN index files
+        self.temp_direc = None
+        self.temp_knn_files = None
 
     def fit(self, layer_embeddings_normal, labels_normal, labels_pred_normal,
             layer_embeddings_adversarial, labels_pred_adversarial,
@@ -520,6 +536,11 @@ class DetectorLIDClassCond:
         if not all([layer_embeddings_adversarial[i].shape[0] == self.n_samples[2] for i in range(self.n_layers)]):
             raise ValueError("Input 'layer_embeddings_adversarial' does not have the expected format")
 
+        if self.save_knn_indices_to_file:
+            # Create a temporary directory for saving the KNN indices
+            self.temp_direc = tempfile.mkdtemp(dir=os.getcwd())
+            self.temp_knn_files = [''] * self.n_layers
+
         # KNN indices for the layer embeddings from each layer and each class
         self.index_knn = [dict() for _ in range(self.n_layers)]
         features_lid_normal = np.zeros((self.n_samples[0], self.n_layers))
@@ -600,6 +621,15 @@ class DetectorLIDClassCond:
                     _, nn_distances = self.index_knn[i][c].query(temp_arr, k=self.n_neighbors_per_class[c])
                     features_lid_adversarial[self.indices_pred_adver[c], i] = lid_mle_amsaleg(nn_distances)
 
+            if self.save_knn_indices_to_file:
+                logger.info("Saving the KNN indices per class from layer {:d} to a pickle file".format(i + 1))
+                self.temp_knn_files[i] = os.path.join(self.temp_direc, 'knn_indices_layer_{:d}.pkl'.format(i + 1))
+                with open(self.temp_knn_files[i], 'wb') as fp:
+                    pickle.dump(self.index_knn[i], fp)
+
+                # Free up the allocated memory
+                self.index_knn[i] = None
+
         # LID feature vectors and labels for the binary logistic classifier.
         # Normal and noisy samples are given label 0 and adversarial samples are given label 1
         n_pos = features_lid_adversarial.shape[0]
@@ -655,7 +685,7 @@ class DetectorLIDClassCond:
         else:
             return self, scores_normal, scores_adversarial
 
-    def score(self, layer_embeddings, labels_pred):
+    def score(self, layer_embeddings, labels_pred, cleanup=True):
         """
         Given a list of layer embeddings for test samples, extract the layer-wise LID feature vector and return the
         decision function of the logistic classifier.
@@ -664,6 +694,9 @@ class DetectorLIDClassCond:
                                  `(n, d_i)`, where `n` is the number of samples and `d_i` is the dimension of the
                                  embeddings at layer `i`.
         :param labels_pred: numpy array with the predicted class labels for the samples in `layer_embeddings`.
+        :param cleanup: If set to True, the temporary directory where the KNN index files are saved will be deleted
+                        after scoring. If this method is to be called multiple times, set `cleanup = False` for all
+                        calls except the last one.
         :return:
             - numpy array of detection scores for the test samples. Has shape `(n, )` where `n` is the number of
               samples. Larger values correspond to a higher confidence that the sample is adversarial.
@@ -683,10 +716,22 @@ class DetectorLIDClassCond:
             else:
                 data_proj = layer_embeddings[i]
 
+            if self.save_knn_indices_to_file:
+                # logger.info("Loading the KNN indices per class from file")
+                with open(self.temp_knn_files[i], 'rb') as fp:
+                    self.index_knn[i] = pickle.load(fp)
+
             for c in self.labels_unique:
                 ind = np.where(labels_pred == c)[0]
                 if ind.shape[0]:
                     _, nn_distances = self.index_knn[i][c].query(data_proj[ind, :], k=self.n_neighbors_per_class[c])
                     features_lid[ind, i] = lid_mle_amsaleg(nn_distances)
+
+            if self.save_knn_indices_to_file:
+                # Free up the allocated memory
+                self.index_knn[i] = None
+
+        if cleanup and self.save_knn_indices_to_file:
+            _ = subprocess.check_call(['rm', '-rf', self.temp_direc])
 
         return self.model_logistic.decision_function(features_lid)
