@@ -11,6 +11,17 @@ Note that this implementation does not use the mini-batching method to estimate 
 Since the main utility of mini-batching was for computational efficiency, we instead use the approximate nearest
 neighbors method for fast querying of neighbors from the full set of normal data.
 
+We also implement an extension of their method (see class `DetectorLIDClassCond`) that estimates LID values (at each
+layer) specific to each class manifold. For a test sample, the LID estimate is based on the non-adversarial samples
+from its predicted class. This method improves the performance of the detector significantly.
+
+Other notes on the implementation:
+- Min-max scaling of LID features used as done in their code repo
+- 5-fold stratified cross-validation used to search for the best weight regularization coefficient.
+- Area under the ROC curve is used as the metric for cross-validation.
+- To handle class imbalance (adversarial vs. non-adversarial), the implmentation allows the classes to be balanced
+by assigning sample weights.
+
 """
 import numpy as np
 import sys
