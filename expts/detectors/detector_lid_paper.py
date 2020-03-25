@@ -32,6 +32,7 @@ from helpers.knn_index import KNNIndex, helper_knn_distance
 from helpers.lid_estimators import lid_mle_amsaleg
 from helpers.utils import get_num_jobs
 from sklearn.linear_model import LogisticRegressionCV
+from sklearn.preprocessing import MinMaxScaler
 try:
     import cPickle as pickle
 except:
@@ -127,6 +128,7 @@ class DetectorLID:
         self.n_samples = []
         self.index_knn = None
         self.model_logistic = None
+        self.scaler = None
 
     def fit(self, layer_embeddings_normal, layer_embeddings_adversarial, layer_embeddings_noisy=None):
         """
@@ -263,6 +265,9 @@ class DetectorLID:
         ind_perm = np.random.permutation(labels.shape[0])
         features_lid = features_lid[ind_perm, :]
         labels = labels[ind_perm]
+        # Min-max scaling for the LID features
+        self.scaler = MinMaxScaler().fit(features_lid)
+        features_lid = self.scaler.transform(features_lid)
         logger.info("Training a binary logistic classifier with {:d} samples and {:d} LID features.".
                     format(*features_lid.shape))
         logger.info("Using {:d}-fold cross-validation with area under ROC curve as the metric to select "
@@ -330,6 +335,7 @@ class DetectorLID:
             _, nn_distances = self.index_knn[i].query(data_proj, k=self.n_neighbors)
             features_lid[:, i] = lid_mle_amsaleg(nn_distances)
 
+        features_lid = self.scaler.transform(features_lid)
         return self.model_logistic.decision_function(features_lid)
 
 
@@ -435,6 +441,8 @@ class DetectorLIDClassCond:
         self.index_knn = None
         # Logistic classification model for normal vs. adversarial
         self.model_logistic = None
+        # Feature scaler
+        self.scaler = None
         # Temporary directory to save the KNN index files
         self.temp_direc = None
         self.temp_knn_files = None
@@ -649,6 +657,9 @@ class DetectorLIDClassCond:
         ind_perm = np.random.permutation(labels_bin.shape[0])
         features_lid = features_lid[ind_perm, :]
         labels_bin = labels_bin[ind_perm]
+        # Min-max scaling for the LID features
+        self.scaler = MinMaxScaler().fit(features_lid)
+        features_lid = self.scaler.transform(features_lid)
         logger.info("Training a binary logistic classifier with {:d} samples and {:d} LID features.".
                     format(*features_lid.shape))
         logger.info("Using {:d}-fold cross-validation with area under ROC curve as the metric to select "
@@ -734,4 +745,5 @@ class DetectorLIDClassCond:
         if cleanup and self.save_knn_indices_to_file:
             _ = subprocess.check_call(['rm', '-rf', self.temp_direc])
 
+        features_lid = self.scaler.transform(features_lid)
         return self.model_logistic.decision_function(features_lid)
