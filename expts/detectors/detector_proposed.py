@@ -20,7 +20,7 @@ from helpers.dimension_reduction_methods import (
     load_dimension_reduction_models
 )
 from helpers.utils import log_sum_exp
-from pvalue_estimation import (
+from detectors.pvalue_estimation import (
     pvalue_score,
     pvalue_score_all_pairs
 )

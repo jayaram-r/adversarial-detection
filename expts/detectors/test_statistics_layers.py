@@ -22,7 +22,7 @@ from helpers.dimension_reduction_methods import (
     pca_wrapper,
     helper_reconstruction_error
 )
-from pvalue_estimation import (
+from detectors.pvalue_estimation import (
     pvalue_score,
     pvalue_score_all_pairs
 )

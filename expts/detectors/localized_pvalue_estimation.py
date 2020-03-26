@@ -25,7 +25,7 @@ from helpers.constants import (
     SEED_DEFAULT,
     METRIC_DEF
 )
-from pvalue_estimation import pvalue_score
+from detectors.pvalue_estimation import pvalue_score
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
