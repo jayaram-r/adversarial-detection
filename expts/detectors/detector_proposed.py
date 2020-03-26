@@ -26,7 +26,8 @@ from detectors.test_statistics_layers import (
     MultinomialScore,
     BinomialScore,
     LIDScore,
-    LLEScore
+    LLEScore,
+    DistanceScore
 )
 from helpers.density_model_layer_statistics import (
     train_log_normal_mixture,
