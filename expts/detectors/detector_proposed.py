@@ -439,6 +439,17 @@ class DetectorLayerStatistics:
                     low_memory=self.low_memory,
                     seed_rng=self.seed_rng
                 )
+            elif self.layer_statistic == 'distance':
+                ts_obj = DistanceScore(
+                    neighborhood_constant=self.neighborhood_constant,
+                    n_neighbors=self.n_neighbors,
+                    metric=self.metric,
+                    metric_kwargs=self.metric_kwargs,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
 
             test_stats_temp, pvalues_temp = ts_obj.fit(
                 data_proj, labels, labels_pred, labels_unique=self.labels_unique, **kwargs_fit

@@ -136,15 +136,20 @@ class averaged_KLPE_anomaly_detection:
         # Compute the distance statistic for every data point
         self.dist_stat_nominal = self.distance_statistic(data, exclude_self=True)
 
-    def score(self, data_test, exclude_self=False):
+    def score(self, data_test, exclude_self=False, return_distances=False):
         """
         Calculate the anomaly score which is the negative log of the empirical p-value of the averaged KNN distance.
 
         :param data_test: numpy data array of shape `(N, d)`, where `N` is the number of samples and `d` is the
                           number of dimensions (features).
         :param exclude_self: Set to True if the points in `data` were already used to build the KNN index.
-        :return score: numpy array of shape `(n, 1)` containing the score for each point. Points with higher score
-                       are more likely to be anomalous.
+        :param return_distances: Set to True in order to include the distance statistics along with the negative
+                                 log p-value scores in the returned tuple.
+        :return
+            score: numpy array of shape `(N, )` containing the score for each point. Points with higher score are
+                   more likely to be anomalous.
+            Returned only if `return_distances` is set to True.
+            dist: numpy array of shape `(N, )` containing the distance statistic for each point.
         """
         # Standardize the data if required
         if self.standardize:
@@ -153,7 +158,11 @@ class averaged_KLPE_anomaly_detection:
         # Calculate the k-nearest neighbors based distance statistic
         dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
         # Negative log of the empirical p-value
-        return pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
+        p = pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
+        if return_distances:
+            return p, dist_stat_test
+        else:
+            return p
 
     def distance_statistic(self, data, exclude_self=False):
         """
