@@ -20,9 +20,11 @@ from helpers.dimension_reduction_methods import (
     load_dimension_reduction_models
 )
 from helpers.utils import log_sum_exp
-from detectors.test_statistics_layers import (
+from pvalue_estimation import (
     pvalue_score,
-    pvalue_score_all_pairs,
+    pvalue_score_all_pairs
+)
+from detectors.test_statistics_layers import (
     MultinomialScore,
     BinomialScore,
     LIDScore,
