@@ -998,8 +998,9 @@ class DistanceScore(TestStatistic):
                 '''
                 # Average distance values for samples not labeled as class `c`
                 ind_comp = np.where(labels != c)[0]
-                _, dist = self.klpe_models_true[c].score(features[ind_comp, :], return_distances=True)
-                self.distances_avg_train[ind_comp, i + 1] = dist
+                self.distances_avg_train[ind_comp, i + 1] = self.klpe_models_true[c].distance_statistic(
+                    features[ind_comp, :]
+                )
                 '''
             else:
                 raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
