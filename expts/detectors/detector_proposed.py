@@ -20,13 +20,16 @@ from helpers.dimension_reduction_methods import (
     load_dimension_reduction_models
 )
 from helpers.utils import log_sum_exp
-from detectors.test_statistics_layers import (
+from detectors.pvalue_estimation import (
     pvalue_score,
-    pvalue_score_all_pairs,
+    pvalue_score_all_pairs
+)
+from detectors.test_statistics_layers import (
     MultinomialScore,
     BinomialScore,
     LIDScore,
-    LLEScore
+    LLEScore,
+    DistanceScore
 )
 from helpers.density_model_layer_statistics import (
     train_log_normal_mixture,
@@ -430,6 +433,17 @@ class DetectorLayerStatistics:
                 )
             elif self.layer_statistic == 'lle':
                 ts_obj = LLEScore(
+                    neighborhood_constant=self.neighborhood_constant,
+                    n_neighbors=self.n_neighbors,
+                    metric=self.metric,
+                    metric_kwargs=self.metric_kwargs,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+            elif self.layer_statistic == 'distance':
+                ts_obj = DistanceScore(
                     neighborhood_constant=self.neighborhood_constant,
                     n_neighbors=self.n_neighbors,
                     metric=self.metric,

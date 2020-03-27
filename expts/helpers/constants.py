@@ -66,7 +66,7 @@ METHOD_NAME_MAP = {
 }
 
 # List of layerwise test statistics supported by the proposed method
-TEST_STATS_SUPPORTED = ['multinomial', 'binomial', 'lid', 'lle']
+TEST_STATS_SUPPORTED = ['multinomial', 'binomial', 'lid', 'lle', 'distance']
 
 # Score type used by the proposed method
 SCORE_TYPES = ['density', 'pvalue', 'klpe']

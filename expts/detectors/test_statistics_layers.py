@@ -11,6 +11,7 @@ from numba import njit, prange
 from scipy.stats import binom
 import logging
 import copy
+from sklearn.preprocessing import MinMaxScaler
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
 from helpers.multinomial import (
@@ -22,6 +23,11 @@ from helpers.dimension_reduction_methods import (
     pca_wrapper,
     helper_reconstruction_error
 )
+from detectors.pvalue_estimation import (
+    pvalue_score,
+    pvalue_score_all_pairs
+)
+from detectors.localized_pvalue_estimation import averaged_KLPE_anomaly_detection
 from helpers.utils import get_num_jobs
 from helpers.constants import (
     NEIGHBORHOOD_CONST,
@@ -33,123 +39,6 @@ from helpers.constants import (
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
-
-
-# numba version
-@njit(parallel=True)
-def pvalue_score(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=NUM_BOOTSTRAP):
-    """
-    Calculate the empirical p-values of the observed scores `scores_obs` with respect to the scores from the
-    null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
-
-    :param scores_null: numpy array of shape `(m, )` with the scores from the null distribution.
-    :param scores_obs: numpy array of shape `(n, )` with the observed scores.
-    :param log_transform: set to True to apply negative log transform to the p-values.
-    :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
-    :param n_bootstrap: number of bootstrap resamples to use.
-    :param n_jobs: number of jobs to execute in parallel.
-
-    :return: numpy array with the p-values or negative-log-transformed p-values. Has the same shape as `scores_obs`.
-    """
-    eps = 1e-16
-    n_samp = scores_null.shape[0]
-    n_obs = scores_obs.shape[0]
-    p = np.zeros(n_obs)
-    for i in prange(n_obs):
-        for j in range(n_samp):
-            if scores_null[j] >= scores_obs[i]:
-                p[i] += 1.
-
-        p[i] = p[i] / n_samp
-
-    if bootstrap:
-        ind_null_repl = np.random.choice(np.arange(n_samp), size=(n_bootstrap, n_samp), replace=True)
-        p_sum = p
-        for b in prange(n_bootstrap):
-            p_curr = np.zeros(n_obs)
-            for i in range(n_obs):
-                for j in ind_null_repl[b, :]:
-                    if scores_null[j] >= scores_obs[i]:
-                        p_curr[i] += 1.
-
-                p_curr[i] = p_curr[i] / n_samp
-
-            p_sum += p_curr
-
-        # Average p-value from the bootstrap replications
-        p = p_sum / (n_bootstrap + 1.)
-
-    p[p < eps] = eps
-    if log_transform:
-        return -np.log(p)
-    else:
-        return p
-
-
-@njit(parallel=True)
-def pvalue_score_bivar(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=NUM_BOOTSTRAP):
-    """
-    Calculate the empirical p-values of the bivariate observed scores `scores_obs` with respect to the scores from
-    the null distribution `scores_null`. Bootstrap resampling can be used to get better estimates of the p-values.
-
-    :param scores_null: numpy array of shape `(m, 2)` with the scores from the null distribution.
-    :param scores_obs: numpy array of shape `(n, 2)` with the observed scores.
-    :param log_transform: set to True to apply negative log transform to the p-values.
-    :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
-    :param n_bootstrap: number of bootstrap resamples to use.
-    :param n_jobs: number of jobs to execute in parallel.
-
-    :return: numpy array with the p-values or negative-log-transformed p-values. Has shape `(scores_obs.shape[0], )`.
-    """
-    eps = 1e-16
-    n_samp = scores_null.shape[0]
-    n_obs = scores_obs.shape[0]
-    p = np.zeros(n_obs)
-    for i in prange(n_obs):
-        for j in range(n_samp):
-            if (scores_null[j, 0] >= scores_obs[i, 0]) and (scores_null[j, 1] >= scores_obs[i, 1]):
-                p[i] += 1.
-
-        p[i] = p[i] / n_samp
-
-    if bootstrap:
-        ind_null_repl = np.random.choice(np.arange(n_samp), size=(n_bootstrap, n_samp), replace=True)
-        p_sum = p
-        for b in prange(n_bootstrap):
-            p_curr = np.zeros(n_obs)
-            for i in range(n_obs):
-                for j in ind_null_repl[b, :]:
-                    if (scores_null[j, 0] >= scores_obs[i, 0]) and (scores_null[j, 1] >= scores_obs[i, 1]):
-                        p_curr[i] += 1.
-
-                p_curr[i] = p_curr[i] / n_samp
-
-            p_sum += p_curr
-
-        # Average p-value from the bootstrap replications
-        p = p_sum / (n_bootstrap + 1.)
-
-    p[p < eps] = eps
-    if log_transform:
-        return -np.log(p)
-    else:
-        return p
-
-
-def pvalue_score_all_pairs(scores_null, scores_obs, log_transform=False, bootstrap=True, n_bootstrap=NUM_BOOTSTRAP):
-    n_obs, n_feat = scores_obs.shape
-    n_pairs = int(0.5 * n_feat * (n_feat - 1))
-    p_vals = np.zeros((n_obs, n_pairs))
-    k = 0
-    for i in range(n_feat - 1):
-        for j in range(i + 1, n_feat):
-            p_vals[:, k] = pvalue_score_bivar(
-                scores_null[:, [i, j]], scores_obs[:, [i, j]], log_transform=log_transform,
-                bootstrap=bootstrap, n_bootstrap=n_bootstrap
-            )
-            k += 1
-
-    return p_vals
 
 
 class TestStatistic(ABC):
@@ -995,6 +884,189 @@ class LIDScore(TestStatistic):
                 # Precomputed LID estimates
                 scores[:, i + 1] = self.lid_estimates_train[:, i + 1]
                 # p-value of the LID estimates
+                p_values[:, i + 1] = pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap
+                )
+
+        return scores, p_values
+
+
+class DistanceScore(TestStatistic):
+    """
+    Average distance statistic from the k/2 to 3k/2 nearest neighbors of each point. This statistic is used in the
+    localized p-value estimation paper.
+    Qian, Jing, and Venkatesh Saligrama. "New statistic in p-value estimation for anomaly detection."
+    IEEE Statistical Signal Processing Workshop (SSP). IEEE, 2012.
+    """
+    def __init__(self, **kwargs):
+        super(DistanceScore, self).__init__(
+            neighborhood_constant=kwargs.get('neighborhood_constant', NEIGHBORHOOD_CONST),
+            n_neighbors=kwargs.get('n_neighbors', None),
+            metric=kwargs.get('metric', METRIC_DEF),
+            metric_kwargs=kwargs.get('metric_kwargs', None),
+            shared_nearest_neighbors=False,     # Intentionally set to False
+            approx_nearest_neighbors=kwargs.get('approx_nearest_neighbors', True),
+            n_jobs=kwargs.get('n_jobs', 1),
+            low_memory=kwargs.get('low_memory', False),
+            seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
+        )
+
+        # Feature scaler
+        self.scaler = None
+        # Localize p-value estimation models for the set of samples from each predicted and true class
+        self.klpe_models_pred = dict()
+        self.klpe_models_true = dict()
+        # Average distance score for the train samples
+        self.distances_avg_train = None
+        # Scores on the training data
+        self.scores_train = None
+        # Index of train samples from each class based on the true class and predicted class
+        self.indices_true = dict()
+        self.indices_pred = dict()
+
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False):
+        """
+        Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
+
+        :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                         dimension respectively.
+        :param labels: numpy array of shape `(N, )` with the true labels per sample.
+        :param labels_pred: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
+                              be supplied as input during repeated calls to avoid having the find the unique
+                              labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap here makes it faster.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
+        """
+        set_n_neighbors = True if (self.n_neighbors is None) else False
+        # `fit` method of the super class
+        super(DistanceScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
+
+        # Scale the individual feature values to the range [0, 1]
+        self.scaler = MinMaxScaler().fit(features)
+        features = self.scaler.transform(features)
+
+        # Column 0 corresponds to the average distance conditioned on the predicted class.
+        # Column `i` for `i = 1, 2, . . .` correspond to the average distance conditioned on the true class
+        # being `i - 1`
+        self.distances_avg_train = np.zeros((self.n_train, 1 + self.n_classes))
+        kwargs_lpe = {
+            'standardize': False,
+            'metric': self.metric,
+            'metric_kwargs': self.metric_kwargs,
+            'approx_nearest_neighbors': self.approx_nearest_neighbors,
+            'n_jobs': self.n_jobs,
+            'seed_rng': self.seed_rng
+        }
+        if set_n_neighbors:
+            # number of neighbors is set based on the number of samples per class
+            kwargs_lpe['neighborhood_constant'] = self.neighborhood_constant
+        else:
+            kwargs_lpe['n_neighbors'] = self.n_neighbors
+
+        for i, c in enumerate(self.labels_unique):
+            logger.info("Fitting localized p-value estimation models for class {}:".format(c))
+            # Samples predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            self.indices_pred[c] = ind
+            if ind.shape[0]:
+                self.klpe_models_pred[c] = averaged_KLPE_anomaly_detection(**kwargs_lpe)
+                self.klpe_models_pred[c].fit(features[ind, :])
+                self.distances_avg_train[ind, 0] = self.klpe_models_pred[c].dist_stat_nominal
+            else:
+                raise ValueError("No predicted samples from class '{}'. Cannot proceed.".format(c))
+
+            # Labeled samples from class `c`
+            ind = np.where(labels == c)[0]
+            self.indices_true[c] = ind
+            if ind.shape[0]:
+                self.klpe_models_true[c] = averaged_KLPE_anomaly_detection(**kwargs_lpe)
+                self.klpe_models_true[c].fit(features[ind, :])
+                self.distances_avg_train[ind, i + 1] = self.klpe_models_true[c].dist_stat_nominal
+
+                # Commenting this block out to avoid unneccessary computation.
+                # The average distance for these samples is not used anywhere else.
+                '''
+                # Average distance values for samples not labeled as class `c`
+                ind_comp = np.where(labels != c)[0]
+                self.distances_avg_train[ind_comp, i + 1] = self.klpe_models_true[c].distance_statistic(
+                    features[ind_comp, :]
+                )
+                '''
+            else:
+                raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
+
+        # Calculate the scores and p-values for each sample
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
+        return self.scores_train, p_values
+
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
+        """
+        Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
+        each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
+
+        :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                              dimension respectively.
+        :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param log_transform: Set to True to apply negative log transformation to the p-values.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
+
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
+        """
+        n_test = labels_pred_test.shape[0]
+        if not is_train:
+            if self.scaler is not None:
+                features_test = self.scaler.transform(features_test)
+
+        scores = np.zeros((n_test, 1 + self.n_classes))
+        p_values = np.zeros((n_test, 1 + self.n_classes))
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
+        cnt_par = 0
+        for c_hat in preds_unique:
+            # Index of samples predicted into class `c_hat`
+            ind = np.where(labels_pred_test == c_hat)[0]
+            if ind.shape[0]:
+                if not is_train:
+                    # Average distances and corresponding negative log p-values
+                    p_values[ind, 0], scores[ind, 0] = self.klpe_models_pred[c_hat].score(features_test[ind, :],
+                                                                                          return_distances=True)
+                else:
+                    # Precomputed average distances
+                    scores[ind, 0] = self.distances_avg_train[ind, 0]
+                    # Negative log p-values
+                    p_values[ind, 0] = pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
+                    )
+
+                cnt_par += ind.shape[0]
+                if cnt_par >= n_test:
+                    break
+
+        for i, c in enumerate(self.labels_unique):
+            if not is_train:
+                # Average distances and corresponding negative log p-values
+                p_values[:, i + 1], scores[:, i + 1] = self.klpe_models_true[c].score(features_test,
+                                                                                      return_distances=True)
+            else:
+                # Precomputed average distances
+                scores[:, i + 1] = self.distances_avg_train[:, i + 1]
+                # Negative log p-values
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
                     bootstrap=bootstrap
