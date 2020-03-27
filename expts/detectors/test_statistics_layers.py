@@ -11,6 +11,7 @@ from numba import njit, prange
 from scipy.stats import binom
 import logging
 import copy
+from sklearn.preprocessing import MinMaxScaler
 from helpers.knn_index import KNNIndex
 from helpers.knn_classifier import neighbors_label_counts
 from helpers.multinomial import (
@@ -911,6 +912,8 @@ class DistanceScore(TestStatistic):
             seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
         )
 
+        # Feature scaler
+        self.scaler = None
         # Localize p-value estimation models for the set of samples from each predicted and true class
         self.klpe_models_pred = dict()
         self.klpe_models_true = dict()
@@ -948,12 +951,16 @@ class DistanceScore(TestStatistic):
         # `fit` method of the super class
         super(DistanceScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
+        # Scale the individual feature values to the range [0, 1]
+        self.scaler = MinMaxScaler().fit(features)
+        features = self.scaler.transform(features)
+
         # Column 0 corresponds to the average distance conditioned on the predicted class.
         # Column `i` for `i = 1, 2, . . .` correspond to the average distance conditioned on the true class
         # being `i - 1`
         self.distances_avg_train = np.zeros((self.n_train, 1 + self.n_classes))
-
         kwargs_lpe = {
+            'standardize': False,
             'metric': self.metric,
             'metric_kwargs': self.metric_kwargs,
             'approx_nearest_neighbors': self.approx_nearest_neighbors,
@@ -1022,6 +1029,10 @@ class DistanceScore(TestStatistic):
                       p-values of the scores.
         """
         n_test = labels_pred_test.shape[0]
+        if not is_train:
+            if self.scaler is not None:
+                features_test = self.scaler.transform(features_test)
+
         scores = np.zeros((n_test, 1 + self.n_classes))
         p_values = np.zeros((n_test, 1 + self.n_classes))
         preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]

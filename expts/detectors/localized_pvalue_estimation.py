@@ -20,6 +20,7 @@ from helpers.knn_index import KNNIndex
 from helpers.utils import get_num_jobs
 import logging
 from sklearn.metrics import pairwise_distances
+from sklearn.preprocessing import MinMaxScaler
 from helpers.constants import (
     NEIGHBORHOOD_CONST,
     SEED_DEFAULT,
@@ -92,7 +93,7 @@ class averaged_KLPE_anomaly_detection:
         self.low_memory = low_memory
         self.seed_rng = seed_rng
 
-        self.scale_data = None
+        self.scaler = None
         self.data_train = None
         self.neighborhood_range = None
         self.index_knn = None
@@ -107,7 +108,8 @@ class averaged_KLPE_anomaly_detection:
         """
         N, d = data.shape
         if self.standardize:
-            data = self.standardize_data(data)
+            self.scaler = MinMaxScaler().fit(data)
+            data = self.scaler.transform(data)
 
         if self.shared_nearest_neighbors:
             self.data_train = data
@@ -151,14 +153,11 @@ class averaged_KLPE_anomaly_detection:
             Returned only if `return_distances` is set to True.
             dist: numpy array of shape `(N, )` containing the distance statistic for each point.
         """
-        # Standardize the data if required
-        if self.standardize:
-            data_test = self.standardize_data(data_test)
-
         # Calculate the k-nearest neighbors based distance statistic
         dist_stat_test = self.distance_statistic(data_test, exclude_self=exclude_self)
         # Negative log of the empirical p-value
         p = pvalue_score(self.dist_stat_nominal, dist_stat_test, log_transform=True, bootstrap=True)
+
         if return_distances:
             return p, dist_stat_test
         else:
@@ -174,8 +173,12 @@ class averaged_KLPE_anomaly_detection:
         :return dist_stat: numpy array of distance statistic for each point.
         """
         if exclude_self:
+            # Data should be already scaled in the `fit` method
             nn_indices, nn_distances = self.index_knn.query_self(k=self.neighborhood_range[1])
         else:
+            if self.standardize:
+                data = self.scaler.transform(data)
+
             nn_indices, nn_distances = self.index_knn.query(data, k=self.neighborhood_range[1])
 
         if self.shared_nearest_neighbors:
@@ -213,17 +216,3 @@ class averaged_KLPE_anomaly_detection:
             pool_obj.join()
 
         return np.array(dist_stat)
-
-    def standardize_data(self, data):
-        # Scale the data to be in the range [-1, 1]
-        if self.scale_data is None:
-            v_min = np.min(data, axis=0)
-            v_max = np.max(data, axis=0)
-            mu = 0.5 * (v_min + v_max)
-            sig = 0.5 * (v_max - v_min)
-            sig[sig < sys.float_info.epsilon] = 1.
-            self.scale_data = (mu, sig)
-        else:
-            mu, sig = self.scale_data
-
-        return (data - mu) / sig
