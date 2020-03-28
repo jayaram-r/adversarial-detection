@@ -951,9 +951,9 @@ class DistanceScore(TestStatistic):
         # `fit` method of the super class
         super(DistanceScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
-        # Scale the individual feature values to the range [0, 1]
-        self.scaler = MinMaxScaler().fit(features)
-        features = self.scaler.transform(features)
+        # Scale the individual feature values to the range [-1, 1]
+        # self.scaler = MinMaxScaler().fit(features)
+        # features = self.scaler.transform(features)
 
         # Column 0 corresponds to the average distance conditioned on the predicted class.
         # Column `i` for `i = 1, 2, . . .` correspond to the average distance conditioned on the true class
