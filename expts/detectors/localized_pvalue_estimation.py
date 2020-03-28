@@ -108,7 +108,7 @@ class averaged_KLPE_anomaly_detection:
         """
         N, d = data.shape
         if self.standardize:
-            self.scaler = MinMaxScaler().fit(data)
+            self.scaler = MinMaxScaler(feature_range=(-1, 1)).fit(data)
             data = self.scaler.transform(data)
 
         if self.shared_nearest_neighbors:
