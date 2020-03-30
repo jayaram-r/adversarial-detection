@@ -12,7 +12,7 @@ from scipy.stats import binom
 import logging
 import copy
 from sklearn.preprocessing import MinMaxScaler
-from helpers.knn_index import KNNIndex
+from helpers.knn_index import KNNIndex, helper_knn_distance
 from helpers.knn_classifier import neighbors_label_counts
 from helpers.multinomial import (
     multinomial_estimation,
@@ -689,11 +689,9 @@ class LIDScore(TestStatistic):
         self.mean_data = None
         self.transform_pca = None
         # Number of neighbors can be set based on the number of samples per class if `self.n_neighbors = None`
-        self.n_neighbors_pred = dict()
-        self.n_neighbors_true = dict()
-        # KNN indices for the data points from each predicted class and true class
-        self.index_knn_pred = dict()
-        self.index_knn_true = dict()
+        self.n_neighbors_per_class = dict()
+        # KNN indices for the data points from each class
+        self.index_knn = dict()
         # LID estimates conditioned on different predicted and true classes for the train samples
         self.lid_estimates_train = None
         # Scores for the training data
@@ -744,51 +742,23 @@ class LIDScore(TestStatistic):
         # Column `i` for `i = 1, 2, . . .` correspond to the LID estimates conditioned on the true class being `i - 1`
         self.lid_estimates_train = np.zeros((self.n_train, 1 + self.n_classes))
 
-        logger.info("Building KNN indices for nearest neighbor queries from each predicted and each true class.")
+        logger.info("Building KNN indices for nearest neighbor queries from each class.")
         for i, c in enumerate(self.labels_unique):
             logger.info("Processing class {}:".format(c))
-            # Samples predicted into class `c`
-            ind = np.where(labels_pred == c)[0]
-            self.indices_pred[c] = ind
-            n_pred = ind.shape[0]
-            # Number of neighbors for the samples predicted into class `c`
-            if set_n_neighbors:
-                self.n_neighbors_pred[c] = int(np.ceil(n_pred ** self.neighborhood_constant))
-            else:
-                self.n_neighbors_pred[c] = self.n_neighbors
-
-            if n_pred:
-                # KNN index for the samples predicted into class `c`
-                self.index_knn_pred[c] = KNNIndex(
-                    features[ind, :], n_neighbors=self.n_neighbors_pred[c],
-                    metric=self.metric, metric_kwargs=self.metric_kwargs,
-                    shared_nearest_neighbors=self.shared_nearest_neighbors,
-                    approx_nearest_neighbors=self.approx_nearest_neighbors,
-                    n_jobs=self.n_jobs,
-                    low_memory=self.low_memory,
-                    seed_rng=self.seed_rng
-                )
-                # Indices and distances of the nearest neighbors of the points from `features[ind, :]`
-                _, nn_distances = self.index_knn_pred[c].query_self(k=self.n_neighbors_pred[c])
-                # LID estimates from the k nearest neighbor distances of each sample
-                self.lid_estimates_train[ind, 0] = lid_mle_amsaleg(nn_distances)
-            else:
-                raise ValueError("No predicted samples from class '{}'. Cannot proceed.".format(c))
-
             # Labeled samples from class `c`
             ind = np.where(labels == c)[0]
             self.indices_true[c] = ind
             n_true = ind.shape[0]
             # Number of neighbors for the labeled samples from class `c`
             if set_n_neighbors:
-                self.n_neighbors_true[c] = int(np.ceil(n_true ** self.neighborhood_constant))
+                self.n_neighbors_per_class[c] = int(np.ceil(n_true ** self.neighborhood_constant))
             else:
-                self.n_neighbors_true[c] = self.n_neighbors
+                self.n_neighbors_per_class[c] = self.n_neighbors
 
             if n_true:
                 # KNN index for the labeled samples from class `c`
-                self.index_knn_true[c] = KNNIndex(
-                    features[ind, :], n_neighbors=self.n_neighbors_true[c],
+                self.index_knn[c] = KNNIndex(
+                    features[ind, :], n_neighbors=self.n_neighbors_per_class[c],
                     metric=self.metric, metric_kwargs=self.metric_kwargs,
                     shared_nearest_neighbors=self.shared_nearest_neighbors,
                     approx_nearest_neighbors=self.approx_nearest_neighbors,
@@ -797,7 +767,7 @@ class LIDScore(TestStatistic):
                     seed_rng=self.seed_rng
                 )
                 # LID estimates for the labeled samples from class `c`
-                _, nn_distances = self.index_knn_true[c].query_self(k=self.n_neighbors_true[c])
+                _, nn_distances = self.index_knn[c].query_self(k=self.n_neighbors_per_class[c])
                 self.lid_estimates_train[ind, i + 1] = lid_mle_amsaleg(nn_distances)
 
                 # Commenting this block out to avoid unneccessary computation.
@@ -805,11 +775,33 @@ class LIDScore(TestStatistic):
                 '''
                 # LID estimates for the samples not labeled as class `c`
                 ind_comp = np.where(labels != c)[0]
-                _, nn_distances = self.index_knn_true[c].query(features[ind_comp, :], k=self.n_neighbors_true[c])
+                _, nn_distances = self.index_knn[c].query(features[ind_comp, :], k=self.n_neighbors_per_class[c])
                 self.lid_estimates_train[ind_comp, i + 1] = lid_mle_amsaleg(nn_distances)
                 '''
             else:
                 raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
+
+            # Samples predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            self.indices_pred[c] = ind
+            n_pred = ind.shape[0]
+            if n_pred:
+                # Distance to nearest neighbors of samples predicted into class `c` that are also labeled as
+                # class `c`. These samples will be a part of the KNN index
+                nn_distances = helper_knn_distance(self.indices_pred[c], self.indices_true[c], nn_distances)
+
+                # Distance to nearest neighbors of samples predicted into class `c` that are not labeled as
+                # class `c`. These samples will not be a part of the KNN index
+                mask = (nn_distances[:, 0] < 0.)
+                if np.any(mask):
+                    ind_comp = self.indices_pred[c][mask]
+                    _, temp_arr = self.index_knn[c].query(features[ind_comp, :], k=self.n_neighbors_per_class[c])
+                    nn_distances[mask, :] = temp_arr
+
+                # LID estimates from the k nearest neighbor distances of each sample
+                self.lid_estimates_train[ind, 0] = lid_mle_amsaleg(nn_distances)
+            else:
+                raise ValueError("No predicted samples from class '{}'. Cannot proceed.".format(c))
 
         # Calculate the scores and p-values for each sample
         self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
@@ -850,8 +842,8 @@ class LIDScore(TestStatistic):
             if ind.shape[0]:
                 if not is_train:
                     # LID estimate relative to the samples predicted into class `c_hat`
-                    _, nn_distances = self.index_knn_pred[c_hat].query(features_test[ind, :],
-                                                                       k=self.n_neighbors_pred[c_hat])
+                    _, nn_distances = self.index_knn[c_hat].query(features_test[ind, :],
+                                                                  k=self.n_neighbors_per_class[c_hat])
                     scores[ind, 0] = lid_mle_amsaleg(nn_distances)
                     # p-value of the LID estimates
                     p_values[ind, 0] = pvalue_score(
@@ -873,7 +865,7 @@ class LIDScore(TestStatistic):
         for i, c in enumerate(self.labels_unique):
             if not is_train:
                 # LID estimates relative to the samples labeled as class `c`
-                _, nn_distances = self.index_knn_true[c].query(features_test, k=self.n_neighbors_true[c])
+                _, nn_distances = self.index_knn[c].query(features_test, k=self.n_neighbors_per_class[c])
                 scores[:, i + 1] = lid_mle_amsaleg(nn_distances)
                 # p-value of the LID estimates
                 p_values[:, i + 1] = pvalue_score(
