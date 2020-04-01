@@ -56,7 +56,7 @@ def analyze_adversarial_samples(data_path, output_path, norm_type='inf'):
     lines = ['{}\t{}\n'.format('perc', 'value')]
     v = np.percentile(norm_diff, perc)
     print("\nTrain fold. Number of samples = {:d}".format(n_train + n_test))
-    print("Percentile of {}-norm values:")
+    print("Percentile of {}-norm values:".format(norm_type))
     for a, b in zip(perc, v):
         print("{:2d}\t{:.8f}".format(a, b))
         lines.append("{:2d}\t{:.8f}\n".format(a, b))
