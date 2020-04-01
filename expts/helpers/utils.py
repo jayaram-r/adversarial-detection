@@ -140,6 +140,8 @@ def get_path_dr_models(model_type, method_detection, test_statistic=None):
     fname = fname1
     if method_detection == 'proposed':
         if test_statistic in ['lid', 'lle']:
+            # Not a mistake. Projecting to a fixed dimension for the LID and LLE methods (using `fname2`) does
+            # not work well
             fname = fname1
         else:
             fname = fname1
