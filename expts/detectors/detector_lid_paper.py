@@ -66,6 +66,7 @@ class DetectorLID:
                  max_iter=200,
                  balanced_classification=True,
                  low_memory=False,
+                 save_knn_indices_to_file=True,
                  seed_rng=SEED_DEFAULT):
         """
 
@@ -98,6 +99,10 @@ class DetectorLID:
                                         problem separating adversarial from non-adversarial samples.
         :param low_memory: Set to True to enable the low memory option of the `NN-descent` method. Note that this
                            is likely to increase the running time.
+        :param save_knn_indices_to_file: Set to True in order to save the KNN indices from each layer to a pickle
+                                         file to reduce memory usage. This may not be needed when the data size
+                                         and/or the number of layers is small. It avoids potential out-of-memory
+                                         errors at the expense of time taken to write and read the files.
         :param seed_rng: int value specifying the seed for the random number generator. This is passed around to
                          all the classes/functions that require random number generation. Set this to a fixed value
                          for reproducible results.
@@ -114,6 +119,7 @@ class DetectorLID:
         self.max_iter = max_iter
         self.balanced_classification = balanced_classification
         self.low_memory = low_memory
+        self.save_knn_indices_to_file = save_knn_indices_to_file
         self.seed_rng = seed_rng
 
         np.random.seed(self.seed_rng)
@@ -140,6 +146,9 @@ class DetectorLID:
         self.index_knn = None
         self.model_logistic = None
         self.scaler = None
+        # Temporary directory to save the KNN index files
+        self.temp_direc = None
+        self.temp_knn_files = None
 
     def fit(self, layer_embeddings_normal, layer_embeddings_adversarial, layer_embeddings_noisy=None):
         """
@@ -202,6 +211,11 @@ class DetectorLID:
         if not all([layer_embeddings_adversarial[i].shape[0] == self.n_samples[2] for i in range(self.n_layers)]):
             raise ValueError("Input 'layer_embeddings_adversarial' does not have the expected format")
 
+        if self.save_knn_indices_to_file:
+            # Create a temporary directory for saving the KNN indices
+            self.temp_direc = tempfile.mkdtemp(dir=os.getcwd())
+            self.temp_knn_files = [''] * self.n_layers
+
         self.index_knn = [None for _ in range(self.n_layers)]
         features_lid_normal = np.zeros((self.n_samples[0], self.n_layers))
         features_lid_noisy = np.zeros((self.n_samples[1], self.n_layers))
@@ -256,6 +270,15 @@ class DetectorLID:
             nn_indices, nn_distances = self.index_knn[i].query(data_adver, k=self.n_neighbors)
             # LID estimates of the adversarial feature embeddings from this layer
             features_lid_adversarial[:, i] = lid_mle_amsaleg(nn_distances)
+
+            if self.save_knn_indices_to_file:
+                logger.info("Saving the KNN index from layer {:d} to a pickle file".format(i + 1))
+                self.temp_knn_files[i] = os.path.join(self.temp_direc, 'knn_index_layer_{:d}.pkl'.format(i + 1))
+                with open(self.temp_knn_files[i], 'wb') as fp:
+                    pickle.dump(self.index_knn[i], fp)
+
+                # Free up the allocated memory
+                self.index_knn[i] = None
 
         # Feature vector and labels for the binary logistic classifier.
         # Normal and noisy samples are given labels 0 and adversarial samples are given label 1
@@ -315,7 +338,7 @@ class DetectorLID:
         else:
             return self, scores_normal, scores_adversarial
 
-    def score(self, layer_embeddings):
+    def score(self, layer_embeddings, cleanup=True):
         """
         Given a list of layer embeddings for test samples, extract the layer-wise LID feature vector and return the
         decision function of the logistic classifier.
@@ -324,6 +347,9 @@ class DetectorLID:
                                  list is equal to the number of layers. The numpy array at index `i` has shape
                                  `(n, d_i)`, where `n` is the number of samples and `d_i` is the dimension of the
                                  embeddings at layer `i`.
+        :param cleanup: If set to True, the temporary directory where the KNN index files are saved will be deleted
+                        after scoring. If this method is to be called multiple times, set `cleanup = False` for all
+                        calls except the last one.
         :return:
             - numpy array of detection scores for the test samples. Has shape `(n, )` where `n` is the number of
               samples. Larger values correspond to a higher confidence that the sample is adversarial.
@@ -343,8 +369,18 @@ class DetectorLID:
             else:
                 data_proj = layer_embeddings[i]
 
+            if self.save_knn_indices_to_file:
+                with open(self.temp_knn_files[i], 'rb') as fp:
+                    self.index_knn[i] = pickle.load(fp)
+
             _, nn_distances = self.index_knn[i].query(data_proj, k=self.n_neighbors)
             features_lid[:, i] = lid_mle_amsaleg(nn_distances)
+
+            if self.save_knn_indices_to_file:
+                self.index_knn[i] = None
+
+        if cleanup and self.save_knn_indices_to_file:
+            _ = subprocess.check_call(['rm', '-rf', self.temp_direc])
 
         features_lid = self.scaler.transform(features_lid)
         return self.model_logistic.decision_function(features_lid)
