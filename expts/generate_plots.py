@@ -12,6 +12,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-dir', '-o', required=True, help='output directory with the performance '
                                                                   'metrics files')
+    parser.add_argument('--pos-label', '-p', default='adversarial',
+                        help='label for the positive class - e.g. adversarial or ood')
     args = parser.parse_args()
 
     methods = []
@@ -29,7 +31,7 @@ def main():
             results[m] = pickle.load(fp)
 
     if results:
-        plot_performance_comparison(results, args.output_dir, place_legend_outside=True)
+        plot_performance_comparison(results, args.output_dir, place_legend_outside=True, pos_label=args.pos_label)
     else:
         print("No performance metrics files were found in the specified output directory.")
 

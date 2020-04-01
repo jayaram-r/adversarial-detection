@@ -323,9 +323,9 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
 
 # TODO: Can we stratify by attack labels in order to subsample while preserving the same proportion of different
 #  attack methods as in the full sample?
-# TODO: Parallelize the calculation of metrics over the random samples.
 def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
-                                              num_random_samples=100, n_jobs=1, seed=SEED_DEFAULT, output_file=None):
+                                              num_random_samples=100, seed=SEED_DEFAULT, output_file=None,
+                                              max_pos_proportion=1.0):
     """
     Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
     For each proportion, the estimates are calculated from different random samples, and the median and confidence
@@ -336,10 +336,11 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     :param pos_label: postive class label; set to 1 by default.
     :param num_prop: number of positive proportion values to evaluate.
     :param num_random_samples: number of random samples to use for estimating the median and confidence interval.
-    :param n_jobs: number of cpu cores or processes to use in parallel.
     :param seed: seed for the random number generator.
     :param output_file: (optional) path to an output file where the metrics dict is written to using the
                         Pickle protocol.
+    :param max_pos_proportion: Maximum proportion of positive samples to include in the plots. Should be a float
+                               value between 0 and 1.
 
     :return: a dict with the proportion of positive samples and all the performance metrics.
     """
@@ -366,6 +367,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     p_min = max([max(5., np.ceil(0.005 * n_samp[i])) / n_samp[i] for i in range(n_folds)])
     # Maximum proportion of positive samples considering all the folds
     p_max = min([n_pos_max[i] / n_samp[i] for i in range(n_folds)])
+    p_max = min(p_max, max_pos_proportion)
     # Range of proportion of positive samples
     prop_range = np.unique(np.linspace(p_min, p_max, num=num_prop))
 
@@ -534,7 +536,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.close(fig)
 
 
-def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True):
+def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial'):
     """
     Plot the performance comparison for different detection methods.
 
@@ -542,13 +544,13 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
                          `metrics_varying_positive_class_proportion`).
     :param output_dir: path to the output directory where the plots are to be saved.
     :param place_legend_outside: Set to True to place the legend outside the plot area.
-
+    :param pos_label: string with the positive class label.
     :return: None
     """
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    x_label = '% positive samples'
+    x_label = '% {} samples'.format(pos_label)
     methods = sorted(results_dict.keys())
     # AUC plots
     plot_dict = dict()
