@@ -146,6 +146,8 @@ def main():
     parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
                         help="Which layer to use for the trust score calculation. Choices are: {}".
                         format(', '.join(LAYERS_TRUST_SCORE)))
+    parser.add_argument('--batch-lid', action='store_true', default=False,
+                        help='Use this option to enable batched, faster version of the LID detector')
     parser.add_argument('--num-neighbors', '--nn', type=int, default=-1,
                         help='Number of nearest neighbors (if applicable to the method). By default, this is set '
                              'to be a power of the number of samples (n): n^{:.1f}'.format(NEIGHBORHOOD_CONST))
@@ -410,16 +412,21 @@ def main():
             # the detector to skip noisy data
             layer_embeddings_tr_noisy = None
 
-            model_det = DetectorLID(
-                n_neighbors=n_neighbors,
-                skip_dim_reduction=(not apply_dim_reduc),
-                model_dim_reduction=model_dim_reduc,
-                max_iter=200,
-                balanced_classification=True,
-                n_jobs=args.n_jobs,
-                save_knn_indices_to_file=True,
-                seed_rng=args.seed
-            )
+            kwargs = {
+                'n_neighbors': n_neighbors,
+                'skip_dim_reduction': (not apply_dim_reduc),
+                'model_dim_reduction': model_dim_reduc,
+                'max_iter': 200,
+                'balanced_classification': True,
+                'n_jobs': args.n_jobs,
+                'save_knn_indices_to_file': True,
+                'seed_rng': args.seed
+            }
+            if args.batch_lid:
+                model_det = DetectorLIDBatch(n_batches=10, **kwargs)
+            else:
+                model_det = DetectorLID(**kwargs)
+
             # Fit the detector on clean, noisy, and adversarial data from the training fold
             _ = model_det.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
                               layer_embeddings_noisy=layer_embeddings_tr_noisy)
