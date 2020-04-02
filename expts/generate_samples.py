@@ -55,7 +55,7 @@ def main():
     parser.add_argument('--epsilon', type=float, default=0.3, help='epsilon value')
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
     parser.add_argument('--iterations', type=int, default=40, help='num. of iterations')
-    parser.add_argument('--max-epsilon', type=int, default=1, help='max. value of epsilon')
+    parser.add_argument('--max-epsilon', type=float, default=1., help='max. value of epsilon')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     args = parser.parse_args()
