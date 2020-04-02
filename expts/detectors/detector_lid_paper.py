@@ -308,13 +308,13 @@ class DetectorLID:
                     "the best regularization hyperparameter.".format(self.n_cv_folds))
         logger.info("Proportion of positive (adversarial or OOD) samples in the training data: {:.4f}".
                     format(pos_prop))
+        class_weight = None
         if self.balanced_classification:
-            class_weight = {0: 1.0 / (1 - pos_prop),
-                            1: 1.0 / pos_prop}
-            logger.info("Balancing the classes by assigning sample weight {:.4f} to class 0 and sample weight "
-                        "{:.4f} to class 1".format(class_weight[0], class_weight[1]))
-        else:
-            class_weight = None
+            if (pos_prop < 0.45) or (pos_prop > 0.55):
+                class_weight = {0: 1.0 / (1 - pos_prop),
+                                1: 1.0 / pos_prop}
+                logger.info("Balancing the classes by assigning sample weight {:.4f} to class 0 and sample weight "
+                            "{:.4f} to class 1".format(class_weight[0], class_weight[1]))
 
         self.model_logistic = LogisticRegressionCV(
             Cs=self.c_search_values,
@@ -384,6 +384,96 @@ class DetectorLID:
 
         features_lid = self.scaler.transform(features_lid)
         return self.model_logistic.decision_function(features_lid)
+
+
+class DetectorLIDBatch:
+    """
+    A faster version of `DetectorLID` that randomly splits up the non-adversarial data into a fixed number of batches.
+    It leverages the implementation of `DetectorLIDClassCond` by passing it randomly assigned labels and predicted
+    labels.
+    """
+    def __init__(self,
+                 n_batches=10,
+                 neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
+                 metric='euclidean', metric_kwargs=None,
+                 n_cv_folds=CROSS_VAL_SIZE,
+                 c_search_values=None,
+                 approx_nearest_neighbors=True,
+                 skip_dim_reduction=True,
+                 model_dim_reduction=None,
+                 n_jobs=1,
+                 max_iter=200,
+                 balanced_classification=True,
+                 low_memory=False,
+                 save_knn_indices_to_file=True,
+                 seed_rng=SEED_DEFAULT):
+        """
+
+        :param n_batches: (int) number of batches to create out of the non-adversarial data.
+        Rest of the parameters are the same as the class `DetectorLID`.
+        """
+        self.n_batches = n_batches
+        np.random.seed(seed_rng)
+
+        self.det_class_cond = DetectorLIDClassCond(
+            neighborhood_constant=neighborhood_constant, n_neighbors=n_neighbors,
+            metric=metric, metric_kwargs=metric_kwargs,
+            n_cv_folds=n_cv_folds,
+            c_search_values=c_search_values,
+            approx_nearest_neighbors=approx_nearest_neighbors,
+            skip_dim_reduction=skip_dim_reduction,
+            model_dim_reduction=model_dim_reduction,
+            n_jobs=n_jobs,
+            max_iter=max_iter,
+            balanced_classification=balanced_classification,
+            low_memory=low_memory,
+            save_knn_indices_to_file=save_knn_indices_to_file,
+            seed_rng=seed_rng
+        )
+
+    def _gen_random_labels(self, n_samples):
+        m = int(np.round(float(n_samples) / self.n_batches))
+        arr = []
+        for i in range(self.n_batches):
+            arr.extend([i] * m)
+
+        labels = np.array(arr[:n_samples], dtype=np.int)
+        np.random.shuffle(labels)
+
+        return labels
+
+    def fit(self, layer_embeddings_normal, layer_embeddings_adversarial, layer_embeddings_noisy=None):
+        """
+        Same inputs and output as the `fit` method of the class `DetectorLID`.
+        """
+        n_normal = layer_embeddings_normal[0].shape[0]
+        labels_normal = self._gen_random_labels(n_normal)
+        labels_pred_normal = labels_normal
+
+        labels_pred_noisy = None
+        if layer_embeddings_noisy is not None:
+            n_noisy = layer_embeddings_noisy[0].shape[0]
+            if n_noisy == n_normal:
+                labels_pred_noisy = labels_pred_normal
+            else:
+                labels_pred_noisy = self._gen_random_labels(n_noisy)
+
+        n_adver = layer_embeddings_adversarial[0].shape[0]
+        labels_pred_adver = self._gen_random_labels(n_adver)
+
+        return self.det_class_cond.fit(layer_embeddings_normal, labels_normal, labels_pred_normal,
+                                       layer_embeddings_adversarial, labels_pred_adver,
+                                       layer_embeddings_noisy=layer_embeddings_noisy,
+                                       labels_pred_noisy=labels_pred_noisy)
+
+    def score(self, layer_embeddings, cleanup=True):
+        """
+        Same inputs and output as the `score` method of the class `DetectorLID`.
+        """
+        n_test = layer_embeddings[0].shape[0]
+        labels_pred = self._gen_random_labels(n_test)
+
+        return self.det_class_cond.score(layer_embeddings, labels_pred, cleanup=cleanup)
 
 
 class DetectorLIDClassCond:
@@ -713,13 +803,13 @@ class DetectorLIDClassCond:
                     "the best regularization hyperparameter.".format(self.n_cv_folds))
         logger.info("Proportion of positive (adversarial or OOD) samples in the training data: {:.4f}".
                     format(pos_prop))
+        class_weight = None
         if self.balanced_classification:
-            class_weight = {0: 1.0 / (1 - pos_prop),
-                            1: 1.0 / pos_prop}
-            logger.info("Balancing the classes by assigning sample weight {:.4f} to class 0 and sample weight "
-                        "{:.4f} to class 1".format(class_weight[0], class_weight[1]))
-        else:
-            class_weight = None
+            if (pos_prop < 0.45) or (pos_prop > 0.55):
+                class_weight = {0: 1.0 / (1 - pos_prop),
+                                1: 1.0 / pos_prop}
+                logger.info("Balancing the classes by assigning sample weight {:.4f} to class 0 and sample weight "
+                            "{:.4f} to class 1".format(class_weight[0], class_weight[1]))
 
         self.model_logistic = LogisticRegressionCV(
             Cs=self.c_search_values,
