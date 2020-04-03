@@ -369,9 +369,11 @@ def main():
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
         print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-              "samples = {:.4f}".format(labels_tr.shape[0], num_adv_tr, (100. * num_adv_tr) / labels_tr.shape[0]))
+              "samples = {:.4f}".format(labels_tr.shape[0], num_adv_tr,
+                                        (100. * num_adv_tr) / (labels_tr.shape[0] + num_adv_tr)))
         print("Test fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-              "samples = {:.4f}".format(labels_te.shape[0], num_adv_te, (100. * num_adv_te) / labels_te.shape[0]))
+              "samples = {:.4f}".format(labels_te.shape[0], num_adv_te,
+                                        (100. * num_adv_te) / (labels_te.shape[0] + num_adv_te)))
         # Adversarial data loader for the train fold
         adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
                                                   device=device)
