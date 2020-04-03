@@ -944,7 +944,7 @@ class DistanceScore(TestStatistic):
         super(DistanceScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
 
         # Scale the individual feature values to the range [-1, 1]
-        # self.scaler = MinMaxScaler().fit(features)
+        # self.scaler = MinMaxScaler(feature_range=(-1, 1)).fit(features)
         # features = self.scaler.transform(features)
 
         # Column 0 corresponds to the average distance conditioned on the predicted class.
@@ -1059,6 +1059,274 @@ class DistanceScore(TestStatistic):
                 # Precomputed average distances
                 scores[:, i + 1] = self.distances_avg_train[:, i + 1]
                 # Negative log p-values
+                p_values[:, i + 1] = pvalue_score(
+                    scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap
+                )
+
+        return scores, p_values
+
+
+class TrustScore(TestStatistic):
+    """
+    Test statistic based on the trust score at each layer of the DNN.
+    """
+    def __init__(self, **kwargs):
+        super(TrustScore, self).__init__(
+            neighborhood_constant=kwargs.get('neighborhood_constant', NEIGHBORHOOD_CONST),
+            n_neighbors=kwargs.get('n_neighbors', None),
+            metric=kwargs.get('metric', METRIC_DEF),
+            metric_kwargs=kwargs.get('metric_kwargs', None),
+            shared_nearest_neighbors=False,     # Intentionally set to False
+            approx_nearest_neighbors=kwargs.get('approx_nearest_neighbors', True),
+            n_jobs=kwargs.get('n_jobs', 1),
+            low_memory=kwargs.get('low_memory', False),
+            seed_rng=kwargs.get('seed_rng', SEED_DEFAULT)
+        )
+
+        # Feature scaler
+        self.scaler = None
+        # Number of neighbors is set based on the number of samples per class if `self.n_neighbors = None`
+        self.n_neighbors_pred = dict()
+        self.n_neighbors_true = dict()
+        # KNN indices for the data points from each predicted class and true class
+        self.index_knn_pred = dict()
+        self.index_knn_true = dict()
+        # Distance ratio similar to the trust score calculated on the training data
+        self.distance_ratio_train = None
+        # Scores for the training data
+        self.scores_train = None
+        # Index of train samples from each class based on the true class and predicted class
+        self.indices_true = dict()
+        self.indices_pred = dict()
+
+    def fit(self, features, labels, labels_pred, labels_unique=None, bootstrap=False):
+        """
+        Use the given feature vectors, true labels, and predicted labels to estimate the scoring model.
+        :param features: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                         dimension respectively.
+        :param labels: numpy array of shape `(N, )` with the true labels per sample.
+        :param labels_pred: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param labels_unique: None or a numpy array with the unique labels. For example, np.arange(1, 11). This can
+                              be supplied as input during repeated calls to avoid having the find the unique
+                              labels each time.
+        :param bootstrap: Set to True in order to calculate a bootstrap resampled estimate of the p-value.
+                          The default value is False because the p-values returned by the fit method are usually not
+                          used down the line. Not using the bootstrap her makes it faster.
+
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
+        """
+        set_n_neighbors = True if (self.n_neighbors is None) else False
+        # `fit` method of the super class
+        super(TrustScore, self).fit(features, labels, labels_pred, labels_unique=labels_unique)
+
+        # Scale the individual feature values to the range [-1, 1]
+        # self.scaler = MinMaxScaler(feature_range=(-1, 1)).fit(features)
+        # features = self.scaler.transform(features)
+
+        # Column 0 corresponds to the distance ratio conditioned on the predicted class.
+        # Column `i` for `i = 1, 2, . . .` corresponds to the distance ratio conditioned on the true class
+        # being `i - 1`
+        self.distance_ratio_train = np.zeros((self.n_train, 1 + self.n_classes))
+
+        logger.info("Building KNN indices for nearest neighbor queries from each predicted and each true class.")
+        for i, c in enumerate(self.labels_unique):
+            logger.info("Processing class {}:".format(c))
+            # Samples predicted into class `c`
+            ind = np.where(labels_pred == c)[0]
+            self.indices_pred[c] = ind
+            n_pred = ind.shape[0]
+            # Number of neighbors for the samples predicted into class `c`
+            if set_n_neighbors:
+                self.n_neighbors_pred[c] = int(np.ceil(n_pred ** self.neighborhood_constant))
+            else:
+                self.n_neighbors_pred[c] = self.n_neighbors
+
+            if n_pred:
+                # KNN index for the samples predicted into class `c`
+                self.index_knn_pred[c] = KNNIndex(
+                    features[ind, :], n_neighbors=self.n_neighbors_pred[c],
+                    metric=self.metric, metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=self.shared_nearest_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+                # Nearest-neighbor distance to the samples predicted into class `c`
+                _, nn_distance = self.index_knn_pred[c].query_self(k=1)
+                self.distance_ratio_train[ind, 0] = nn_distance[:, 0]
+            else:
+                raise ValueError("No predicted samples from class '{}'. Cannot proceed.".format(c))
+
+            # Labeled samples from class `c`
+            ind = np.where(labels == c)[0]
+            self.indices_true[c] = ind
+            n_true = ind.shape[0]
+            # Number of neighbors for the labeled samples from class `c`
+            if set_n_neighbors:
+                self.n_neighbors_true[c] = int(np.ceil(n_true ** self.neighborhood_constant))
+            else:
+                self.n_neighbors_true[c] = self.n_neighbors
+
+            if n_true:
+                # KNN index for the labeled samples from class `c`
+                self.index_knn_true[c] = KNNIndex(
+                    features[ind, :], n_neighbors=self.n_neighbors_true[c],
+                    metric=self.metric, metric_kwargs=self.metric_kwargs,
+                    shared_nearest_neighbors=self.shared_nearest_neighbors,
+                    approx_nearest_neighbors=self.approx_nearest_neighbors,
+                    n_jobs=self.n_jobs,
+                    low_memory=self.low_memory,
+                    seed_rng=self.seed_rng
+                )
+                # Nearest-neighbor distance to the labeled samples from class `c`
+                _, nn_distance = self.index_knn_true[c].query_self(k=1)
+                self.distance_ratio_train[ind, i + 1] = nn_distance[:, 0]
+            else:
+                raise ValueError("No labeled samples from class '{}'. Cannot proceed.".format(c))
+
+        # Loop over each class and calculate the denominator of the distance ratio in the trust score
+        for i, c in enumerate(self.labels_unique):
+            # Samples predicted into class `c`
+            ind1 = self.indices_pred[c]
+            features_temp1 = features[ind1, :]
+            dist_temp1 = np.zeros((ind1.shape[0], self.n_classes - 1))
+            # Labeled samples from class `c`
+            ind2 = self.indices_true[c]
+            features_temp2 = features[ind2, :]
+            dist_temp2 = np.zeros((ind2.shape[0], self.n_classes - 1))
+            j = 0
+            # Loop over every class other than `c`
+            for k in self.labels_unique:
+                if k == c:
+                    continue
+
+                # Nearest-neighbor distance from the set of samples predicted into class `k`
+                _, nn_distance = self.index_knn_pred[k].query(features_temp1, k=1)
+                dist_temp1[:, j] = nn_distance[:, 0]
+                # Nearest-neighbor distance from the set of labeled samples from class `k`
+                _, nn_distance = self.index_knn_true[k].query(features_temp2, k=1)
+                dist_temp2[:, j] = nn_distance[:, 0]
+                j += 1
+
+            # Distance ratio for the samples predicted into class `c`
+            v = np.clip(np.min(dist_temp1, axis=1), sys.float_info.epsilon, None)
+            self.distance_ratio_train[ind1, 0] = self.distance_ratio_train[ind1, 0] / v
+            # Distance ratio for the labeled samples from class `c`
+            v = np.clip(np.min(dist_temp2, axis=1), sys.float_info.epsilon, None)
+            self.distance_ratio_train[ind2, i + 1] = self.distance_ratio_train[ind2, i + 1] / v
+
+        # Calculate the scores and p-values for each samples
+        self.scores_train, p_values = self.score(features, labels_pred, is_train=True, bootstrap=bootstrap)
+        return self.scores_train, p_values
+
+    def score(self, features_test, labels_pred_test, is_train=False, log_transform=True, bootstrap=True):
+        """
+        Given the test feature vectors and their corresponding predicted labels, calculate a vector of scores for
+        each test sample. Set `is_train = True` only if the `fit` method was called using `features_test`.
+
+        :param features_test: numpy array of shape `(N, d)` where `N` and `d` are the number of samples and
+                              dimension respectively.
+        :param labels_pred_test: numpy array of shape `(N, )` with the predicted labels per sample.
+        :param is_train: Set to True if points from `features_test` were used for training, i.e. by the fit method.
+        :param log_transform: Set to True to apply negative log transformation to the p-values.
+        :param bootstrap: Set to True to calculate a bootstrap resampled estimate of the p-value.
+        :return: (scores, p_values)
+            scores: numpy array of shape `(N, m + 1)` with a vector of scores for each sample, where `m` is the
+                    number of classes. The first column `scores[:, 0]` gives the scores conditioned on the predicted
+                    class. The remaining columns `scores[:, i]` for `i = 1, . . ., m` gives the scores conditioned
+                    on `i - 1` being the candidate true class for the test sample.
+            p_values: numpy array of same shape as `scores` containing the negative-log-transformed empirical
+                      p-values of the scores.
+        """
+        n_test = labels_pred_test.shape[0]
+        if not is_train:
+            if self.scaler is not None:
+                features_test = self.scaler.transform(features_test)
+
+        scores = np.zeros((n_test, 1 + self.n_classes))
+        p_values = np.zeros((n_test, 1 + self.n_classes))
+        preds_unique = self.labels_unique if (n_test > 1) else [labels_pred_test[0]]
+        cnt_par = 0
+        for c_hat in preds_unique:
+            # Index of samples predicted into class `c_hat`
+            ind = np.where(labels_pred_test == c_hat)[0]
+            if ind.shape[0]:
+                if not is_train:
+                    temp_arr = features_test[ind, :]
+                    # Nearest-neighbor distance to the samples predicted into class `c_hat`
+                    _, nn_distance = self.index_knn_pred[c_hat].query(temp_arr, k=1)
+                    scores[ind, 0] = nn_distance[:, 0]
+
+                    dist_temp = np.zeros((ind.shape[0], self.n_classes - 1))
+                    j = 0
+                    # Loop over every class other than `c_hat`
+                    for k in self.labels_unique:
+                        if k == c_hat:
+                            continue
+
+                        # Nearest-neighbor distance to the samples predicted into class `k`
+                        _, nn_distance = self.index_knn_pred[k].query(temp_arr, k=1)
+                        dist_temp[:, j] = nn_distance[:, 0]
+                        j += 1
+
+                    # Distance ratio
+                    v = np.clip(np.min(dist_temp, axis=1), sys.float_info.epsilon, None)
+                    scores[ind, 0] = scores[ind, 0] / v
+                    # p-value of the distance ratio
+                    p_values[ind, 0] = pvalue_score(
+                        self.scores_train[self.indices_pred[c_hat], 0], scores[ind, 0], log_transform=log_transform,
+                        bootstrap=bootstrap
+                    )
+                else:
+                    # Precomputed distance ratios
+                    scores[ind, 0] = self.distance_ratio_train[ind, 0]
+                    # p-value of the distance ratio
+                    p_values[ind, 0] = pvalue_score(
+                        scores[ind, 0], scores[ind, 0], log_transform=log_transform, bootstrap=bootstrap
+                    )
+
+                cnt_par += ind.shape[0]
+                if cnt_par >= n_test:
+                    break
+
+        for i, c in enumerate(self.labels_unique):
+            if not is_train:
+                # Nearest-neighbor distance to the labeled samples from class `c`
+                _, nn_distance = self.index_knn_true[c].query(features_test, k=1)
+                scores[:, i + 1] = nn_distance[:, 0]
+
+                dist_temp = np.zeros((n_test, self.n_classes - 1))
+                j = 0
+                # Loop over every class other than `c`
+                for k in self.labels_unique:
+                    if k == c:
+                        continue
+
+                    # Nearest-neighbor distance to the labeled samples from class `k`
+                    _, nn_distance = self.index_knn_true[k].query(features_test, k=1)
+                    dist_temp[:, j] = nn_distance[:, 0]
+                    j += 1
+
+                # Distance ratio
+                v = np.clip(np.min(dist_temp, axis=1), sys.float_info.epsilon, None)
+                scores[:, i + 1] = scores[:, i + 1] / v
+                # p-value of the distance ratio
+                p_values[:, i + 1] = pvalue_score(
+                    self.scores_train[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
+                    bootstrap=bootstrap
+                )
+            else:
+                # Precomputed distance ratios
+                scores[:, i + 1] = self.distance_ratio_train[:, i + 1]
+                # p-value of the distance ratio
                 p_values[:, i + 1] = pvalue_score(
                     scores[self.indices_true[c], i + 1], scores[:, i + 1], log_transform=log_transform,
                     bootstrap=bootstrap
