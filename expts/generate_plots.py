@@ -14,6 +14,8 @@ def main():
                                                                   'metrics files')
     parser.add_argument('--pos-label', '-p', default='adversarial',
                         help='label for the positive class - e.g. adversarial or ood')
+    parser.add_argument('--log-scale', action='store_true', default=False,
+                        help='use log scale for the x-axis of the plots')
     args = parser.parse_args()
 
     methods = []
@@ -32,7 +34,7 @@ def main():
 
     if results:
         plot_performance_comparison(results, args.output_dir, place_legend_outside=True, pos_label=args.pos_label,
-                                    log_scale=True)
+                                    log_scale=args.log_scale)
     else:
         print("No performance metrics files were found in the specified output directory.")
 

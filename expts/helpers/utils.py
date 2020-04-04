@@ -528,11 +528,11 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
 
     plt.xlim([x_bounds[0], x_bounds[1]])
     plt.ylim([y_bounds[0], y_bounds[1]])
-    plt.yticks(np.linspace(y_bounds[0], y_bounds[1], num=n_ticks))
+    plt.yticks(np.linspace(y_bounds[0], y_bounds[1], num=n_ticks), rotation=0)
     if log_scale:
-        plt.xticks(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks), rotation=45)
+        plt.xticks(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks), rotation=0)
     else:
-        plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), rotation=45)
+        plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), rotation=0)
 
     plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
