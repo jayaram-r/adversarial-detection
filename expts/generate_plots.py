@@ -31,7 +31,8 @@ def main():
             results[m] = pickle.load(fp)
 
     if results:
-        plot_performance_comparison(results, args.output_dir, place_legend_outside=True, pos_label=args.pos_label)
+        plot_performance_comparison(results, args.output_dir, place_legend_outside=True, pos_label=args.pos_label,
+                                    log_scale=True)
     else:
         print("No performance metrics files were found in the specified output directory.")
 

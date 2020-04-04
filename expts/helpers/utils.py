@@ -325,7 +325,7 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
 #  attack methods as in the full sample?
 def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
                                               num_random_samples=100, seed=SEED_DEFAULT, output_file=None,
-                                              max_pos_proportion=1.0):
+                                              max_pos_proportion=1.0, log_scale=True):
     """
     Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
     For each proportion, the estimates are calculated from different random samples, and the median and confidence
@@ -341,6 +341,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
                         Pickle protocol.
     :param max_pos_proportion: Maximum proportion of positive samples to include in the plots. Should be a float
                                value between 0 and 1.
+    :param log_scale: Set to True to use logarithmically spaced positive proportion values.
 
     :return: a dict with the proportion of positive samples and all the performance metrics.
     """
@@ -369,7 +370,10 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     p_max = min([n_pos_max[i] / n_samp[i] for i in range(n_folds)])
     p_max = min(p_max, max_pos_proportion)
     # Range of proportion of positive samples
-    prop_range = np.unique(np.linspace(p_min, p_max, num=num_prop))
+    if log_scale:
+        prop_range = np.unique(np.logspace(np.log10(p_min), np.log10(p_max), num=num_prop))
+    else:
+        prop_range = np.unique(np.linspace(p_min, p_max, num=num_prop))
 
     # dict with the positive proportion and the corresponding performance metrics. The mean, and lower and upper
     # confidence interval values are calculated for each performance metric
@@ -491,8 +495,12 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     return results
 
 
-def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False):
+def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False,
+                log_scale=False, n_ticks=8):
     fig = plt.figure()
+    if log_scale:
+        plt.xscale('log', basex=10)
+
     x_vals = []
     y_vals = []
     for j, m in enumerate(methods):
@@ -520,8 +528,11 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
 
     plt.xlim([x_bounds[0], x_bounds[1]])
     plt.ylim([y_bounds[0], y_bounds[1]])
-    plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=6))
-    plt.yticks(np.linspace(y_bounds[0], y_bounds[1], num=6))
+    plt.yticks(np.linspace(y_bounds[0], y_bounds[1], num=n_ticks))
+    if log_scale:
+        plt.xticks(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks), rotation=45)
+    else:
+        plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), rotation=45)
 
     plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
@@ -536,7 +547,8 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.close(fig)
 
 
-def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial'):
+def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial',
+                                log_scale=True):
     """
     Plot the performance comparison for different detection methods.
 
@@ -545,6 +557,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     :param output_dir: path to the output directory where the plots are to be saved.
     :param place_legend_outside: Set to True to place the legend outside the plot area.
     :param pos_label: string with the positive class label.
+    :param log_scale: Set to True to use a logarithmic scale on the x-axis.
     :return: None
     """
     if not os.path.isdir(output_dir):
@@ -571,7 +584,8 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('auc'))
-    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
+    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
+                log_scale=log_scale)
 
     # Average precision plots
     plot_dict = dict()
@@ -592,7 +606,8 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         }
 
     plot_file = os.path.join(output_dir, '{}_comparison.png'.format('avg_prec'))
-    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
+    plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
+                log_scale=log_scale)
 
     # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
@@ -614,7 +629,8 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             }
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
-        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
+                    log_scale=log_scale)
 
     # Scaled TPR for different target FPR values
     for j, f in enumerate(FPR_THRESH):
@@ -634,7 +650,8 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             }
 
         plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('tpr', j + 1))
-        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside)
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
+                    log_scale=log_scale)
 
 
 def get_num_jobs(n_jobs):

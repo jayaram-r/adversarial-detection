@@ -40,6 +40,10 @@ from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, Dete
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
+try:
+    import cPickle as pickle
+except:
+    import pickle
 
 
 # Parameters that were used for the attack data generation
@@ -558,10 +562,16 @@ def main():
         labels_folds.append(labels_detec)
 
     tf = time.time()
+    # Save the scores and detection labels from the cross-validation folds to a pickle file
+    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
+    tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
+    with open(fname, 'wb') as fp:
+        pickle.dump(tmp, fp)
+
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
     results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, output_file=fname,
-                                                             max_pos_proportion=0.25)
+                                                             max_pos_proportion=0.5, log_scale=True)
     print("Performance metrics saved to the file: {}".format(fname))
     print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
 
