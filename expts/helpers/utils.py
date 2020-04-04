@@ -325,7 +325,7 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
 #  attack methods as in the full sample?
 def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
                                               num_random_samples=100, seed=SEED_DEFAULT, output_file=None,
-                                              max_pos_proportion=1.0, log_scale=True):
+                                              max_pos_proportion=1.0, log_scale=False):
     """
     Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
     For each proportion, the estimates are calculated from different random samples, and the median and confidence
@@ -548,7 +548,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
 
 
 def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial',
-                                log_scale=True):
+                                log_scale=False):
     """
     Plot the performance comparison for different detection methods.
 

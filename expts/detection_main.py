@@ -571,7 +571,7 @@ def main():
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
     results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, output_file=fname,
-                                                             max_pos_proportion=0.5, log_scale=True)
+                                                             max_pos_proportion=0.5, log_scale=False)
     print("Performance metrics saved to the file: {}".format(fname))
     print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
 
