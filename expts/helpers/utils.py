@@ -94,6 +94,41 @@ def load_numpy_data(path, adversarial=False):
     return data_tr, labels_tr, data_te, labels_te
 
 
+def load_noisy_data(path):
+    data_tr = None
+    data_te = None
+    k = 0
+    for file_pre in ('data_tr_noisy_stdev_', 'data_te_noisy_stdev_'):
+        len_pre = len(file_pre)
+        stdev_list = []
+        data_list = []
+        for f in os.listdir(path):
+            if f.startswith(file_pre):
+                # Get the standard deviation value from the filename
+                a = os.path.splitext(f)[0]
+                stdev_list.append(float(a[len_pre:]))
+                data_list.append(np.load(os.path.join(path, f)))
+
+        print("Noise standard deviation values:")
+        print(', '.join(['{:.6f}'.format(v) for v in stdev_list]))
+        n_vals = len(stdev_list)
+        n_samp = data_list[0].shape[0]
+        if not all([data_list[i].shape[0] == n_samp for i in range(n_vals)]):
+            raise ValueError("Data arrays for different noise standard deviations have different sizes")
+
+        # Each noisy sample is selected randomly from one of the noise standard deviation values
+        ind_cols = np.random.choice(np.arange(n_vals), size=n_samp, replace=True)
+        data = np.array([data_list[ind_cols[i]][i, :] for i in range(n_samp)])
+        if k == 0:
+            data_tr = data
+        else:
+            data_te = data
+
+        k += 1
+
+    return data_tr, data_te
+
+
 def get_data_bounds(data, alpha=0.95):
     bounds = [np.min(data), np.max(data)]
     # Value slightly smaller than the minimum

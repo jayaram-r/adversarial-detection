@@ -20,8 +20,10 @@ from helpers.utils import (
     save_model_checkpoint,
     convert_to_loader,
     load_numpy_data,
+    load_noisy_data,
     get_path_dr_models,
     get_clean_data_path,
+    get_noisy_data_path,
     get_adversarial_data_path,
     get_output_path,
     list_all_adversarial_subdirs,
@@ -363,6 +365,33 @@ def main():
             model, device, test_fold_loader, args.detection_method, labels_te
         )
 
+        # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
+        numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        data_tr_noisy, data_te_noisy = load_noisy_data(numpy_save_path)
+        # Noisy data have the same labels as the clean data
+        labels_tr_noisy = labels_tr
+        labels_te_noisy = labels_te
+        # Check the number of noisy samples
+        assert data_tr_noisy.shape[0] == labels_tr.shape[0], ("Number of noisy samples from the train fold is "
+                                                              "different from expected")
+        assert data_te_noisy.shape[0] == labels_te.shape[0], ("Number of noisy samples from the test fold is "
+                                                              "different from expected")
+        # Data loader for the noisy train and test fold data
+        noisy_train_fold_loader = convert_to_loader(data_tr_noisy, labels_tr_noisy, batch_size=args.batch_size,
+                                                    device=device)
+        noisy_test_fold_loader = convert_to_loader(data_te_noisy, labels_te_noisy, batch_size=args.batch_size,
+                                                   device=device)
+        print("\nCalculating the layer embeddings and DNN predictions for the noisy train data split:")
+        layer_embeddings_tr_noisy, labels_pred_tr_noisy = helper_layer_embeddings(
+            model, device, noisy_train_fold_loader, args.detection_method, labels_tr_noisy
+        )
+        print("\nCalculating the layer embeddings and DNN predictions for the noisy test data split:")
+        layer_embeddings_te_noisy, labels_pred_te_noisy = helper_layer_embeddings(
+            model, device, noisy_test_fold_loader, args.detection_method, labels_te_noisy
+        )
+
         # Load the saved adversarial numpy data generated from this training and test fold
         # numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
         numpy_save_path = list_all_adversarial_subdirs(args.model_type, i + 1, args.adv_attack)[0]
@@ -398,8 +427,6 @@ def main():
         )
         check_label_mismatch(labels_te_adv, labels_pred_te_adv)
 
-        # TODO: Load noisy data from the saved numpy files, create data loaders, and extract layer embeddings
-
         # Detection labels (0 denoting clean and 1 adversarial)
         labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
                                        np.ones(labels_pred_te_adv.shape[0], dtype=np.int)])
@@ -414,10 +441,8 @@ def main():
             # Unlike the other methods, these are not continuous valued scores
 
         elif args.detection_method == 'lid':
-            # TODO: generate noisy data from the clean training fold data. Setting this to `None` will inform
-            # the detector to skip noisy data
-            layer_embeddings_tr_noisy = None
-
+            # Set to `None` to skip noisy data
+            # layer_embeddings_tr_noisy = None
             kwargs = {
                 'n_neighbors': n_neighbors,
                 'skip_dim_reduction': (not apply_dim_reduc),
@@ -445,10 +470,9 @@ def main():
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
 
         elif args.detection_method == 'lid_class_cond':
-            # TODO: generate noisy data from the clean training fold data. Setting this to `None` will inform
-            # the detector to skip noisy data
-            layer_embeddings_tr_noisy = None
-            labels_pred_tr_noisy = None
+            # Set to `None` to skip noisy data
+            # layer_embeddings_tr_noisy = None
+            # labels_pred_tr_noisy = None
 
             model_det = DetectorLIDClassCond(
                 n_neighbors=n_neighbors,
