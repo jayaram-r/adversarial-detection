@@ -20,6 +20,7 @@ from helpers.utils import (
     save_model_checkpoint,
     convert_to_loader,
     load_numpy_data,
+    load_adversarial_data,
     load_noisy_data,
     get_path_dr_models,
     get_clean_data_path,
@@ -165,6 +166,8 @@ def main():
                         help='type of adversarial attack')
     # parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
     #                     help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
+    parser.add_argument('--max-attack-prop', '--map', type=float, default=0.5,
+                        help="Maximum proportion of attack samples in the test fold. Should be a value in (0, 1]")
     parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
                         help='Use option to enable a mixed attack strategy with multiple methods in '
                              'different proportions')
@@ -349,8 +352,10 @@ def main():
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
         # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
-        data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path, adversarial=False)
+        data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
 
+        num_clean_tr = labels_tr.shape[0]
+        num_clean_te = labels_te.shape[0]
         # Data loader for the train fold
         train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
         # Data loader for the test fold
@@ -374,10 +379,10 @@ def main():
         labels_tr_noisy = labels_tr
         labels_te_noisy = labels_te
         # Check the number of noisy samples
-        assert data_tr_noisy.shape[0] == labels_tr.shape[0], ("Number of noisy samples from the train fold is "
-                                                              "different from expected")
-        assert data_te_noisy.shape[0] == labels_te.shape[0], ("Number of noisy samples from the test fold is "
-                                                              "different from expected")
+        assert data_tr_noisy.shape[0] == num_clean_tr, ("Number of noisy samples from the train fold is different "
+                                                        "from expected")
+        assert data_te_noisy.shape[0] == num_clean_te, ("Number of noisy samples from the test fold is different "
+                                                        "from expected")
         # Data loader for the noisy train and test fold data
         noisy_train_fold_loader = convert_to_loader(data_tr_noisy, labels_tr_noisy, batch_size=args.batch_size,
                                                     device=device)
@@ -397,16 +402,21 @@ def main():
         numpy_save_path = list_all_adversarial_subdirs(args.model_type, i + 1, args.adv_attack)[0]
         # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
-        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_numpy_data(numpy_save_path, adversarial=True)
-
+        # Maximum number of adversarial samples in the test fold
+        max_num_adv = int(np.ceil(args.max_attack_prop * num_clean_te))
+        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
+            numpy_save_path,
+            max_n_test=max_num_adv,
+            sampling_type='ranked_by_norm',
+            norm_type=ATTACK_NORM_MAP.get(args.adv_attack, '2')
+        )
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
         print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-              "samples = {:.4f}".format(labels_tr.shape[0], num_adv_tr,
-                                        (100. * num_adv_tr) / (labels_tr.shape[0] + num_adv_tr)))
+              "samples = {:.4f}".format(num_clean_tr, num_adv_tr, (100. * num_adv_tr) / (num_clean_tr + num_adv_tr)))
         print("Test fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-              "samples = {:.4f}".format(labels_te.shape[0], num_adv_te,
-                                        (100. * num_adv_te) / (labels_te.shape[0] + num_adv_te)))
+              "samples = {:.4f}".format(num_clean_te, num_adv_te, (100. * num_adv_te) / (num_clean_te + num_adv_te)))
+
         # Adversarial data loader for the train fold
         adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
                                                   device=device)
@@ -594,8 +604,9 @@ def main():
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
-    results_dict = metrics_varying_positive_class_proportion(scores_folds, labels_folds, output_file=fname,
-                                                             max_pos_proportion=0.5, log_scale=False)
+    results_dict = metrics_varying_positive_class_proportion(
+        scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
+    )
     print("Performance metrics saved to the file: {}".format(fname))
     print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
 
