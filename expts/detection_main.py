@@ -369,6 +369,7 @@ def main():
         layer_embeddings_te, labels_pred_te = helper_layer_embeddings(
             model, device, test_fold_loader, args.detection_method, labels_te
         )
+        train_fold_loader = None
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
@@ -396,6 +397,8 @@ def main():
         layer_embeddings_te_noisy, labels_pred_te_noisy = helper_layer_embeddings(
             model, device, noisy_test_fold_loader, args.detection_method, labels_te_noisy
         )
+        noisy_train_fold_loader = None
+        noisy_test_fold_loader = None
 
         # Load the saved adversarial numpy data generated from this training and test fold
         # numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
@@ -436,6 +439,7 @@ def main():
             model, device, adv_test_fold_loader, args.detection_method, labels_te_adv
         )
         check_label_mismatch(labels_te_adv, labels_pred_te_adv)
+        adv_train_fold_loader = None
 
         # Detection labels (0 denoting clean and 1 adversarial)
         labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
