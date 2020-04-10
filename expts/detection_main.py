@@ -370,6 +370,8 @@ def main():
             model, device, test_fold_loader, args.detection_method, labels_te
         )
         train_fold_loader = None
+        if args.detection_method != 'odds':
+            test_fold_loader = None
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
@@ -440,6 +442,8 @@ def main():
         )
         check_label_mismatch(labels_te_adv, labels_pred_te_adv)
         adv_train_fold_loader = None
+        if args.detection_method != 'odds':
+            adv_test_fold_loader = None
 
         # Detection labels (0 denoting clean and 1 adversarial)
         labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
@@ -613,6 +617,7 @@ def main():
     )
     print("Performance metrics saved to the file: {}".format(fname))
     print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
+
 
 if __name__ == '__main__':
     main()
