@@ -70,28 +70,127 @@ def check_label_mismatch(labels, labels_pred, frac=1.0):
         print("Fraction of mismatched samples with different original and predicted labels = {:.4f}".format(d))
 
 
-def load_numpy_data(path, adversarial=False):
-    # print("Loading saved numpy data from the path:", path)
-    if not adversarial:
-        data_tr = np.load(os.path.join(path, "data_tr.npy"))
-        labels_tr = np.load(os.path.join(path, "labels_tr.npy"))
-        data_te = np.load(os.path.join(path, "data_te.npy"))
-        labels_te = np.load(os.path.join(path, "labels_te.npy"))
-    else:
-        data_tr = np.load(os.path.join(path, "data_tr_adv.npy"))
-        data_te = np.load(os.path.join(path, "data_te_adv.npy"))
-        # Predicted (mis-classified) labels
-        labels_pred_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
-        labels_pred_te = np.load(os.path.join(path, "labels_te_adv.npy"))
-        # Labels of the original inputs from which the adversarial inputs were created
-        labels_tr = np.load(os.path.join(path, "labels_tr_clean.npy"))
-        labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
-
-        # Check if the original and adversarial labels are all different
-        check_label_mismatch(labels_tr, labels_pred_tr)
-        check_label_mismatch(labels_te, labels_pred_te)
+def load_numpy_data(path):
+    # Utility to load clean data and labels from saved numpy files
+    data_tr = np.load(os.path.join(path, "data_tr.npy"))
+    labels_tr = np.load(os.path.join(path, "labels_tr.npy"))
+    data_te = np.load(os.path.join(path, "data_te.npy"))
+    labels_te = np.load(os.path.join(path, "labels_te.npy"))
 
     return data_tr, labels_tr, data_te, labels_te
+
+
+def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm', norm_type='inf',
+                          seed=SEED_DEFAULT):
+    """
+    Utility to load adversarial data and labels from saved numpy files. Allows the number of samples from the test
+    fold to be specified and has a few sampling options.
+
+    :param path: path to the directory where the numpy files are saved.
+    :param max_n_test: None or an int value specifying the maximum number of samples in the test data fold.
+    :param sampling_type: string specifying the type of sampling to use. Valid values are:
+                         ('uniform', 'ranked_by_norm', 'importance')
+    :param norm_type: string or int value specifying the type of norm. Valid values are 'inf' and non-negative
+                      integer values.
+    :param seed: seed for the random number generator.
+    :return:
+    """
+    # Adversarial inputs from the train and test fold
+    data_tr = np.load(os.path.join(path, "data_tr_adv.npy"))
+    data_te = np.load(os.path.join(path, "data_te_adv.npy"))
+
+    # Predicted (mis-classified) labels
+    labels_pred_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
+    labels_pred_te = np.load(os.path.join(path, "labels_te_adv.npy"))
+    # Labels of the original inputs from which the adversarial inputs were created
+    labels_tr = np.load(os.path.join(path, "labels_tr_clean.npy"))
+    labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
+
+    # Check if the original and adversarial labels are all different
+    check_label_mismatch(labels_tr, labels_pred_tr)
+    check_label_mismatch(labels_te, labels_pred_te)
+
+    n_test = labels_te.shape[0]
+    all_test = True
+    if max_n_test:
+        if n_test > max_n_test:
+            all_test = False
+
+    if all_test:
+        return data_tr, labels_tr, data_te, labels_te
+    else:
+        np.random.seed(seed)
+        ind_test = None
+        if sampling_type == 'uniform':
+            print("Number of adversarial samples from the test fold = {:d}. Selecting a random subset of {:d} "
+                  "samples\n".format(n_test, max_n_test))
+            ind_test = np.random.permutation(n_test)[:max_n_test]
+        else:
+            # Calculate the norm of the perturbation for adversarial inputs from the test fold
+            data_te_clean = np.load(os.path.join(path, "data_te_clean.npy"))
+            diff = data_te.reshape(n_test, -1) - data_te_clean.reshape(n_test, -1)
+            if norm_type == 'inf':
+                norm_diff = np.linalg.norm(diff, ord=np.inf, axis=1)
+            else:
+                # expecting a non-negative integer
+                norm_diff = np.linalg.norm(diff, ord=int(norm_type), axis=1)
+
+            if sampling_type == 'ranked_by_norm':
+                print("Number of adversarial samples from the test fold = {:d}. Selecting the subset of {:d} samples"
+                      " with the smallest perturbation {}-norm\n".format(n_test, max_n_test, norm_type))
+                # Select the `max_n_test` samples with the least norm
+                ind_test = np.argsort(norm_diff)[:max_n_test]
+
+            elif sampling_type == 'importance':
+                print("Number of adversarial samples from the test fold = {:d}. Selecting a random subset of {:d} "
+                      "samples with importance sampling based on the inverse perturbation {}-norm\n".
+                      format(n_test, max_n_test, norm_type))
+                # Assign each test sample a weight proportional to the inverse of its perturbation norm and
+                # do importance sampling to select `max_n_test` samples (without replacement)
+                samp_wt = 1. / np.clip(norm_diff, sys.float_info.epsilon, None)
+                p = samp_wt / np.sum(samp_wt)
+                ind_test = np.random.choice(n_test, size=max_n_test, replace=False, p=p)
+
+            else:
+                raise ValueError("Invalid value '{}' specified for the input 'sampling_type'".format(sampling_type))
+
+        return data_tr, labels_tr, data_te[ind_test, :], labels_te[ind_test]
+
+
+def load_noisy_data(path):
+    # Utility to load noisy data and labels from saved numpy files
+    data_tr = None
+    data_te = None
+    k = 0
+    for file_pre in ('data_tr_noisy_stdev_', 'data_te_noisy_stdev_'):
+        len_pre = len(file_pre)
+        stdev_list = []
+        data_list = []
+        for f in os.listdir(path):
+            if f.startswith(file_pre):
+                # Get the standard deviation value from the filename
+                a = os.path.splitext(f)[0]
+                stdev_list.append(float(a[len_pre:]))
+                data_list.append(np.load(os.path.join(path, f)))
+
+        print("Noise standard deviation values:")
+        print(', '.join(['{:.6f}'.format(v) for v in stdev_list]))
+        n_vals = len(stdev_list)
+        n_samp = data_list[0].shape[0]
+        if not all([data_list[i].shape[0] == n_samp for i in range(n_vals)]):
+            raise ValueError("Data arrays for different noise standard deviations have different sizes")
+
+        # Each noisy sample is selected randomly from one of the noise standard deviation values
+        ind_cols = np.random.choice(np.arange(n_vals), size=n_samp, replace=True)
+        data = np.array([data_list[ind_cols[i]][i, :] for i in range(n_samp)])
+        if k == 0:
+            data_tr = data
+        else:
+            data_te = data
+
+        k += 1
+
+    return data_tr, data_te
 
 
 def get_data_bounds(data, alpha=0.95):
