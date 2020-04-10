@@ -87,23 +87,28 @@ def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
 
 
 def extract_input_embeddings(model, device, x_input, requires_grad=True):
-    #returns a list of torch tensors, where each torch tensor is a per layer embedding
-    if model.training:
-        model.eval()
+    # Returns a list of torch tensors, where each torch tensor is a per layer embedding
+    # Model should already be set to eval mode
+    # if model.training:
+    #    model.eval()
 
     with torch.no_grad():
         data = x_input.to(device)
         # Layer outputs
         outputs_layers = model.layer_wise(data)
 
-    embeddings = []
-    for v in outputs_layers:
-        # Flatten all but the first dimension of the tensor and set/unset its requires gradient flag
-        v = v.view(v.size(0), -1)
-        v.requires_grad = requires_grad
-        embeddings.append(v)
+    n_layers = len(outputs_layers)
+    for i in range(n_layers):
+        # Flatten all but the first dimension of the tensor and set/unset its requires_grad flag
+        tens = outputs_layers[i]
+        s = tens.size()
+        if len(s) > 2:
+            tens = tens.view(s[0], -1)
 
-    return embeddings
+        tens.requires_grad = requires_grad
+        outputs_layers[i] = tens
+
+    return outputs_layers
 
 
 def get_distance(p1, p2, dist_type='cosine'):
@@ -120,17 +125,17 @@ def get_distance(p1, p2, dist_type='cosine'):
 def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
     #loss function needed by the attack formulation
     #pending
-    
-    def gaussian_kernel(dist):
+
+    # Need to pass the kernel a scale that is layer specific
+    def gaussian_kernel(dist, scale=1.0):
         inp = torch.mul(dist, dist)
-        val = torch.exp(inp)
-        return val
+        return torch.exp((-1 / scale) * inp)
 
     src_indices = indices
     target_indices = indices
 
     batch_size = x.size(0)
-    #embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, data_loader)
+    #embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
     num_embeddings = len(reps)
     adv_loss = torch.zeros((batch_size))
     #, device=device)
@@ -154,7 +159,9 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
             num_reps_per_label = src_reps.size(0)
             
             temp_sum_1 = torch.Tensor([0])
-            
+            # Avoid loop here and compute pairwise distances in a batch. See below:
+            # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.pairwise_distances.html
+            # https://github.com/jayaram-r/adversarial-detection/blob/master/expts/helpers/dimension_reduction_methods.py#L78
             for k in range(0, num_reps_per_label):
                 dist = get_distance(x_e, src_reps[k])
                 gauss_dist = gaussian_kernel(dist)
@@ -174,7 +181,7 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
             num_reps_per_label = target_reps.size(0)
 
             temp_sum_2 = torch.Tensor([0])
-            
+            # Same comment as before on pairwise distances
             for k in range(0, num_reps_per_label):
                 dist = get_distance(x_e, target_reps[k])
                 gauss_dist = gaussian_kernel(dist)
@@ -191,6 +198,7 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
         #exit()
         adv_loss = torch.add(adv_loss, diff)
         print(adv_loss, adv_loss.shape)
+
     return adv_loss
 
 
@@ -310,15 +318,15 @@ def attack(model, device, data_loader, x_orig, label):
     best_dist = torch.zeros_like(const) + INFTY
 
 
-    #contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices of all elements whose label is i
-    indices = {}
+    # contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices
+    # of all elements whose label is i
+    indices = {i: return_indices(labels, i) for i in range(min_label, max_label + 1)}
     target_indices = {}
-    for i in range(min_label, max_label + 1):
-        indices[i] = return_indices(labels, i)
     
 
-    #reps contains the layer wise embeddings for the entire dataloader
-    reps = extract_layer_embeddings(model, device, data_loader)
+    # `reps` contains the layer wise embeddings for the entire dataloader
+    # gradients are not required for the representative samples
+    reps = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
 
     for binary_search_step in range(binary_search_steps):
 
@@ -344,12 +352,12 @@ def attack(model, device, data_loader, x_orig, label):
             loss.backward()
             optimizer.step()
 
-            if (verbose and iteration % (np.ceil(max_iterations / 10)) == 0):
-                print('    step: %d; loss: %.3f; dist: %.3f' %(iteration, loss.cpu().detach().numpy(), dist.mean().cpu().detach().numpy()))
+            if verbose and iteration % (np.ceil(max_iterations / 10)) == 0:
+                print('    step: %d; loss: %.3f; dist: %.3f' % (iteration, loss.cpu().detach().numpy(), dist.mean().cpu().detach().numpy()))
 
             # every <check_adv_steps>, save adversarial samples
             # with minimal perturbation
-            if ((iteration + 1) % check_adv_steps == 0 or iteration == max_iterations):
+            if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
                 is_adv = check_adv(x, label)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
