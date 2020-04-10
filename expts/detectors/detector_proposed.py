@@ -19,7 +19,10 @@ from helpers.dimension_reduction_methods import (
     transform_data_from_model,
     load_dimension_reduction_models
 )
-from helpers.utils import log_sum_exp
+from helpers.utils import (
+    log_sum_exp,
+    combine_and_vectorize
+)
 from detectors.pvalue_estimation import (
     pvalue_score,
     pvalue_score_all_pairs
@@ -40,24 +43,6 @@ from detectors.localized_pvalue_estimation import averaged_KLPE_anomaly_detectio
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
-
-
-def combine_and_vectorize(data_batches):
-    """
-    Combine a list of data batches and vectorize them if they are tensors. If there is only a single data batch,
-    it can be passed in as list with a single array.
-
-    :param data_batches: list of numpy arrays containing the data batches. Each array has shape `(n, d1, ...)`,
-                         where `n` can be different across the batches, but the remaining dimensions should be
-                         the same.
-    :return: single numpy array with the combined, vectorized data.
-    """
-    data = np.concatenate(data_batches, axis=0)
-    s = data.shape
-    if len(s) > 2:
-        data = data.reshape((s[0], -1))
-
-    return data
 
 
 def extract_layer_embeddings(model, device, data_loader, method='proposed', num_samples=None):

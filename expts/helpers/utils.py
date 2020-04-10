@@ -41,6 +41,24 @@ def convert_to_loader(x, y, dtype_x=None, dtype_y=None, device=None, batch_size=
     return DataLoader(dataset, batch_size=batch_size)
 
 
+def combine_and_vectorize(data_batches):
+    """
+    Combine a list of data batches and vectorize them if they are tensors. If there is only a single data batch,
+    it can be passed in as list with a single array.
+
+    :param data_batches: list of numpy arrays containing the data batches. Each array has shape `(n, d1, ...)`,
+                         where `n` can be different across the batches, but the remaining dimensions should be
+                         the same.
+    :return: single numpy array with the combined, vectorized data.
+    """
+    data = np.concatenate(data_batches, axis=0)
+    s = data.shape
+    if len(s) > 2:
+        data = data.reshape((s[0], -1))
+
+    return data
+
+
 def get_samples_as_ndarray(loader):
     X = np.array([])
     Y = np.array([])
