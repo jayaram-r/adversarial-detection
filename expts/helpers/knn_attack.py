@@ -7,30 +7,25 @@ import scipy
 import os
 from numpy import linalg as LA
 from helpers.constants import ROOT
+from helpers.utils import combine_and_vectorize
 
 INFTY = 1e20
 
-def get_labels(model, device, data_loader):
-    #function to return an ndarray with all the labels of the data_loader, and will return a list with the smallest and largest label
+
+def get_labels(data_loader):
+    # function to return an ndarray with all the labels of the data_loader, and will return a list with the smallest
+    # and largest label
     labels = []
-    for batch_idx, (data, target) in enumerate(data_loader):
-        target.detach().cpu().numpy()
-        labels.extend(target)
+    for data, target in data_loader:
+        labels.extend(target.detach().cpu().numpy())
+
     labels = np.array(labels, dtype=np.int)
-    list_set = set(labels) 
-    unique_list = list(list_set)
-    labels_range = [min(unique_list), max(unique_list)]
-    return labels, labels_range
+    # Find the unique labels in sorted order
+    labels_uniq = np.unique(labels)
+
+    return labels, [labels_uniq[0], labels_uniq[-1]]
 
 
-def combine_and_vectorize(data_batches):
-    #from jayaram
-    data = np.concatenate(data_batches, axis=0)
-    s = data.shape
-    if len(s) > 2:
-        data = data.reshape((s[0], -1))
-
-    return data
 '''
 def make_tensor(e1, e2, requires_grad=True):
     #unused
@@ -60,22 +55,17 @@ def make_tensor(e1, e2, requires_grad=True):
     return output1, output2
 '''
 
-def extract_layer_embeddings(model, device, data_loader, num_samples=None, requires_grad=True):
-    #returns a list of torch tensors, where each torch tensor is a per layer embedding
+
+def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
+    # returns a list of torch tensors, where each torch tensor is a per layer embedding
     if model.training:
         model.eval()
 
     embeddings = []
     n_layers = 0
-    num_samples_partial = 0
-
     with torch.no_grad():
         for batch_idx, (data, target) in enumerate(data_loader):
             data = data.to(device)
-
-            temp = target.detach().cpu().numpy()
-            num_samples_partial += temp.shape[0]
-            
             # Layer outputs
             outputs_layers = model.layer_wise(data)
 
@@ -87,43 +77,39 @@ def extract_layer_embeddings(model, device, data_loader, num_samples=None, requi
                 n_layers = len(outputs_layers)
                 embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
-            if num_samples:
-                if num_samples_partial >= num_samples:
-                    break
+    for i in range(n_layers):
+        # Combine all the data batches and convert the numpy array to torch tensor
+        temp_arr = combine_and_vectorize(embeddings[i])
+        embeddings[i] = torch.from_numpy(temp_arr).to(device)
+        embeddings[i].requires_grad = requires_grad
 
-        for i in range(n_layers):
-            embeddings[i] = combine_and_vectorize(embeddings[i])
+    return embeddings
 
-    output = []
-    for embedding in embeddings:
-        output.append(torch.from_numpy(embedding))
 
-    return output
-
-def extract_input_embeddings(model, device, x_input, num_samples=None, requires_grad=True):
-    #returns a list of torch tensors, where each torch tensor is a per layer embedding
-    if model.training:
-        model.eval()
-
-    embeddings = []
-    n_layers = 0
+def extract_input_embeddings(model, device, x_input, requires_grad=True):
+    # Returns a list of torch tensors, where each torch tensor is a per layer embedding
+    # Model should already be set to eval mode
+    # if model.training:
+    #    model.eval()
 
     with torch.no_grad():
         data = x_input.to(device)
-        
         # Layer outputs
         outputs_layers = model.layer_wise(data)
-        n_layers = len(outputs_layers)
-        embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
-        for i in range(n_layers):
-            embeddings[i] = combine_and_vectorize(embeddings[i])
+    n_layers = len(outputs_layers)
+    for i in range(n_layers):
+        # Flatten all but the first dimension of the tensor and set/unset its requires_grad flag
+        tens = outputs_layers[i]
+        s = tens.size()
+        if len(s) > 2:
+            tens = tens.view(s[0], -1)
 
-    output = []
-    for embedding in embeddings:
-        output.append(torch.from_numpy(embedding))
+        tens.requires_grad = requires_grad
+        outputs_layers[i] = tens
 
-    return output
+    return outputs_layers
+
 
 def get_distance(p1, p2, dist_type='cosine'):
     #returns either the cosine distance or the euclidean distance, depending on what is specified
@@ -134,21 +120,22 @@ def get_distance(p1, p2, dist_type='cosine'):
     val = torch.div(numerator, denominator)
     #print(numerator, denominator, val)
     return val
-    
+
+
 def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
     #loss function needed by the attack formulation
     #pending
-    
-    def gaussian_kernel(dist):
+
+    # Need to pass the kernel a scale that is layer specific
+    def gaussian_kernel(dist, scale=1.0):
         inp = torch.mul(dist, dist)
-        val = torch.exp(inp)
-        return val
+        return torch.exp((-1 / scale) * inp)
 
     src_indices = indices
     target_indices = indices
 
     batch_size = x.size(0)
-    #embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, data_loader)
+    #embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
     num_embeddings = len(reps)
     adv_loss = torch.zeros((batch_size))
     #, device=device)
@@ -172,7 +159,9 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
             num_reps_per_label = src_reps.size(0)
             
             temp_sum_1 = torch.Tensor([0])
-            
+            # Avoid loop here and compute pairwise distances in a batch. See below:
+            # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.pairwise_distances.html
+            # https://github.com/jayaram-r/adversarial-detection/blob/master/expts/helpers/dimension_reduction_methods.py#L78
             for k in range(0, num_reps_per_label):
                 dist = get_distance(x_e, src_reps[k])
                 gauss_dist = gaussian_kernel(dist)
@@ -192,7 +181,7 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
             num_reps_per_label = target_reps.size(0)
 
             temp_sum_2 = torch.Tensor([0])
-            
+            # Same comment as before on pairwise distances
             for k in range(0, num_reps_per_label):
                 dist = get_distance(x_e, target_reps[k])
                 gauss_dist = gaussian_kernel(dist)
@@ -209,7 +198,9 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
         #exit()
         adv_loss = torch.add(adv_loss, diff)
         print(adv_loss, adv_loss.shape)
+
     return adv_loss
+
 
 #this function below needs to be re-written to factor in prediction from knn and not model
 #pending
@@ -217,10 +208,12 @@ def check_adv(x, label, model, device):
     y_pred = model(x).argmax(1)
     return torch.tensor((y_pred != label).astype(np.float32)).to(device)
 
+
 def return_indices(labels, label):
     #labels is a list
     #label is an int
     return np.where(labels == label)[0]
+
 
 def get_adv_labels(label, label_range):
     #given an ndarray `label` and a list of label ranges, return an ndarray of adv. labels i.e. the labels the input should be misclassified as 
@@ -236,11 +229,14 @@ def get_adv_labels(label, label_range):
     output = np.reshape(output, label_shape)
     return output
 
+
 def atanh(x):
     return 0.5 * torch.log((1 + x) / (1 - x))
 
+
 def sigmoid(x, a=1):
     return 1 / (1 + torch.exp(-a * x))
+
 
 #below is the main attack function
 #pending
@@ -262,7 +258,7 @@ def attack(model, device, data_loader, x_orig, label):
     verbose=True
         
     #all labels of the data_loader + range of labels 
-    labels, labels_range = get_labels(model, device, data_loader)
+    labels, labels_range = get_labels(data_loader)
     
     min_label = labels_range[0]
     max_label = labels_range[1]
@@ -322,15 +318,15 @@ def attack(model, device, data_loader, x_orig, label):
     best_dist = torch.zeros_like(const) + INFTY
 
 
-    #contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices of all elements whose label is i
-    indices = {}
+    # contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices
+    # of all elements whose label is i
+    indices = {i: return_indices(labels, i) for i in range(min_label, max_label + 1)}
     target_indices = {}
-    for i in range(min_label, max_label + 1):
-        indices[i] = return_indices(labels, i)
     
 
-    #reps contains the layer wise embeddings for the entire dataloader
-    reps = extract_layer_embeddings(model, device, data_loader)
+    # `reps` contains the layer wise embeddings for the entire dataloader
+    # gradients are not required for the representative samples
+    reps = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
 
     for binary_search_step in range(binary_search_steps):
 
@@ -356,12 +352,12 @@ def attack(model, device, data_loader, x_orig, label):
             loss.backward()
             optimizer.step()
 
-            if (verbose and iteration % (np.ceil(max_iterations / 10)) == 0):
-                print('    step: %d; loss: %.3f; dist: %.3f' %(iteration, loss.cpu().detach().numpy(), dist.mean().cpu().detach().numpy()))
+            if verbose and iteration % (np.ceil(max_iterations / 10)) == 0:
+                print('    step: %d; loss: %.3f; dist: %.3f' % (iteration, loss.cpu().detach().numpy(), dist.mean().cpu().detach().numpy()))
 
             # every <check_adv_steps>, save adversarial samples
             # with minimal perturbation
-            if ((iteration + 1) % check_adv_steps == 0 or iteration == max_iterations):
+            if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
                 is_adv = check_adv(x, label)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
@@ -388,6 +384,3 @@ def attack(model, device, data_loader, x_orig, label):
                 print('binary step: %d; num successful adv so far: %d/%d' %(binary_search_step, is_adv.sum(), batch_size))
 
     return x_adv
-
-
-
