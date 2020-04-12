@@ -116,39 +116,48 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     """
     Compute the sum of Gaussian kernels evaluated at the set of representative points `reps` and centered on `x`.
 
-    :param x: torch tensor with a particular layer embedding of the perturbed input. Specifically, `f_l(x + delta)`.
-              It is expected to be vectorized (flattened) with a shape like `(dim, )`.
+    :param x: torch tensor with a particular layer embedding of the perturbed inputs. Specifically, `f_l(x + delta)`.
+              It is expected to be a tensor of shape `(n_samp, n_dim)`, where `n_samp` is the number of inputs and
+              `n_dim` is the number of dimensions.
     :param reps: torch tensor with the layer embeddings of the representative samples from a particular class.
                  Specifically, `f_l(x_n)` for the set of `n` from a given class. Expected to be a tensor of shape
-                 `(n_reps, dim)`, where `n_reps` is the number of representative samples.
+                 `(n_reps, n_dim)`, where `n_reps` is the number of representative samples and `n_dim` is the number
+                 of dimensions.
     :param sigma: scale or standard deviation of the Gaussian kernel for layer `l`.
     :param metric: distance metric. Set to 'euclidean' or 'cosine'.
 
-    :return: scalar value that is the sum of the gaussian kernels.
+    :return: torch tensor of shape `(n_samp, )` with the sum of the Gaussian kernels for each of the `n_samp`
+             inputs in `x`.
     """
-    n_samp, n_dim = reps.size()
+    n_samp, d = x.size()
+    n_reps, n_dim = reps.size()
+    assert d == n_dim, "Mismatch in the input dimensions"
+
     # `x` is a function of the perturbation vector, which is the variable of optimization
     x.requires_grad = True
 
     if metric == 'cosine':
         # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
         # a scale factor)
-        norm_x = torch.norm(x, p=2) + 1e-32
-        x_n = torch.div(x, norm_x)
-        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-32
-        reps_n = torch.div(reps, norm_reps.view(n_samp, 1))
+        norm_x = torch.norm(x, p=2, dim=1) + 1e-16
+        x_n = torch.div(x, norm_x.view(n_samp, 1))
+        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-16
+        reps_n = torch.div(reps, norm_reps.view(n_reps, 1))
     elif metric == 'euclidean':
         x_n = x
         reps_n = reps
     else:
         raise ValueError("Invalid value '{}' for the input 'metric'".format(metric))
 
-    diff = reps_n - x_n.view(1, n_dim)
-    norm_diff = torch.norm(diff, p=2, dim=1)
-    temp_ten = (-1. / (sigma * sigma)) * torch.pow(norm_diff, 2)
-    max_val = torch.max(temp_ten)
+    # Compute pairwise euclidean distances
+    dist_mat = torch.cdist(torch.unsqueeze(x_n, 0), torch.unsqueeze(reps_n, 0), p=2)
+    dist_mat = torch.squeeze(dist_mat, 0)
+    temp_ten = (-1. / (sigma * sigma)) * torch.pow(dist_mat, 2)
+    # `dist_mat` and `temp_ten` will have the same size `(n_samp, n_reps)`
+    max_val = torch.max(temp_ten, dim=1)
+    # `max_val` will have size `(n_samp, )`
 
-    return torch.exp(max_val) * torch.exp(temp_ten - max_val).sum()
+    return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
 def get_distance(p1, p2, dist_type='cosine'):
