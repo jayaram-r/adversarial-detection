@@ -27,36 +27,6 @@ def get_labels(data_loader):
     return labels, [labels_uniq[0], labels_uniq[-1]]
 
 
-'''
-def make_tensor(e1, e2, requires_grad=True):
-    #unused
-    with torch.set_grad_enabled(requires_grad):
-        n = len(e1) #should be equal to the batch size
-        m = len(e1[0]) #should be equal to the number of layers from which we extract embeddings
-        output1 = []
-        for i in range(0, m):
-            for j in range(0, n):
-                if j == 0:
-                    temp = e1[j][i]
-                else:
-                    temp = np.vstack((temp, e1[j][i]))
-            output1.append(torch.from_numpy(temp))
-
-        output2 = []
-        n = len(e2)
-        m = len(e2[0])
-        for i in range(0, m):
-            for j in range(0, n):
-                if j == 0:
-                    temp = e2[j][i]
-                else:
-                    temp = np.vstack((temp, e2[j][i]))
-            output2.append(torch.from_numpy(temp))
-
-    return output1, output2
-'''
-
-
 def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
     # returns a list of torch tensors, where each torch tensor is a per layer embedding
     if model.training:
@@ -81,9 +51,11 @@ def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
     for i in range(n_layers):
         # Combine all the data batches and convert the numpy array to torch tensor
         temp_arr = combine_and_vectorize(embeddings[i])
+        embeddings[i] = temp_arr
+        '''
         embeddings[i] = torch.from_numpy(temp_arr).to(device)
         embeddings[i].requires_grad = requires_grad
-
+        '''
     return embeddings
 
 
@@ -170,8 +142,33 @@ def get_distance(p1, p2, dist_type='cosine'):
     #print(numerator, denominator, val)
     return val
 
+def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, min_label, max_label):
 
-def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
+    batch_size = x.size(0)
+    num_embeddings = len(reps[0])
+
+    def preprocess_input(x, label, min_label, max_label):
+        indices = {}
+        output = {}
+        
+        for l in range(min_label, max_label+1):
+            indices[l] = np.where(label == l)[0]
+            output[l] = x[list(indices[l])]
+
+        return output
+
+    classwise_x = preprocess_input(x, label, min_label, max_label)
+    
+    uniq_labels = [k for k in classwise_x.keys()]
+
+    for i in range(num_embeddings):
+        for uniq_label in uniq_labels:
+            input1 = classwise_x[uniq_label]
+            input2 = reps[uniq_label][i]
+            #call jayaram's function here
+    
+
+def loss_function_unused(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
     #loss function needed by the attack formulation
     #pending
 
@@ -352,6 +349,22 @@ def attack(model, device, data_loader, x_orig, label):
         x = x * b + a
         return x
 
+    def preprocess_reps(reps, indices):
+        labels = [k for k in indices.keys()]
+        output = {}
+        num_embeddings = len(reps)
+        for label in labels:
+            indices_needed = list(indices[label])
+            for layer in range(num_embeddings):
+                rep = reps[layer]
+                rep_needed = rep[indices_needed]
+                if layer == 0:
+                    output[label] = [rep_needed]
+                else:
+                    output[label].append(rep_needed)
+
+        return output
+
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
     x_recon = to_model_space(z_orig)
@@ -370,10 +383,12 @@ def attack(model, device, data_loader, x_orig, label):
     indices = {i: return_indices(labels, i) for i in range(min_label, max_label + 1)}
     target_indices = {}
     
-
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
     reps = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
+
+    #reps is now a list of lists; reps[i] denotes all the representations corresponding to label i
+    reps = preprocess_reps(reps, indices)
 
     for binary_search_step in range(binary_search_steps):
 
