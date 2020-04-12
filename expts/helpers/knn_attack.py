@@ -143,6 +143,8 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     else:
         raise ValueError("Invalid value '{}' for the input 'metric'".format(metric))
 
+    # Divide `sigma` by sqrt(2) to cancel out the factor of `1 / 2` in the multivariate normal density
+    sigma = sigma / (2 ** 0.5)
     # Lower triangular factor of the covariance matrix.
     # Covariance matrix in this case is `sigma^2` times the identity matrix
     scale_tril = torch.diag(sigma * torch.ones(n_dim))
