@@ -148,7 +148,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     temp_ten = (-1. / (sigma * sigma)) * torch.pow(norm_diff, 2)
     max_val = torch.max(temp_ten)
 
-    return np.exp(max_val) * np.exp(temp_ten - max_val).sum()
+    return torch.exp(max_val) * torch.exp(temp_ten - max_val).sum()
 
 
 def get_distance(p1, p2, dist_type='cosine'):
