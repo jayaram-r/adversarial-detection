@@ -143,21 +143,12 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     else:
         raise ValueError("Invalid value '{}' for the input 'metric'".format(metric))
 
-    # Divide `sigma` by sqrt(2) to cancel out the factor of `1 / 2` in the multivariate normal density
-    sigma = sigma / (2 ** 0.5)
-    # Lower triangular factor of the covariance matrix.
-    # Covariance matrix in this case is `sigma^2` times the identity matrix
-    scale_tril = torch.diag(sigma * torch.ones(n_dim))
+    diff = reps_n - x_n.view(1, n_dim)
+    norm_diff = torch.norm(diff, p=2, dim=1)
+    temp_ten = (-1. / (sigma * sigma)) * torch.pow(norm_diff, 2)
+    max_val = torch.max(temp_ten)
 
-    # Multivariate normal density with mean at `x_n` and scaled identity covariance matrix
-    distr = MultivariateNormal(x_n, scale_tril=scale_tril)
-
-    # Log of the normalization constant of the multivariate normal density
-    log_const = -0.5 * n_dim * (np.log(2 * np.pi) + 2 * np.log(sigma))
-    # Log pdf of `reps_n`
-    log_vals = distr.log_prob(reps_n)
-
-    return torch.exp(torch.logsumexp(log_vals, dim=0) - log_const)
+    return np.exp(max_val) * np.exp(temp_ten - max_val).sum()
 
 
 def get_distance(p1, p2, dist_type='cosine'):
