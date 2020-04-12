@@ -27,36 +27,6 @@ def get_labels(data_loader):
     return labels, [labels_uniq[0], labels_uniq[-1]]
 
 
-'''
-def make_tensor(e1, e2, requires_grad=True):
-    #unused
-    with torch.set_grad_enabled(requires_grad):
-        n = len(e1) #should be equal to the batch size
-        m = len(e1[0]) #should be equal to the number of layers from which we extract embeddings
-        output1 = []
-        for i in range(0, m):
-            for j in range(0, n):
-                if j == 0:
-                    temp = e1[j][i]
-                else:
-                    temp = np.vstack((temp, e1[j][i]))
-            output1.append(torch.from_numpy(temp))
-
-        output2 = []
-        n = len(e2)
-        m = len(e2[0])
-        for i in range(0, m):
-            for j in range(0, n):
-                if j == 0:
-                    temp = e2[j][i]
-                else:
-                    temp = np.vstack((temp, e2[j][i]))
-            output2.append(torch.from_numpy(temp))
-
-    return output1, output2
-'''
-
-
 def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
     # returns a list of torch tensors, where each torch tensor is a per layer embedding
     if model.training:
@@ -81,9 +51,11 @@ def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
     for i in range(n_layers):
         # Combine all the data batches and convert the numpy array to torch tensor
         temp_arr = combine_and_vectorize(embeddings[i])
+        embeddings[i] = temp_arr
+        '''
         embeddings[i] = torch.from_numpy(temp_arr).to(device)
         embeddings[i].requires_grad = requires_grad
-
+        '''
     return embeddings
 
 
@@ -116,48 +88,48 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     """
     Compute the sum of Gaussian kernels evaluated at the set of representative points `reps` and centered on `x`.
 
-    :param x: torch tensor with a particular layer embedding of the perturbed input. Specifically, `f_l(x + delta)`.
-              It is expected to be vectorized (flattened) with a shape like `(dim, )`.
+    :param x: torch tensor with a particular layer embedding of the perturbed inputs. Specifically, `f_l(x + delta)`.
+              It is expected to be a tensor of shape `(n_samp, n_dim)`, where `n_samp` is the number of inputs and
+              `n_dim` is the number of dimensions.
     :param reps: torch tensor with the layer embeddings of the representative samples from a particular class.
                  Specifically, `f_l(x_n)` for the set of `n` from a given class. Expected to be a tensor of shape
-                 `(n_reps, dim)`, where `n_reps` is the number of representative samples.
+                 `(n_reps, n_dim)`, where `n_reps` is the number of representative samples and `n_dim` is the number
+                 of dimensions.
     :param sigma: scale or standard deviation of the Gaussian kernel for layer `l`.
     :param metric: distance metric. Set to 'euclidean' or 'cosine'.
 
-    :return: scalar value that is the sum of the gaussian kernels.
+    :return: torch tensor of shape `(n_samp, )` with the sum of the Gaussian kernels for each of the `n_samp`
+             inputs in `x`.
     """
-    n_samp, n_dim = reps.size()
+    n_samp, d = x.size()
+    n_reps, n_dim = reps.size()
+    assert d == n_dim, "Mismatch in the input dimensions"
+
     # `x` is a function of the perturbation vector, which is the variable of optimization
     x.requires_grad = True
 
     if metric == 'cosine':
         # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
         # a scale factor)
-        norm_x = torch.norm(x, p=2) + 1e-32
-        x_n = torch.div(x, norm_x)
-        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-32
-        reps_n = torch.div(reps, norm_reps.view(n_samp, 1))
+        norm_x = torch.norm(x, p=2, dim=1) + 1e-16
+        x_n = torch.div(x, norm_x.view(n_samp, 1))
+        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-16
+        reps_n = torch.div(reps, norm_reps.view(n_reps, 1))
     elif metric == 'euclidean':
         x_n = x
         reps_n = reps
     else:
         raise ValueError("Invalid value '{}' for the input 'metric'".format(metric))
 
-    # Divide `sigma` by sqrt(2) to cancel out the factor of `1 / 2` in the multivariate normal density
-    sigma = sigma / (2 ** 0.5)
-    # Lower triangular factor of the covariance matrix.
-    # Covariance matrix in this case is `sigma^2` times the identity matrix
-    scale_tril = torch.diag(sigma * torch.ones(n_dim))
+    # Compute pairwise euclidean distances
+    dist_mat = torch.cdist(torch.unsqueeze(x_n, 0), torch.unsqueeze(reps_n, 0), p=2)
+    dist_mat = torch.squeeze(dist_mat, 0)
+    temp_ten = (-1. / (sigma * sigma)) * torch.pow(dist_mat, 2)
+    # `dist_mat` and `temp_ten` will have the same size `(n_samp, n_reps)`
+    max_val, _ = torch.max(temp_ten, dim=1)
+    # `max_val` will have size `(n_samp, )`
 
-    # Multivariate normal density with mean at `x_n` and scaled identity covariance matrix
-    distr = MultivariateNormal(x_n, scale_tril=scale_tril)
-
-    # Log of the normalization constant of the multivariate normal density
-    log_const = -0.5 * n_dim * (np.log(2 * np.pi) + 2 * np.log(sigma))
-    # Log pdf of `reps_n`
-    log_vals = distr.log_prob(reps_n)
-
-    return torch.exp(torch.logsumexp(log_vals, dim=0) - log_const)
+    return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
 def get_distance(p1, p2, dist_type='cosine'):
@@ -170,8 +142,33 @@ def get_distance(p1, p2, dist_type='cosine'):
     #print(numerator, denominator, val)
     return val
 
+def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, min_label, max_label):
 
-def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
+    batch_size = x.size(0)
+    num_embeddings = len(reps[0])
+
+    def preprocess_input(x, label, min_label, max_label):
+        indices = {}
+        output = {}
+        
+        for l in range(min_label, max_label+1):
+            indices[l] = np.where(label == l)[0]
+            output[l] = x[list(indices[l])]
+
+        return output
+
+    classwise_x = preprocess_input(x, label, min_label, max_label)
+    
+    uniq_labels = [k for k in classwise_x.keys()]
+
+    for i in range(num_embeddings):
+        for uniq_label in uniq_labels:
+            input1 = classwise_x[uniq_label]
+            input2 = reps[uniq_label][i]
+            #call jayaram's function here
+    
+
+def loss_function_unused(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
     #loss function needed by the attack formulation
     #pending
 
@@ -352,6 +349,22 @@ def attack(model, device, data_loader, x_orig, label):
         x = x * b + a
         return x
 
+    def preprocess_reps(reps, indices):
+        labels = [k for k in indices.keys()]
+        output = {}
+        num_embeddings = len(reps)
+        for label in labels:
+            indices_needed = list(indices[label])
+            for layer in range(num_embeddings):
+                rep = reps[layer]
+                rep_needed = rep[indices_needed]
+                if layer == 0:
+                    output[label] = [rep_needed]
+                else:
+                    output[label].append(rep_needed)
+
+        return output
+
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
     x_recon = to_model_space(z_orig)
@@ -370,10 +383,12 @@ def attack(model, device, data_loader, x_orig, label):
     indices = {i: return_indices(labels, i) for i in range(min_label, max_label + 1)}
     target_indices = {}
     
-
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
     reps = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
+
+    #reps is now a list of lists; reps[i] denotes all the representations corresponding to label i
+    reps = preprocess_reps(reps, indices)
 
     for binary_search_step in range(binary_search_steps):
 
