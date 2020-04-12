@@ -154,7 +154,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     dist_mat = torch.squeeze(dist_mat, 0)
     temp_ten = (-1. / (sigma * sigma)) * torch.pow(dist_mat, 2)
     # `dist_mat` and `temp_ten` will have the same size `(n_samp, n_reps)`
-    max_val = torch.max(temp_ten, dim=1)
+    max_val, _ = torch.max(temp_ten, dim=1)
     # `max_val` will have size `(n_samp, )`
 
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
