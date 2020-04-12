@@ -6,6 +6,7 @@ import numpy as np
 import scipy
 import os
 from numpy import linalg as LA
+from torch.distributions.multivariate_normal import MultivariateNormal
 from helpers.constants import ROOT
 from helpers.utils import combine_and_vectorize
 
@@ -111,6 +112,52 @@ def extract_input_embeddings(model, device, x_input, requires_grad=True):
     return outputs_layers
 
 
+def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
+    """
+    Compute the sum of Gaussian kernels evaluated at the set of representative points `reps` and centered on `x`.
+
+    :param x: torch tensor with a particular layer embedding of the perturbed input. Specifically, `f_l(x + delta)`.
+              It is expected to be vectorized (flattened) with a shape like `(dim, )`.
+    :param reps: torch tensor with the layer embeddings of the representative samples from a particular class.
+                 Specifically, `f_l(x_n)` for the set of `n` from a given class. Expected to be a tensor of shape
+                 `(n_reps, dim)`, where `n_reps` is the number of representative samples.
+    :param sigma: scale or standard deviation of the Gaussian kernel for layer `l`.
+    :param metric: distance metric. Set to 'euclidean' or 'cosine'.
+
+    :return: scalar value that is the sum of the gaussian kernels.
+    """
+    n_samp, n_dim = reps.size()
+    # `x` is a function of the perturbation vector, which is the variable of optimization
+    x.requires_grad = True
+
+    if metric == 'cosine':
+        # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
+        # a scale factor)
+        norm_x = torch.norm(x, p=2) + 1e-32
+        x_n = torch.div(x, norm_x)
+        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-32
+        reps_n = torch.div(reps, norm_reps.view(n_samp, 1))
+    elif metric == 'euclidean':
+        x_n = x
+        reps_n = reps
+    else:
+        raise ValueError("Invalid value '{}' for the input 'metric'".format(metric))
+
+    # Lower triangular factor of the covariance matrix.
+    # Covariance matrix in this case is `sigma^2` times the identity matrix
+    scale_tril = torch.diag(sigma * torch.ones(n_dim))
+
+    # Multivariate normal density with mean at `x_n` and scaled identity covariance matrix
+    distr = MultivariateNormal(x_n, scale_tril=scale_tril)
+
+    # Log of the normalization constant of the multivariate normal density
+    log_const = -0.5 * n_dim * (np.log(2 * np.pi) + 2 * np.log(sigma))
+    # Log pdf of `reps_n`
+    log_vals = distr.log_prob(reps_n)
+
+    return torch.exp(torch.logsumexp(log_vals, dim=0) - log_const)
+
+
 def get_distance(p1, p2, dist_type='cosine'):
     #returns either the cosine distance or the euclidean distance, depending on what is specified
     numerator = torch.dot(p1.view(-1,),p2.view(-1,))
@@ -159,9 +206,7 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
             num_reps_per_label = src_reps.size(0)
             
             temp_sum_1 = torch.Tensor([0])
-            # Avoid loop here and compute pairwise distances in a batch. See below:
-            # https://scikit-learn.org/stable/modules/generated/sklearn.metrics.pairwise_distances.html
-            # https://github.com/jayaram-r/adversarial-detection/blob/master/expts/helpers/dimension_reduction_methods.py#L78
+            # Avoid loop here and use the function `sum_gaussian_kernels`
             for k in range(0, num_reps_per_label):
                 dist = get_distance(x_e, src_reps[k])
                 gauss_dist = gaussian_kernel(dist)
@@ -181,7 +226,7 @@ def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, 
             num_reps_per_label = target_reps.size(0)
 
             temp_sum_2 = torch.Tensor([0])
-            # Same comment as before on pairwise distances
+            # Avoid loop here and use the function `sum_gaussian_kernels`
             for k in range(0, num_reps_per_label):
                 dist = get_distance(x_e, target_reps[k])
                 gauss_dist = gaussian_kernel(dist)
