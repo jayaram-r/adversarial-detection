@@ -117,8 +117,8 @@ def main():
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
-    # Should `model` be set to evaluation mode here?
-    # model.eval()
+    # Set model to evaluation mode
+    model.eval()
 
     # convert the test data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
