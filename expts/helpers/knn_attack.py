@@ -219,43 +219,43 @@ def get_adv_labels(label, label_range):
 
 
 def atanh(x):
-    return 0.5 * torch.log((1 + x) / (1 - x))
+    return 0.5 * torch.log((1. + x) / (1. - x))
 
 
-def sigmoid(x, a=1):
-    return 1 / (1 + torch.exp(-a * x))
+def sigmoid(x, a=1.):
+    return torch.sigmoid(a * x)
 
 
 #below is the main attack function
 #pending
 def attack(model, device, data_loader, x_orig, label):
-
-    #x_orig is a torch tensor
-    #label is a torch tensor
+    # x_orig is a torch tensor
+    # label is a torch tensor
     
-    init_mode=1 
-    init_mode_k=1 
-    binary_search_steps=1
-    max_iterations=500 
-    learning_rate=1e-2 
-    initial_const=1
-    max_linf=None
-    random_start=False 
-    thres_steps=100
-    check_adv_steps=100
-    verbose=True
+    init_mode = 1
+    init_mode_k = 1
+    binary_search_steps = 1
+    max_iterations = 500
+    learning_rate = 1e-2
+    initial_const = 1.
+    max_linf = None
+    random_start = False
+    thres_steps = 100
+    check_adv_steps = 100
+    verbose = True
         
     #all labels of the data_loader + range of labels 
     labels, labels_range = get_labels(data_loader)
-    
     min_label = labels_range[0]
     max_label = labels_range[1]
 
-    min_ = torch.tensor(0., device=device)
-    max_ = torch.tensor(1., device=device)
+    min_, max_ = x_orig.min(), x_orig.max()
+    # min_ = torch.tensor(0., device=device)
+    # max_ = torch.tensor(1., device=device)
     if max_linf is not None:
         min_ = torch.max(x_orig - max_linf, min_)
         max_ = torch.min(x_orig + max_linf, max_)
+
     batch_size = x_orig.size(0)
     x_adv = x_orig.clone()
     
@@ -274,24 +274,24 @@ def attack(model, device, data_loader, x_orig, label):
     
     def to_attack_space(x):
         # map from [min_, max_] to [-1, +1]
-        a = (min_ + max_) / 2
-        b = (max_ - min_) / 2
-        x = (x - a) / b
-        # from [-1, +1] to approx. (-1, +1)
-        x = x * 0.999999
+        a = (min_ + max_) / 2.
+        b = (max_ - min_) / 2.
+        # map to the open interval (-1, 1)
+        x = (1 - 1e-16) * ((x - a) / b)
+
         # from (-1, +1) to (-inf, +inf)
         return atanh(x)
 
     def to_model_space(x):
         """Transforms an input from the attack space to the model space.
         This transformation and the returned gradient are elementwise."""
-        # from (-inf, +inf) to (-1, +1)
+        # map from (-inf, +inf) to (-1, +1)
         x = torch.tanh(x)
         # map from (-1, +1) to (min_, max_)
-        a = (min_ + max_) / 2
-        b = (max_ - min_) / 2
-        x = x * b + a
-        return x
+        a = (min_ + max_) / 2.
+        b = (max_ - min_) / 2.
+
+        return b * x + a
 
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
