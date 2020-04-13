@@ -388,10 +388,10 @@ def main():
         assert data_te_noisy.shape[0] == num_clean_te, ("Number of noisy samples from the test fold is different "
                                                         "from expected")
         # Data loader for the noisy train and test fold data
-        noisy_train_fold_loader = convert_to_loader(data_tr_noisy, labels_tr_noisy, batch_size=args.batch_size,
-                                                    device=device)
-        noisy_test_fold_loader = convert_to_loader(data_te_noisy, labels_te_noisy, batch_size=args.batch_size,
-                                                   device=device)
+        noisy_train_fold_loader = convert_to_loader(data_tr_noisy, labels_tr_noisy, dtype_x=torch.float,
+                                                    batch_size=args.batch_size, device=device)
+        noisy_test_fold_loader = convert_to_loader(data_te_noisy, labels_te_noisy, dtype_x=torch.float,
+                                                   batch_size=args.batch_size, device=device)
         print("\nCalculating the layer embeddings and DNN predictions for the noisy train data split:")
         layer_embeddings_tr_noisy, labels_pred_tr_noisy = helper_layer_embeddings(
             model, device, noisy_train_fold_loader, args.detection_method, labels_tr_noisy
@@ -409,7 +409,7 @@ def main():
         # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
         # Maximum number of adversarial samples in the test fold
-        max_num_adv = int(np.ceil(args.max_attack_prop * num_clean_te))
+        max_num_adv = int(np.ceil((args.max_attack_prop / (1. - args.max_attack_prop)) * num_clean_te))
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
             numpy_save_path,
             max_n_test=max_num_adv,
