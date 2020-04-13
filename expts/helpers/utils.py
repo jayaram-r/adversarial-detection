@@ -212,7 +212,7 @@ def load_noisy_data(path):
 
 
 def get_data_bounds(data, alpha=0.95):
-    bounds = [np.min(data), np.max(data)]
+    bounds = [data.min(), data.max()]
     # Value slightly smaller than the minimum
     bounds[0] = (alpha * bounds[0]) if bounds[0] >= 0 else (bounds[0] / alpha)
     # Value slightly larger than the maximum

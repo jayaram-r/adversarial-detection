@@ -8,7 +8,7 @@ import os
 from numpy import linalg as LA
 from torch.distributions.multivariate_normal import MultivariateNormal
 from helpers.constants import ROOT
-from helpers.utils import combine_and_vectorize
+from helpers.utils import combine_and_vectorize, get_data_bounds
 
 INFTY = 1e20
 
@@ -248,8 +248,9 @@ def attack(model, device, data_loader, x_orig, label):
     labels, labels_range = get_labels(data_loader)
     min_label = labels_range[0]
     max_label = labels_range[1]
-
-    min_, max_ = x_orig.min(), x_orig.max()
+    
+    # Get the range of values in `x_orig`
+    min_, max_ = get_data_bounds(x_orig, alpha=0.99)
     # min_ = torch.tensor(0., device=device)
     # max_ = torch.tensor(1., device=device)
     if max_linf is not None:
@@ -277,7 +278,9 @@ def attack(model, device, data_loader, x_orig, label):
         a = (min_ + max_) / 2.
         b = (max_ - min_) / 2.
         # map to the open interval (-1, 1)
-        x = (1 - 1e-16) * ((x - a) / b)
+        lb = -1 + 1e-16
+        ub = 1 - 1e-16
+        x = torch.clamp((x - a) / b, min=lb, max=ub)
 
         # from (-1, +1) to (-inf, +inf)
         return atanh(x)
@@ -333,7 +336,7 @@ def attack(model, device, data_loader, x_orig, label):
 
             #obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
-            
+
             loss = loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label)
             exit()
             loss.backward()
