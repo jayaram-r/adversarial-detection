@@ -277,9 +277,7 @@ def attack(model, device, data_loader, x_orig, label):
         a = (min_ + max_) / 2.
         b = (max_ - min_) / 2.
         # map to the open interval (-1, 1)
-        lb = -1 + 1e-16
-        ub = 1 - 1e-16
-        x = torch.clamp((x - a) / b, min=lb, max=ub)
+        x = (1 - 1e-16) * ((x - a) / b)
 
         # from (-1, +1) to (-inf, +inf)
         return atanh(x)
