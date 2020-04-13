@@ -26,11 +26,13 @@ def get_labels(data_loader):
 
     return labels, [labels_uniq[0], labels_uniq[-1]]
 
-
-def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
+def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=True):
     # returns a list of torch tensors, where each torch tensor is a per layer embedding
     if model.training:
         model.eval()
+
+    output = {}
+    labels = list(indices.keys())
 
     embeddings = []
     n_layers = 0
@@ -48,15 +50,23 @@ def extract_layer_embeddings(model, device, data_loader, requires_grad=True):
                 n_layers = len(outputs_layers)
                 embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
-    for i in range(n_layers):
-        # Combine all the data batches and convert the numpy array to torch tensor
-        temp_arr = combine_and_vectorize(embeddings[i])
-        embeddings[i] = temp_arr
-        '''
-        embeddings[i] = torch.from_numpy(temp_arr).to(device)
-        embeddings[i].requires_grad = requires_grad
-        '''
-    return embeddings
+    for label in labels:
+        indices_needed = list(indices[label])
+        for i in range(n_layers):
+            # Combine all the data batches and convert the numpy array to torch tensor
+            temp_arr = combine_and_vectorize(embeddings[i])
+            temp_arr = temp_arr[indices_needed]
+            temp_arr = torch.from_numpy(temp_arr).to(device)
+            temp_arr.requires_grad = requires_grad
+            if i == 0:
+                output[label] = [temp_arr]
+            else:
+                output[label].append(temp_arr)
+            #embeddings[i] = temp_arr
+            #embeddings[i] = torch.from_numpy(temp_arr).to(device)
+            #embeddings[i].requires_grad = requires_grad
+    
+    return output
 
 
 def extract_input_embeddings(model, device, x_input, requires_grad=True):
@@ -106,7 +116,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     assert d == n_dim, "Mismatch in the input dimensions"
 
     # `x` is a function of the perturbation vector, which is the variable of optimization
-    x.requires_grad = True
+    #x.requires_grad = True
 
     if metric == 'cosine':
         # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
@@ -132,6 +142,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
+#not useful?
 def get_distance(p1, p2, dist_type='cosine'):
     #returns either the cosine distance or the euclidean distance, depending on what is specified
     numerator = torch.dot(p1.view(-1,),p2.view(-1,))
@@ -142,110 +153,43 @@ def get_distance(p1, p2, dist_type='cosine'):
     #print(numerator, denominator, val)
     return val
 
-def loss_function(x, x_recon, x_embedding, reps, device, indices, const, label, min_label, max_label):
+def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label):
 
     batch_size = x.size(0)
     num_embeddings = len(reps[0])
 
-    def preprocess_input(x, label, min_label, max_label):
+    def preprocess_input(x_embeddings, label, min_label, max_label):
         indices = {}
         output = {}
-        
+        num_embeddings = len(x_embeddings)
         for l in range(min_label, max_label+1):
             indices[l] = np.where(label == l)[0]
-            output[l] = x[list(indices[l])]
+           
+        for i in range(num_embeddings):
+            for l in range(min_label, max_label+1):
+                if i == 0:
+                    output[l] = [x_embeddings[i][list(indices[l])]]
+                else:
+                    output[l].append(x_embeddings[i][list(indices[l])])
 
         return output
 
-    classwise_x = preprocess_input(x, label, min_label, max_label)
+    classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
     
     uniq_labels = [k for k in classwise_x.keys()]
 
     for i in range(num_embeddings):
         for uniq_label in uniq_labels:
-            input1 = classwise_x[uniq_label]
+            input1 = classwise_x[uniq_label][i]
             input2 = reps[uniq_label][i]
-            #call jayaram's function here
+            print(input1)
+            print(input2)
+            exit()
+            val = sum_gaussian_kernels(input1, input2, 1)
+            print(val, val.sum(0))
+
+    return None
     
-
-def loss_function_unused(x, x_recon, x_embedding, reps, device, indices, const, label, max_label):
-    #loss function needed by the attack formulation
-    #pending
-
-    # Need to pass the kernel a scale that is layer specific
-    def gaussian_kernel(dist, scale=1.0):
-        inp = torch.mul(dist, dist)
-        return torch.exp((-1 / scale) * inp)
-
-    src_indices = indices
-    target_indices = indices
-
-    batch_size = x.size(0)
-    #embeddings, labels, labels_pred, counts = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
-    num_embeddings = len(reps)
-    adv_loss = torch.zeros((batch_size))
-    #, device=device)
-
-    num_embeddings = len(reps)
-    
-    #must find way to avoid using loops
-    for embedding_num in range(0, num_embeddings):
-        rep = reps[embedding_num] #is a torch tensor 
-        
-        for sample_num in range(0, batch_size):
-            x_e = x_embedding[embedding_num][sample_num]
-            x_label = label[sample_num]
-
-            #obtain those indices of the dataset corresponding to label == x_label from the dict `indices`
-            required_src_indices = src_indices[x_label]
-            required_src_indices = list(required_src_indices)
-
-            #obtain the embeddings from the entire data_loader corresponding to the indices obtained above; desired_reps is a torch tensor
-            src_reps = rep[required_src_indices] #might not be able to do this over a torch tensor
-            num_reps_per_label = src_reps.size(0)
-            
-            temp_sum_1 = torch.Tensor([0])
-            # Avoid loop here and use the function `sum_gaussian_kernels`
-            for k in range(0, num_reps_per_label):
-                dist = get_distance(x_e, src_reps[k])
-                gauss_dist = gaussian_kernel(dist)
-                temp_sum_1 += gauss_dist
-            
-            if sample_num == 0:
-                final_1 = temp_sum_1
-            else:
-                final_1 = torch.cat((final_1, temp_sum_1), 0)    
-                
-            #obtain those indices of the dataset corresponding to label == x_label from the dict `indices`
-            required_target_indices = target_indices[max_label - x_label]
-            required_target_indices = list(required_target_indices)
-            
-            #obtain the embeddings from the entire data_loader corresponding to the indices obtained above; desired_reps is a torch tensor
-            target_reps = rep[required_target_indices] #might not be able to do this over a torch tensor
-            num_reps_per_label = target_reps.size(0)
-
-            temp_sum_2 = torch.Tensor([0])
-            # Avoid loop here and use the function `sum_gaussian_kernels`
-            for k in range(0, num_reps_per_label):
-                dist = get_distance(x_e, target_reps[k])
-                gauss_dist = gaussian_kernel(dist)
-                temp_sum_2 += gauss_dist
-
-            if sample_num == 0:
-                final_2 = temp_sum_2
-            else:
-                final_2 = torch.cat((final_2, temp_sum_2), 0)
-        
-        diff = torch.sub(final_1, final_2)
-        #diff.to(device)
-        #print(final_1, final_2)
-        #exit()
-        adv_loss = torch.add(adv_loss, diff)
-        print(adv_loss, adv_loss.shape)
-
-    return adv_loss
-
-
 #this function below needs to be re-written to factor in prediction from knn and not model
 #pending
 def check_adv(x, label, model, device):
@@ -349,22 +293,6 @@ def attack(model, device, data_loader, x_orig, label):
         x = x * b + a
         return x
 
-    def preprocess_reps(reps, indices):
-        labels = [k for k in indices.keys()]
-        output = {}
-        num_embeddings = len(reps)
-        for label in labels:
-            indices_needed = list(indices[label])
-            for layer in range(num_embeddings):
-                rep = reps[layer]
-                rep_needed = rep[indices_needed]
-                if layer == 0:
-                    output[label] = [rep_needed]
-                else:
-                    output[label].append(rep_needed)
-
-        return output
-
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
     x_recon = to_model_space(z_orig)
@@ -385,11 +313,8 @@ def attack(model, device, data_loader, x_orig, label):
     
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
-    reps = extract_layer_embeddings(model, device, data_loader, requires_grad=False)
-
-    #reps is now a list of lists; reps[i] denotes all the representations corresponding to label i
-    reps = preprocess_reps(reps, indices)
-
+    reps = extract_layer_embeddings(model, device, data_loader, indices, requires_grad=False)
+    
     for binary_search_step in range(binary_search_steps):
 
         # initialize perturbation in transformed space
@@ -409,7 +334,7 @@ def attack(model, device, data_loader, x_orig, label):
             #obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
             
-            loss = loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, max_label)
+            loss = loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label)
             exit()
             loss.backward()
             optimizer.step()
