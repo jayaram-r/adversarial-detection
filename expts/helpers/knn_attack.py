@@ -26,6 +26,7 @@ def get_labels(data_loader):
 
     return labels, [labels_uniq[0], labels_uniq[-1]]
 
+
 def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=True):
     # returns a list of torch tensors, where each torch tensor is a per layer embedding
     if model.training:
@@ -220,8 +221,9 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
         reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, dim)
         adv_loss_src += reconstructed_tensor
     
-    #second double summation based on the paper
-    #note: input2 can be different; this is a weird way to determine the representations for the adversarial label (which is determined as max_label - true_label)
+    # second double summation based on the paper
+    # note: input2 can be different; this is a weird way to determine the representations for the adversarial label
+    # (which is determined as max_label - true_label)
     for i in range(num_embeddings):
         val_list = {}
         for uniq_label in uniq_labels:
@@ -244,25 +246,21 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
     return total_loss.mean(), dist.sqrt()
     
 
-def check_adv(x, model_path, label, model, device):
-    #embeddings are obtained for the adversarial input x
+def check_adv(x, det_model, label, model, device):
+    # embeddings are obtained for the adversarial input x
     embeddings = extract_input_embeddings(x, model, device)
 
-    #embeddings[i] are converted to a ndarray
+    # embeddings[i] are converted to a ndarray
     for i in range(len(embeddings)):
         embeddings[i] = embeddings[i].cpu().detach().numpy()
 
-    #note: embeddings should be a ndarray
-
-    #dknn model is loaded from pkl file based on the 'model_path' specified
-    with open(model_path, 'rb') as f:
-        det_model = pickle.load(f)
-
-    # Scores on clean data from the test fold
+    # note: embeddings should be a ndarray
+    # scores and class predictions from the detection model
     _, labels_pred = det_model.score(embeddings)
 
-    #check if labels_pred == label; the output will be a boolean ndarray of shape == label.shape
-    return labels_pred == label
+    # check if labels_pred == label; the output will be a boolean ndarray of shape == label.shape
+    return labels_pred != label
+
 
 def return_indices(labels, label):
     #labels is a list
@@ -271,8 +269,9 @@ def return_indices(labels, label):
 
 
 def get_adv_labels(label, label_range):
-    #given an ndarray `label` and a list of label ranges, return an ndarray of adv. labels i.e. the labels the input should be misclassified as 
-    min_ = label_range[0]
+    # Given an ndarray `label` and a list of label ranges, return an ndarray of adv. labels i.e. the labels the
+    # input should be misclassified as
+    # min_ = label_range[0]
     max_ = label_range[1]
     label_shape = label.shape
     label = list(label)
@@ -280,9 +279,14 @@ def get_adv_labels(label, label_range):
     for element in label:
         val = max_ - element
         output.append(val)
+
     output = np.asarray(output)
-    output = np.reshape(output, label_shape)
-    return output
+    return np.reshape(output, label_shape)
+
+
+def check_valid_values(x_ten, name):
+    if torch.isnan(x_ten).any() or torch.isinf(x_ten).any():
+        raise ValueError("Nan or Inf value encountered in '{}'".format(name))
 
 
 def atanh(x):
@@ -295,7 +299,7 @@ def sigmoid(x, a=1.):
 
 #below is the main attack function
 #pending verification E2E
-def attack(model, device, data_loader, x_orig, label, dknn_path=None):
+def attack(model, device, data_loader, x_orig, label, dknn_model):
     # x_orig is a torch tensor
     # label is a torch tensor
     
@@ -365,7 +369,9 @@ def attack(model, device, data_loader, x_orig, label, dknn_path=None):
 
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
+    check_valid_values(z_orig, name='z_orig')
     x_recon = to_model_space(z_orig)
+    check_valid_values(x_recon, name='x_recon')
 
     # declare tensors that keep track of constants and binary search
     #note: might not need them all
@@ -374,7 +380,6 @@ def attack(model, device, data_loader, x_orig, label, dknn_path=None):
     lower_bound = torch.zeros_like(const)
     upper_bound = torch.zeros_like(const) + INFTY
     best_dist = torch.zeros_like(const) + INFTY
-
 
     # contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices
     # of all elements whose label is i
@@ -410,12 +415,13 @@ def attack(model, device, data_loader, x_orig, label, dknn_path=None):
             optimizer.step()
 
             if verbose and iteration % (np.ceil(max_iterations / 10)) == 0:
-                print('    step: %d; loss: %.3f; dist: %.3f' % (iteration, loss.cpu().detach().numpy(), dist.mean().cpu().detach().numpy()))
+                print('    step: %d; loss: %.3f; dist: %.3f' % (iteration, loss.cpu().detach().numpy(),
+                                                                dist.mean().cpu().detach().numpy()))
 
             # every <check_adv_steps>, save adversarial samples
             # with minimal perturbation
             if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
-                is_adv = check_adv(x, dknn_path, label, model, device)
+                is_adv = check_adv(x, dknn_model, label, model, device)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
@@ -423,7 +429,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_path=None):
 
         # check how many attacks have succeeded
         with torch.no_grad():
-            is_adv = check_adv(x, dknn_path, label, model, device)
+            is_adv = check_adv(x, dknn_model, label, model, device)
             if verbose:
                 print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
 
@@ -437,7 +443,9 @@ def attack(model, device, data_loader, x_orig, label, dknn_path=None):
         # binary search steps)
         if verbose:
             with torch.no_grad():
-                is_adv = check_adv(x_adv, dknn_path, label, model, device)
-                print('binary step: %d; num successful adv so far: %d/%d' %(binary_search_step, is_adv.sum(), batch_size))
+                is_adv = check_adv(x_adv, dknn_model, label, model, device)
+                print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, is_adv.sum(),
+                                                                             batch_size))
 
+    check_valid_values(x_adv, name='x_adv')
     return x_adv

@@ -117,6 +117,9 @@ def main():
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
+    # Should `model` be set to evaluation mode here?
+    # model.eval()
+
     # convert the test data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
 
@@ -127,6 +130,12 @@ def main():
     # verify if the data loader is the same as the ndarrays it generates
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
         raise ValueError("Data loader verification failed")
+
+    # Load the deep KNN models from a pickle file
+    with open(model_file_dknn, 'rb') as fp:
+        models_dknn = pickle.load(fp)
+
+    # `models_dknn` will be a list of trained deep KNN models from each fold
 
     # repeat for each fold in the cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
@@ -183,7 +192,7 @@ def main():
                 break
                 #exit()
 
-            _ = attack(model, device, train_fold_loader, x_orig, label)
+            _ = attack(model, device, train_fold_loader, x_orig, label, models_dknn[i - 1])
             exit()
 
         else:
