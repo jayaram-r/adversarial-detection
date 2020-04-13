@@ -346,6 +346,7 @@ def main():
     # Cross-validation
     scores_folds = []
     labels_folds = []
+    models_folds = []
     for i in range(args.num_folds):
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
@@ -472,27 +473,28 @@ def main():
                 'seed_rng': args.seed
             }
             if args.batch_lid:
-                model_det = DetectorLIDBatch(n_batches=10, **kwargs)
+                det_model = DetectorLIDBatch(n_batches=10, **kwargs)
             else:
-                model_det = DetectorLID(**kwargs)
+                det_model = DetectorLID(**kwargs)
 
             # Fit the detector on clean, noisy, and adversarial data from the training fold
-            _ = model_det.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
+            _ = det_model.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
                               layer_embeddings_noisy=layer_embeddings_tr_noisy)
             # Scores on clean data from the test fold
-            scores_adv1 = model_det.score(layer_embeddings_te, cleanup=False)
+            scores_adv1 = det_model.score(layer_embeddings_te, cleanup=False)
 
             # Scores on adversarial data from the test fold
-            scores_adv2 = model_det.score(layer_embeddings_te_adv, cleanup=True)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv, cleanup=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            models_folds.append(det_model)
 
         elif args.detection_method == 'lid_class_cond':
             # Set to `None` to skip noisy data
             # layer_embeddings_tr_noisy = None
             # labels_pred_tr_noisy = None
 
-            model_det = DetectorLIDClassCond(
+            det_model = DetectorLIDClassCond(
                 n_neighbors=n_neighbors,
                 skip_dim_reduction=(not apply_dim_reduc),
                 model_dim_reduction=model_dim_reduc,
@@ -503,17 +505,18 @@ def main():
                 seed_rng=args.seed
             )
             # Fit the detector on clean, noisy, and adversarial data from the training fold
-            _ = model_det.fit(layer_embeddings_tr, labels_tr, labels_pred_tr,
+            _ = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr,
                               layer_embeddings_tr_adv, labels_pred_tr_adv,
                               layer_embeddings_noisy=layer_embeddings_tr_noisy,
                               labels_pred_noisy=labels_pred_tr_noisy)
             # Scores on clean data from the test fold
-            scores_adv1 = model_det.score(layer_embeddings_te, labels_pred_te, cleanup=False)
+            scores_adv1 = det_model.score(layer_embeddings_te, labels_pred_te, cleanup=False)
 
             # Scores on adversarial data from the test fold
-            scores_adv2 = model_det.score(layer_embeddings_te_adv, labels_pred_te_adv, cleanup=True)
+            scores_adv2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv, cleanup=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            models_folds.append(det_model)
 
         elif args.detection_method == 'proposed':
             nl = len(layer_embeddings_tr)
@@ -556,6 +559,7 @@ def main():
             scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv, test_layer_pairs=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            models_folds.append(det_model)
 
         elif args.detection_method == 'dknn':
             det_model = DeepKNN(
@@ -576,6 +580,7 @@ def main():
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
             # labels_pred_dknn = np.concatenate([labels_pred_dknn1, labels_pred_dknn2])
+            models_folds.append(det_model)
 
         elif args.detection_method == 'trust':
             ind_layer = config_trust_score['layer']
@@ -597,6 +602,7 @@ def main():
             scores_adv2 = det_model.score(layer_embeddings_te_adv[ind_layer], labels_pred_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
+            models_folds.append(det_model)
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 
@@ -609,6 +615,11 @@ def main():
     tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
     with open(fname, 'wb') as fp:
         pickle.dump(tmp, fp)
+
+    # Save the detection models from the cross-validation folds to a pickle file
+    fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
+    with open(fname, 'wb') as fp:
+        pickle.dump(models_folds, fp)
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
