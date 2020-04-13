@@ -142,6 +142,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
+'''
 #not useful?
 def get_distance(p1, p2, dist_type='cosine'):
     #returns either the cosine distance or the euclidean distance, depending on what is specified
@@ -152,13 +153,21 @@ def get_distance(p1, p2, dist_type='cosine'):
     val = torch.div(numerator, denominator)
     #print(numerator, denominator, val)
     return val
+'''
 
 def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label):
 
     batch_size = x.size(0)
+    dim = x.size(1)
     num_embeddings = len(reps[0])
 
+    adv_loss_src = torch.zeros((batch_size), device=device)
+    adv_loss_target = torch.zeros((batch_size), device=device)
+    adv_loss = torch.zeros((batch_size), device=device)
+    
     def preprocess_input(x_embeddings, label, min_label, max_label):
+        #function that will return (a) a dictionary 'output' where output[label] corresponds to all input embeddings with label == label
+        # (b) dictionary 'indices' where indices[label] are all the indices of x_embeddings where the label == label
         indices = {}
         output = {}
         num_embeddings = len(x_embeddings)
@@ -172,30 +181,88 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
                 else:
                     output[l].append(x_embeddings[i][list(indices[l])])
 
-        return output
+        return indices, output
 
-    classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
+    def reconstruct(val_list, input_indices, uniq_labels, batch_size, dim):
+        #reconstruct the original tensor based on the indices specified in input_indices
+        #recall that the input was broken down into a dictionary in the previous function 'preprocess_input'
+        #note: both 'batch_size' and 'dim' are not used
+        indices = []
+        
+        for i in range(0, len(uniq_labels)):
+            label = uniq_labels[i]
+            tensor = val_list[label]
+            if i == 0:
+                final_tensor = tensor
+            else:
+                final_tensor = torch.cat((final_tensor, tensor),0)
+       
+        final_tensor = final_tensor.view(-1,1)
+
+        for label in uniq_labels:
+            indices.extend(e for e in input_indices[label])
+
+        indices_tensor = torch.LongTensor(indices)
+        return final_tensor[indices_tensor,:].view(-1)
+
+    
+    input_indices, classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
     
     uniq_labels = [k for k in classwise_x.keys()]
 
+    #first double summation based on the paper
     for i in range(num_embeddings):
+        val_list = {}
         for uniq_label in uniq_labels:
             input1 = classwise_x[uniq_label][i]
             input2 = reps[uniq_label][i]
-            print(input1)
-            print(input2)
-            exit()
-            val = sum_gaussian_kernels(input1, input2, 1)
-            print(val, val.sum(0))
-
-    return None
+            val_list[uniq_label] = sum_gaussian_kernels(input1, input2, 1)
+        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, dim)
+        adv_loss_src += reconstructed_tensor
     
-#this function below needs to be re-written to factor in prediction from knn and not model
-#pending
-def check_adv(x, label, model, device):
-    y_pred = model(x).argmax(1)
-    return torch.tensor((y_pred != label).astype(np.float32)).to(device)
+    #second double summation based on the paper
+    #note: input2 can be different; this is a weird way to determine the representations for the adversarial label (which is determined as max_label - true_label)
+    for i in range(num_embeddings):
+        val_list = {}
+        for uniq_label in uniq_labels:
+            input1 = classwise_x[uniq_label][i]
+            input2 = reps[max_label - uniq_label][i]
+            val_list[uniq_label] = sum_gaussian_kernels(input1, input2, 1)
+        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, dim)
+        adv_loss_target += reconstructed_tensor
+    
+    #total loss = first double summation - second double summation
+    adv_loss = adv_loss_src - adv_loss_target
+    
+    #obtaining the distance between the input (with noise added) and the original input (with no noise) 
+    dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
 
+    #the distance term is penalized as in the paper
+    total_loss = (dist.to(device) * const) + adv_loss
+
+    #returned output
+    return total_loss.mean(), dist.sqrt()
+    
+
+def check_adv(x, model_path, label, model, device):
+    #embeddings are obtained for the adversarial input x
+    embeddings = extract_input_embeddings(x, model, device)
+
+    #embeddings[i] are converted to a ndarray
+    for i in range(len(embeddings)):
+        embeddings[i] = embeddings[i].cpu().detach().numpy()
+
+    #note: embeddings should be a ndarray
+
+    #dknn model is loaded from pkl file based on the 'model_path' specified
+    with open(model_path, 'rb') as f:
+        det_model = pickle.load(f)
+
+    # Scores on clean data from the test fold
+    _, labels_pred = det_model.score(embeddings)
+
+    #check if labels_pred == label; the output will be a boolean ndarray of shape == label.shape
+    return labels_pred == label
 
 def return_indices(labels, label):
     #labels is a list
@@ -227,8 +294,8 @@ def sigmoid(x, a=1.):
 
 
 #below is the main attack function
-#pending
-def attack(model, device, data_loader, x_orig, label):
+#pending verification E2E
+def attack(model, device, data_loader, x_orig, label, dknn_path=None):
     # x_orig is a torch tensor
     # label is a torch tensor
     
@@ -338,7 +405,7 @@ def attack(model, device, data_loader, x_orig, label):
             x_embeddings = extract_input_embeddings(model, device, x)
 
             loss = loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label)
-            exit()
+            exit() #exit statement added here
             loss.backward()
             optimizer.step()
 
@@ -348,7 +415,7 @@ def attack(model, device, data_loader, x_orig, label):
             # every <check_adv_steps>, save adversarial samples
             # with minimal perturbation
             if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
-                is_adv = check_adv(x, label)
+                is_adv = check_adv(x, dknn_path, label, model, device)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
@@ -356,7 +423,7 @@ def attack(model, device, data_loader, x_orig, label):
 
         # check how many attacks have succeeded
         with torch.no_grad():
-            is_adv = check_adv(x, label)
+            is_adv = check_adv(x, dknn_path, label, model, device)
             if verbose:
                 print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
 
@@ -370,7 +437,7 @@ def attack(model, device, data_loader, x_orig, label):
         # binary search steps)
         if verbose:
             with torch.no_grad():
-                is_adv = check_adv(x_adv, label)
+                is_adv = check_adv(x_adv, dknn_path, label, model, device)
                 print('binary step: %d; num successful adv so far: %d/%d' %(binary_search_step, is_adv.sum(), batch_size))
 
     return x_adv
