@@ -48,6 +48,8 @@ def main():
                         help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=BATCH_SIZE_DEF, help='batch size of evaluation')
+    parser.add_argument('--det-model-file', '--dmf', default='', help='Path to the saved detector model file')
+
     '''
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
@@ -132,7 +134,7 @@ def main():
         raise ValueError("Data loader verification failed")
 
     # Load the deep KNN models from a pickle file
-    with open(model_file_dknn, 'rb') as fp:
+    with open(args.det_model_file, 'rb') as fp:
         models_dknn = pickle.load(fp)
 
     # `models_dknn` will be a list of trained deep KNN models from each fold
