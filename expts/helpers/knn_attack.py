@@ -167,7 +167,8 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
     adv_loss = torch.zeros((batch_size), device=device)
     
     def preprocess_input(x_embeddings, label, min_label, max_label):
-        #function that will return (a) a dictionary 'output' where output[label] corresponds to all input embeddings with label == label
+        #function that will return:
+        # (a) a dictionary 'output' where output[label] corresponds to all input embeddings with label == label
         # (b) dictionary 'indices' where indices[label] are all the indices of x_embeddings where the label == label
         indices = {}
         output = {}
@@ -204,12 +205,11 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
             indices.extend(e for e in input_indices[label])
 
         indices_tensor = torch.LongTensor(indices)
-        return final_tensor[indices_tensor,:].view(-1)
+        return final_tensor[indices_tensor, :].view(-1)
 
     
     input_indices, classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
-    
-    uniq_labels = [k for k in classwise_x.keys()]
+    uniq_labels = list(classwise_x.keys())
 
     #first double summation based on the paper
     for i in range(num_embeddings):
@@ -230,6 +230,7 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
             input1 = classwise_x[uniq_label][i]
             input2 = reps[max_label - uniq_label][i]
             val_list[uniq_label] = sum_gaussian_kernels(input1, input2, 1)
+
         reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, dim)
         adv_loss_target += reconstructed_tensor
     
@@ -314,6 +315,10 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
     thres_steps = 100
     check_adv_steps = 100
     verbose = True
+
+    # Ensure the DNN model is in evaluation mode
+    if model.training:
+        model.eval()
         
     #all labels of the data_loader + range of labels 
     labels, labels_range = get_labels(data_loader)
