@@ -33,8 +33,6 @@ def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=
         model.eval()
 
     output = {}
-    labels = list(indices.keys())
-
     embeddings = []
     n_layers = 0
     with torch.no_grad():
@@ -51,23 +49,18 @@ def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=
                 n_layers = len(outputs_layers)
                 embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
 
-    for label in labels:
-        indices_needed = list(indices[label])
-        for i in range(n_layers):
-            # Combine all the data batches and convert the numpy array to torch tensor
-            temp_arr = combine_and_vectorize(embeddings[i])
-            temp_arr = temp_arr[indices_needed]
-            temp_arr = torch.from_numpy(temp_arr).to(device)
-            #temp_arr.requires_grad = requires_grad
+    for i in range(n_layers):
+        # Combine all the data batches and convert the numpy array to torch tensor
+        embeddings_comb = combine_and_vectorize(embeddings[i])
+
+        for label in indices.keys():
+            temp_arr = torch.from_numpy(embeddings_comb[indices[label], :]).to(device)
+            # temp_arr.requires_grad = requires_grad
             if i == 0:
                 output[label] = [temp_arr]
             else:
                 output[label].append(temp_arr)
-            '''
-            #embeddings[i] = temp_arr
-            #embeddings[i] = torch.from_numpy(temp_arr).to(device)
-            #embeddings[i].requires_grad = requires_grad
-            '''
+
     return output
 
 
@@ -90,10 +83,12 @@ def extract_input_embeddings(model, device, x_input, requires_grad=True):
         if len(s) > 2:
             tens = tens.view(s[0], -1)
 
+        # TODO: Check if `tens` already has its `requires_grad` set because it is derived from `x_input`
         tens.requires_grad = requires_grad
         outputs_layers[i] = tens
 
     return outputs_layers
+
 
 def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     """
@@ -133,8 +128,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
         raise ValueError("Invalid value '{}' for the input 'metric'".format(metric))
 
     # Compute pairwise euclidean distances
-    dist_mat = torch.cdist(torch.unsqueeze(x_n, 0), torch.unsqueeze(reps_n, 0), p=2)
-    dist_mat = torch.squeeze(dist_mat, 0)
+    dist_mat = torch.squeeze(torch.cdist(torch.unsqueeze(x_n, 0), torch.unsqueeze(reps_n, 0), p=2), 0)
     temp_ten = (-1. / (sigma * sigma)) * torch.pow(dist_mat, 2)
     # `dist_mat` and `temp_ten` will have the same size `(n_samp, n_reps)`
     max_val, _ = torch.max(temp_ten, dim=1)
@@ -196,6 +190,7 @@ def loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, 
             #input2 = reps[uniq_label][i]
             #print("reps1", reps[uniq_label][i].requires_grad)
             val_list[uniq_label] = sum_gaussian_kernels(classwise_x[uniq_label][i], reps[uniq_label][i], 1)
+
         reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, device)
         #print(reconstructed_tensor.requires_grad)
         del val_list
@@ -211,6 +206,7 @@ def loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, 
             #input2 = reps[max_label - uniq_label][i]
             #print("reps2", reps[uniq_label][i].requires_grad)
             val_list[uniq_label] = sum_gaussian_kernels(classwise_x[uniq_label][i], reps[max_label - uniq_label][i], 1)
+
         reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, device)
         #print(reconstructed_tensor.requires_grad)
         del val_list
@@ -256,15 +252,12 @@ def get_adv_labels(label, label_range):
     # input should be misclassified as
     # min_ = label_range[0]
     max_ = label_range[1]
-    label_shape = label.shape
-    label = list(label)
     output = []
     for element in label:
-        val = max_ - element
-        output.append(val)
+        output.append(max_ - element)
 
-    output = np.asarray(output)
-    return np.reshape(output, label_shape)
+    output = np.asarray(output, dtype=label.dtype)
+    return np.reshape(output, label.shape)
 
 
 def check_valid_values(x_ten, name):
@@ -361,15 +354,15 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
         indices = {}
         output = {}
         num_embeddings = len(x_embeddings)
-        for l in range(min_label, max_label+1):
+        for l in range(min_label, max_label + 1):
             indices[l] = np.where(label == l)[0]
 
         for i in range(num_embeddings):
             for l in range(min_label, max_label+1):
                 if i == 0:
-                    output[l] = [x_embeddings[i][list(indices[l])]]
+                    output[l] = [x_embeddings[i][indices[l]]]
                 else:
-                    output[l].append(x_embeddings[i][list(indices[l])])
+                    output[l].append(x_embeddings[i][indices[l]])
 
         return indices, output
     
@@ -394,7 +387,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
     
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
-    reps = extract_layer_embeddings(model, device, data_loader, indices, requires_grad=True)
+    reps = extract_layer_embeddings(model, device, data_loader, indices, requires_grad=False)
     
     for binary_search_step in range(binary_search_steps):
 
@@ -411,10 +404,12 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
         for iteration in range(max_iterations):
             optimizer.zero_grad()
             x = to_model_space(z_orig + z_delta)
+            # `requires_grad` flag should be automatically set for `x`
 
-            #obtain embeddings for the input x
+            # obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
             input_indices, classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
+            # What are the `requires_grad` flag of the tensors in `classwise_x` set to?
             
             loss, dist = loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, input_indices)
             torch.cuda.empty_cache() #added here
