@@ -58,15 +58,16 @@ def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=
             temp_arr = combine_and_vectorize(embeddings[i])
             temp_arr = temp_arr[indices_needed]
             temp_arr = torch.from_numpy(temp_arr).to(device)
-            temp_arr.requires_grad = requires_grad
+            #temp_arr.requires_grad = requires_grad
             if i == 0:
                 output[label] = [temp_arr]
             else:
                 output[label].append(temp_arr)
+            '''
             #embeddings[i] = temp_arr
             #embeddings[i] = torch.from_numpy(temp_arr).to(device)
             #embeddings[i].requires_grad = requires_grad
-    
+            '''
     return output
 
 
@@ -93,7 +94,6 @@ def extract_input_embeddings(model, device, x_input, requires_grad=True):
         outputs_layers[i] = tens
 
     return outputs_layers
-
 
 def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     """
@@ -143,62 +143,41 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
-'''
-#not useful?
-def get_distance(p1, p2, dist_type='cosine'):
-    #returns either the cosine distance or the euclidean distance, depending on what is specified
-    numerator = torch.dot(p1.view(-1,),p2.view(-1,))
-    p1_norm = torch.norm(p1, 2)
-    p2_norm = torch.norm(p2, 2)
-    denominator = torch.mul(p1_norm, p2_norm)
-    val = torch.div(numerator, denominator)
-    #print(numerator, denominator, val)
-    return val
-'''
-
-def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label):
+def loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, input_indices):
 
     batch_size = x.size(0)
     dim = x.size(1)
     num_embeddings = len(reps[0])
+    
+    temp = list(input_indices.keys())
+    max_label = max(temp)
 
-    adv_loss_src = torch.zeros((batch_size), device=device)
-    adv_loss_target = torch.zeros((batch_size), device=device)
+    #adv_loss_src = torch.zeros((batch_size), device=device)
+    #adv_loss_target = torch.zeros((batch_size), device=device)
     adv_loss = torch.zeros((batch_size), device=device)
     
-    def preprocess_input(x_embeddings, label, min_label, max_label):
-        #function that will return:
-        # (a) a dictionary 'output' where output[label] corresponds to all input embeddings with label == label
-        # (b) dictionary 'indices' where indices[label] are all the indices of x_embeddings where the label == label
-        indices = {}
-        output = {}
-        num_embeddings = len(x_embeddings)
-        for l in range(min_label, max_label+1):
-            indices[l] = np.where(label == l)[0]
-           
-        for i in range(num_embeddings):
-            for l in range(min_label, max_label+1):
-                if i == 0:
-                    output[l] = [x_embeddings[i][list(indices[l])]]
-                else:
-                    output[l].append(x_embeddings[i][list(indices[l])])
-
-        return indices, output
-
-    def reconstruct(val_list, input_indices, uniq_labels, batch_size, dim):
+    def reconstruct(val_list, input_indices, uniq_labels, batch_size, device):
         #reconstruct the original tensor based on the indices specified in input_indices
         #recall that the input was broken down into a dictionary in the previous function 'preprocess_input'
         #note: both 'batch_size' and 'dim' are not used
         indices = []
-        
+       
+        final_tensor = torch.empty(batch_size, device=device, requires_grad=False)
+        start = 0
+        end = 0
         for i in range(0, len(uniq_labels)):
             label = uniq_labels[i]
-            tensor = val_list[label]
+            #tensor = val_list[label]
+            end = val_list[label].size(0)
+            end = start + end
+            final_tensor[start:end] = val_list[label]
+            start = end
+            '''
             if i == 0:
-                final_tensor = tensor
+                final_tensor = val_list[label]
             else:
-                final_tensor = torch.cat((final_tensor, tensor),0)
-       
+                final_tensor = torch.cat((final_tensor, val_list[label]),0)
+            '''
         final_tensor = final_tensor.view(-1,1)
 
         for label in uniq_labels:
@@ -207,19 +186,20 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
         indices_tensor = torch.LongTensor(indices)
         return final_tensor[indices_tensor, :].view(-1)
 
-    
-    input_indices, classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
     uniq_labels = list(classwise_x.keys())
 
     #first double summation based on the paper
     for i in range(num_embeddings):
         val_list = {}
         for uniq_label in uniq_labels:
-            input1 = classwise_x[uniq_label][i]
-            input2 = reps[uniq_label][i]
-            val_list[uniq_label] = sum_gaussian_kernels(input1, input2, 1)
-        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, dim)
-        adv_loss_src += reconstructed_tensor
+            #input1 = classwise_x[uniq_label][i]
+            #input2 = reps[uniq_label][i]
+            #print("reps1", reps[uniq_label][i].requires_grad)
+            val_list[uniq_label] = sum_gaussian_kernels(classwise_x[uniq_label][i], reps[uniq_label][i], 1)
+        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, device)
+        #print(reconstructed_tensor.requires_grad)
+        del val_list
+        adv_loss += reconstructed_tensor
     
     # second double summation based on the paper
     # note: input2 can be different; this is a weird way to determine the representations for the adversarial label
@@ -227,15 +207,17 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
     for i in range(num_embeddings):
         val_list = {}
         for uniq_label in uniq_labels:
-            input1 = classwise_x[uniq_label][i]
-            input2 = reps[max_label - uniq_label][i]
-            val_list[uniq_label] = sum_gaussian_kernels(input1, input2, 1)
-
-        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, dim)
-        adv_loss_target += reconstructed_tensor
+            #input1 = classwise_x[uniq_label][i]
+            #input2 = reps[max_label - uniq_label][i]
+            #print("reps2", reps[uniq_label][i].requires_grad)
+            val_list[uniq_label] = sum_gaussian_kernels(classwise_x[uniq_label][i], reps[max_label - uniq_label][i], 1)
+        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, device)
+        #print(reconstructed_tensor.requires_grad)
+        del val_list
+        adv_loss -= reconstructed_tensor
     
     #total loss = first double summation - second double summation
-    adv_loss = adv_loss_src - adv_loss_target
+    #adv_loss = adv_loss_src - adv_loss_target
     
     #obtaining the distance between the input (with noise added) and the original input (with no noise) 
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
@@ -249,7 +231,7 @@ def loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label,
 
 def check_adv(x, det_model, label, model, device):
     # embeddings are obtained for the adversarial input x
-    embeddings = extract_input_embeddings(x, model, device)
+    embeddings = extract_input_embeddings(model, device, x)
 
     # embeddings[i] are converted to a ndarray
     for i in range(len(embeddings)):
@@ -307,7 +289,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
     init_mode = 1
     init_mode_k = 1
     binary_search_steps = 1
-    max_iterations = 500
+    max_iterations = 5
     learning_rate = 1e-2
     initial_const = 1.
     max_linf = None
@@ -372,6 +354,25 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
         return b * x + a
 
+    def preprocess_input(x_embeddings, label, min_label, max_label):
+        #function that will return:
+        # (a) a dictionary 'output' where output[label] corresponds to all input embeddings with label == label
+        # (b) dictionary 'indices' where indices[label] are all the indices of x_embeddings where the label == label
+        indices = {}
+        output = {}
+        num_embeddings = len(x_embeddings)
+        for l in range(min_label, max_label+1):
+            indices[l] = np.where(label == l)[0]
+
+        for i in range(num_embeddings):
+            for l in range(min_label, max_label+1):
+                if i == 0:
+                    output[l] = [x_embeddings[i][list(indices[l])]]
+                else:
+                    output[l].append(x_embeddings[i][list(indices[l])])
+
+        return indices, output
+    
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
     check_valid_values(z_orig, name='z_orig')
@@ -393,7 +394,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
     
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
-    reps = extract_layer_embeddings(model, device, data_loader, indices, requires_grad=False)
+    reps = extract_layer_embeddings(model, device, data_loader, indices, requires_grad=True)
     
     for binary_search_step in range(binary_search_steps):
 
@@ -413,9 +414,10 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
             #obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
-
-            loss = loss_function(x, x_recon, x_embeddings, reps, device, indices, const, label, min_label, max_label)
-            exit() #exit statement added here
+            input_indices, classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
+            
+            loss, dist = loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, input_indices)
+            torch.cuda.empty_cache() #added here
             loss.backward()
             optimizer.step()
 

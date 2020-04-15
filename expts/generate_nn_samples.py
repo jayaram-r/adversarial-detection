@@ -5,6 +5,7 @@ from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
+import pickle
 import numpy as np
 import torch
 from torchvision import datasets, transforms
@@ -40,15 +41,15 @@ def main():
                         help='input batch size for testing (default: 1000)')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training')
-    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='cifar10',
+    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--generate-attacks', type=bool, default=True, help='should attack samples be generated/not (default:True)')
     parser.add_argument('--adv-attack', '--aa', choices=['Custom'], default='Custom',
                         help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
-    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE_DEF, help='batch size of evaluation')
-    parser.add_argument('--det-model-file', '--dmf', default='', help='Path to the saved detector model file')
+    parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
+    parser.add_argument('--det-model-file', '--dmf', default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl', help='Path to the saved detector model file')
 
     '''
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
