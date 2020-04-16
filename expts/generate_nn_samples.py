@@ -191,10 +191,10 @@ def main():
             for batch_idx, (data, target) in enumerate(train_fold_loader):
                 print(type(data), data.size(0), data.shape)
                 x_orig = data
+                x_orig = x_orig.to(device)
                 label = target
                 break
                 #exit()
-
             _ = attack(model, device, train_fold_loader, x_orig, label, models_dknn[i - 1])
             exit()
 
