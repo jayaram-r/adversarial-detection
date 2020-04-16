@@ -132,7 +132,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
-def loss_function(x, x_recon, classwise_x, reps, device, input_indices, n_layers, const, sigma=1.0):
+def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const, sigma=1.0):
 
     batch_size = x.size(0)
     max_label = max(reps.keys())
@@ -142,13 +142,15 @@ def loss_function(x, x_recon, classwise_x, reps, device, input_indices, n_layers
         for c, ind_c in input_indices.items():
             # TODO: `c_hat` needs to be changed after testing
             c_hat = max_label - c
-            # input1 = classwise_x[c][i]
+            # input1 = x_embeddings[i][ind_c, :]
             # input2 = reps[c][i]
             # print("reps1", reps[c][i].requires_grad)
 
+            # embeddings from layer `i` for the samples from class `c`
+            temp_ten = x_embeddings[i][ind_c, :]
             adv_loss[ind_c] = (adv_loss[ind_c]
-                               + sum_gaussian_kernels(classwise_x[c][i], reps[c][i], sigma)
-                               - sum_gaussian_kernels(classwise_x[c][i], reps[c_hat][i], sigma))
+                               + sum_gaussian_kernels(temp_ten, reps[c][i], sigma)
+                               - sum_gaussian_kernels(temp_ten, reps[c_hat][i], sigma))
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
@@ -336,10 +338,9 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
 
             # obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
-            classwise_x = preprocess_input(x_embeddings, input_indices)
-            x_embeddings = None
+            # classwise_x = preprocess_input(x_embeddings, input_indices)
             
-            loss, dist = loss_function(x, x_recon, classwise_x, reps, device, input_indices, n_layers, const)
+            loss, dist = loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const)
             torch.cuda.empty_cache() #added here
             loss.backward()
             optimizer.step()
