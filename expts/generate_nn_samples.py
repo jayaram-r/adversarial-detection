@@ -190,8 +190,7 @@ def main():
             #testing code below
             for batch_idx, (data, target) in enumerate(train_fold_loader):
                 print(type(data), data.size(0), data.shape)
-                x_orig = data
-                x_orig = x_orig.to(device)
+                x_orig = data.to(device)
                 label = target
                 break
                 #exit()
