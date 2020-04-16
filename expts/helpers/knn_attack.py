@@ -147,10 +147,9 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
             # print("reps1", reps[c][i].requires_grad)
 
             # embeddings from layer `i` for the samples from class `c`
-            temp_ten = x_embeddings[i][ind_c, :]
             adv_loss[ind_c] = (adv_loss[ind_c]
-                               + sum_gaussian_kernels(temp_ten, reps[c][i], sigma)
-                               - sum_gaussian_kernels(temp_ten, reps[c_hat][i], sigma))
+                               + sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma)
+                               - sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma))
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
@@ -163,20 +162,16 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
     return total_loss.mean(), dist.sqrt()
     
 
-def check_adv(x, det_model, label, model, device):
-    # embeddings are obtained for the adversarial input x
-    embeddings = extract_input_embeddings(model, device, x)
+def check_adv(x_embeddings, labels, det_model):
+    # `x_embeddings` will be a list of torch tensors. It needs to be converted into a list of numpy arrays before
+    # calling the deep KNN score method
+    x_embeddings_np = [tens.detach().cpu().numpy() for tens in x_embeddings]
 
-    # embeddings[i] are converted to a ndarray
-    for i in range(len(embeddings)):
-        embeddings[i] = embeddings[i].cpu().detach().numpy()
-
-    # note: embeddings should be a ndarray
     # scores and class predictions from the detection model
-    _, labels_pred = det_model.score(embeddings)
+    _, labels_pred = det_model.score(x_embeddings_np)
 
-    # check if labels_pred == label; the output will be a boolean ndarray of shape == label.shape
-    return labels_pred != label
+    # check if labels_pred == labels; the output will be a boolean ndarray of shape == labels.shape
+    return labels_pred != labels
 
 
 def return_indices(labels, label):
@@ -346,13 +341,12 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
             optimizer.step()
 
             if verbose and iteration % (np.ceil(max_iterations / 10)) == 0:
-                print('    step: %d; loss: %.3f; dist: %.3f' % (iteration, loss.cpu().detach().numpy(),
-                                                                dist.mean().cpu().detach().numpy()))
+                print('    step: %d; loss: %.6f; dist: %.4f' % (iteration, loss.item(), dist.mean().item()))
 
             # every <check_adv_steps>, save adversarial samples
             # with minimal perturbation
             if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
-                is_adv = check_adv(x, dknn_model, label_orig, model, device)
+                is_adv = check_adv(x_embeddings, label_orig, dknn_model)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
@@ -360,7 +354,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
 
         # check how many attacks have succeeded
         with torch.no_grad():
-            is_adv = check_adv(x, dknn_model, label_orig, model, device)
+            is_adv = check_adv(x_embeddings, label_orig, dknn_model)
             if verbose:
                 print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
 
@@ -370,11 +364,12 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
                 x_adv[i] = x[i]
                 best_dist[i] = dist[i]
 
-        # check the current attack success rate (combined with previous
-        # binary search steps)
+        # check the final attack success rate (combined with previous binary search steps)
         if verbose:
+            # obtain embeddings for the inputs `x_adv`
+            x_embeddings = extract_input_embeddings(model, device, x_adv)
             with torch.no_grad():
-                is_adv = check_adv(x_adv, dknn_model, label_orig, model, device)
+                is_adv = check_adv(x_embeddings, label_orig, dknn_model)
                 print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, is_adv.sum(),
                                                                              batch_size))
 
