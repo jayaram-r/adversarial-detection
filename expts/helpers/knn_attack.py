@@ -24,10 +24,10 @@ def get_labels(data_loader):
     # Find the unique labels in sorted order
     labels_uniq = np.unique(labels)
 
-    return labels, [labels_uniq[0], labels_uniq[-1]]
+    return labels, labels_uniq
 
 
-def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=True):
+def extract_layer_embeddings(model, device, data_loader, indices):
     # returns a list of torch tensors, where each torch tensor is a per layer embedding
     if model.training:
         model.eval()
@@ -55,7 +55,6 @@ def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=
 
         for label in indices.keys():
             temp_arr = torch.from_numpy(embeddings_comb[indices[label], :]).to(device)
-            # temp_arr.requires_grad = requires_grad
             if i == 0:
                 output[label] = [temp_arr]
             else:
@@ -64,16 +63,15 @@ def extract_layer_embeddings(model, device, data_loader, indices, requires_grad=
     return output
 
 
-def extract_input_embeddings(model, device, x_input, requires_grad=True):
+def extract_input_embeddings(model, device, x_input):
     # Returns a list of torch tensors, where each torch tensor is a per layer embedding
     # Model should already be set to eval mode
     # if model.training:
     #    model.eval()
 
-    with torch.no_grad():
-        data = x_input.to(device)
-        # Layer outputs
-        outputs_layers = model.layer_wise(data)
+    data = x_input.to(device)
+    # Layer outputs
+    outputs_layers = model.layer_wise(data)
 
     n_layers = len(outputs_layers)
     for i in range(n_layers):
@@ -83,8 +81,8 @@ def extract_input_embeddings(model, device, x_input, requires_grad=True):
         if len(s) > 2:
             tens = tens.view(s[0], -1)
 
-        # TODO: Check if `tens` already has its `requires_grad` set because it is derived from `x_input`
-        tens.requires_grad = requires_grad
+        # TODO: Check if `tens` has its `requires_grad` set because it is derived from `x_input`
+        # tens.requires_grad = True
         outputs_layers[i] = tens
 
     return outputs_layers
@@ -111,9 +109,6 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     n_reps, n_dim = reps.size()
     assert d == n_dim, "Mismatch in the input dimensions"
 
-    # `x` is a function of the perturbation vector, which is the variable of optimization
-    #x.requires_grad = True
-
     if metric == 'cosine':
         # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
         # a scale factor)
@@ -137,91 +132,32 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
-def loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, input_indices):
+def loss_function(x, x_recon, classwise_x, reps, device, input_indices, n_layers, const, sigma=1.0):
 
     batch_size = x.size(0)
-    dim = x.size(1)
-    num_embeddings = len(reps[0])
-    
-    temp = list(input_indices.keys())
-    max_label = max(temp)
+    max_label = max(reps.keys())
+    # double summation based on the paper
+    adv_loss = torch.zeros(batch_size, device=device)
+    for i in range(n_layers):
+        for c, ind_c in input_indices.items():
+            # TODO: `c_hat` needs to be changed after testing
+            c_hat = max_label - c
+            # input1 = classwise_x[c][i]
+            # input2 = reps[c][i]
+            # print("reps1", reps[c][i].requires_grad)
 
-    #adv_loss_src = torch.zeros((batch_size), device=device)
-    #adv_loss_target = torch.zeros((batch_size), device=device)
-    adv_loss = torch.zeros((batch_size), device=device)
-    
-    def reconstruct(val_list, input_indices, uniq_labels, batch_size, device):
-        #reconstruct the original tensor based on the indices specified in input_indices
-        #recall that the input was broken down into a dictionary in the previous function 'preprocess_input'
-        #note: both 'batch_size' and 'dim' are not used
-        indices = []
-       
-        final_tensor = torch.empty(batch_size, device=device, requires_grad=False)
-        start = 0
-        end = 0
-        for i in range(0, len(uniq_labels)):
-            label = uniq_labels[i]
-            #tensor = val_list[label]
-            end = val_list[label].size(0)
-            end = start + end
-            final_tensor[start:end] = val_list[label]
-            start = end
-            '''
-            if i == 0:
-                final_tensor = val_list[label]
-            else:
-                final_tensor = torch.cat((final_tensor, val_list[label]),0)
-            '''
-        final_tensor = final_tensor.view(-1,1)
+            adv_loss[ind_c] = (adv_loss[ind_c]
+                               + sum_gaussian_kernels(classwise_x[c][i], reps[c][i], sigma)
+                               - sum_gaussian_kernels(classwise_x[c][i], reps[c_hat][i], sigma))
 
-        for label in uniq_labels:
-            indices.extend(e for e in input_indices[label])
-
-        indices_tensor = torch.LongTensor(indices)
-        return final_tensor[indices_tensor, :].view(-1)
-
-    uniq_labels = list(classwise_x.keys())
-
-    #first double summation based on the paper
-    for i in range(num_embeddings):
-        val_list = {}
-        for uniq_label in uniq_labels:
-            #input1 = classwise_x[uniq_label][i]
-            #input2 = reps[uniq_label][i]
-            #print("reps1", reps[uniq_label][i].requires_grad)
-            val_list[uniq_label] = sum_gaussian_kernels(classwise_x[uniq_label][i], reps[uniq_label][i], 1)
-
-        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, device)
-        #print(reconstructed_tensor.requires_grad)
-        del val_list
-        adv_loss += reconstructed_tensor
-    
-    # second double summation based on the paper
-    # note: input2 can be different; this is a weird way to determine the representations for the adversarial label
-    # (which is determined as max_label - true_label)
-    for i in range(num_embeddings):
-        val_list = {}
-        for uniq_label in uniq_labels:
-            #input1 = classwise_x[uniq_label][i]
-            #input2 = reps[max_label - uniq_label][i]
-            #print("reps2", reps[uniq_label][i].requires_grad)
-            val_list[uniq_label] = sum_gaussian_kernels(classwise_x[uniq_label][i], reps[max_label - uniq_label][i], 1)
-
-        reconstructed_tensor = reconstruct(val_list, input_indices, uniq_labels, batch_size, device)
-        #print(reconstructed_tensor.requires_grad)
-        del val_list
-        adv_loss -= reconstructed_tensor
-    
-    #total loss = first double summation - second double summation
-    #adv_loss = adv_loss_src - adv_loss_target
-    
-    #obtaining the distance between the input (with noise added) and the original input (with no noise) 
+    # obtaining the distance between the input (with noise added) and the original input (with no noise)
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
 
-    #the distance term is penalized as in the paper
-    total_loss = (dist.to(device) * const) + adv_loss
+    # `const` multiplies the loss term to be consistent with CW attack formulation.
+    # Smaller values of `const` lead to solutions with smaller perturbation norm
+    total_loss = dist.to(device) + const * adv_loss
 
-    #returned output
+    # returned output
     return total_loss.mean(), dist.sqrt()
     
 
@@ -247,17 +183,16 @@ def return_indices(labels, label):
     return np.where(labels == label)[0]
 
 
-def get_adv_labels(label, label_range):
-    # Given an ndarray `label` and a list of label ranges, return an ndarray of adv. labels i.e. the labels the
+def get_adv_labels(labels, labels_uniq):
+    # Given an ndarray `labels` and a list of unique labels, return an ndarray of adv. labels i.e. the labels the
     # input should be misclassified as
-    # min_ = label_range[0]
-    max_ = label_range[1]
+    max_ = labels_uniq[-1]
     output = []
-    for element in label:
+    for element in labels:
         output.append(max_ - element)
 
-    output = np.asarray(output, dtype=label.dtype)
-    return np.reshape(output, label.shape)
+    output = np.asarray(output, dtype=labels.dtype)
+    return np.reshape(output, labels.shape)
 
 
 def check_valid_values(x_ten, name):
@@ -273,11 +208,22 @@ def sigmoid(x, a=1.):
     return torch.sigmoid(a * x)
 
 
+def preprocess_input(x_embeddings, indices):
+    #function that will return:
+    # a dictionary `output` where `output[label]` corresponds to all input embeddings with labels == label
+    output = {}
+    for l, ind in indices.items():
+        # Embeddings from each layer for the samples from class `l`
+        output[l] = [arr[ind, :] for arr in x_embeddings]
+
+    return output
+
+
 #below is the main attack function
 #pending verification E2E
-def attack(model, device, data_loader, x_orig, label, dknn_model):
+def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
     # x_orig is a torch tensor
-    # label is a torch tensor
+    # label_orig is a torch tensor
     
     init_mode = 1
     init_mode_k = 1
@@ -295,10 +241,8 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
     if model.training:
         model.eval()
         
-    #all labels of the data_loader + range of labels 
-    labels, labels_range = get_labels(data_loader)
-    min_label = labels_range[0]
-    max_label = labels_range[1]
+    #all labels of the data_loader + range of labels
+    labels, labels_uniq = get_labels(data_loader)
     
     # Get the range of values in `x_orig`
     min_, max_ = get_data_bounds(x_orig, alpha=0.99)
@@ -311,18 +255,17 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
     batch_size = x_orig.size(0)
     x_adv = x_orig.clone()
     
-    #label is converted to ndarray
-    label = label.cpu().numpy()
+    # label_orig is converted to ndarray
+    label_orig = label_orig.detach().cpu().numpy()
+    label_orig_uniq = np.unique(label_orig)
 
-    #get adversarial labels i.e. the labels we want the inputs to be misclassified as 
-    adv_label = get_adv_labels(label, labels_range)
+    # get adversarial labels i.e. the labels we want the inputs to be misclassified as
+    label_adv = get_adv_labels(label_orig, label_orig_uniq)
+    assert type(label_orig) == type(label_adv)
+    assert label_orig.shape == label_adv.shape
 
-    #verify if type and shape of adv_labels is the same as label
-    assert type(label) == type(adv_label)
-    assert label.shape == adv_label.shape
-
-    #shape of the input tensor, which is now converted to ndarray
-    input_shape = x_orig.detach().cpu().numpy().shape
+    # shape of the input tensor
+    input_shape = tuple(x_orig.size())
     
     def to_attack_space(x):
         # map from [min_, max_] to [-1, +1]
@@ -347,25 +290,6 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
         return b * x + a
 
-    def preprocess_input(x_embeddings, label, min_label, max_label):
-        #function that will return:
-        # (a) a dictionary 'output' where output[label] corresponds to all input embeddings with label == label
-        # (b) dictionary 'indices' where indices[label] are all the indices of x_embeddings where the label == label
-        indices = {}
-        output = {}
-        num_embeddings = len(x_embeddings)
-        for l in range(min_label, max_label + 1):
-            indices[l] = np.where(label == l)[0]
-
-        for i in range(num_embeddings):
-            for l in range(min_label, max_label+1):
-                if i == 0:
-                    output[l] = [x_embeddings[i][indices[l]]]
-                else:
-                    output[l].append(x_embeddings[i][indices[l]])
-
-        return indices, output
-    
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
     check_valid_values(z_orig, name='z_orig')
@@ -374,7 +298,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
     # declare tensors that keep track of constants and binary search
     #note: might not need them all
-    const = torch.zeros((batch_size, ), device=device)
+    const = torch.zeros(batch_size, device=device)
     const += initial_const
     lower_bound = torch.zeros_like(const)
     upper_bound = torch.zeros_like(const) + INFTY
@@ -382,20 +306,24 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
     # contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices
     # of all elements whose label is i
-    indices = {i: return_indices(labels, i) for i in range(min_label, max_label + 1)}
-    target_indices = {}
+    indices = {i: return_indices(labels, i) for i in labels_uniq}
+
+    # indices for each distinct label in `label_orig`. Needs to be computed only once
+    input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
+
+    target_indices = {}     # not used
     
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
-    reps = extract_layer_embeddings(model, device, data_loader, indices, requires_grad=False)
+    reps = extract_layer_embeddings(model, device, data_loader, indices)
+    n_layers = len(reps[labels_uniq[0]])
     
     for binary_search_step in range(binary_search_steps):
-
         # initialize perturbation in transformed space
         if not random_start:
-            z_delta = torch.zeros_like(z_orig, requires_grad=True)
+            z_delta = torch.zeros_like(z_orig, requires_grad=True, device=device)
         else:
-            rand = np.random.randn(*input_shape) * 1e-2
+            rand = 1e-2 * np.random.randn(*input_shape)
             z_delta = torch.tensor(rand, dtype=torch.float32, requires_grad=True, device=device)
 
         # create a new optimizer
@@ -408,10 +336,10 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
             # obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
-            input_indices, classwise_x = preprocess_input(x_embeddings, label, min_label, max_label)
-            # What are the `requires_grad` flag of the tensors in `classwise_x` set to?
+            classwise_x = preprocess_input(x_embeddings, input_indices)
+            x_embeddings = None
             
-            loss, dist = loss_function(x, x_recon, classwise_x, reps, device, indices, const, label, input_indices)
+            loss, dist = loss_function(x, x_recon, classwise_x, reps, device, input_indices, n_layers, const)
             torch.cuda.empty_cache() #added here
             loss.backward()
             optimizer.step()
@@ -423,7 +351,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
             # every <check_adv_steps>, save adversarial samples
             # with minimal perturbation
             if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
-                is_adv = check_adv(x, dknn_model, label, model, device)
+                is_adv = check_adv(x, dknn_model, label_orig, model, device)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
@@ -431,7 +359,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
 
         # check how many attacks have succeeded
         with torch.no_grad():
-            is_adv = check_adv(x, dknn_model, label, model, device)
+            is_adv = check_adv(x, dknn_model, label_orig, model, device)
             if verbose:
                 print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
 
@@ -445,7 +373,7 @@ def attack(model, device, data_loader, x_orig, label, dknn_model):
         # binary search steps)
         if verbose:
             with torch.no_grad():
-                is_adv = check_adv(x_adv, dknn_model, label, model, device)
+                is_adv = check_adv(x_adv, dknn_model, label_orig, model, device)
                 print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, is_adv.sum(),
                                                                              batch_size))
 
