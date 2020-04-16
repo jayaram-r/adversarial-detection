@@ -188,8 +188,7 @@ def get_adv_labels(labels, labels_uniq):
     for element in labels:
         output.append(max_ - element)
 
-    output = np.asarray(output, dtype=labels.dtype)
-    return np.reshape(output, labels.shape)
+    return np.asarray(output, dtype=labels.dtype)
 
 
 def check_valid_values(x_ten, name):
@@ -216,8 +215,10 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-#below is the main attack function
-#pending verification E2E
+# TODO:
+# Set the kernel scale `sigma` per layer
+# Set the constant in the loss function via binary search
+# main attack function
 def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
     # x_orig is a torch tensor
     # label_orig is a torch tensor
@@ -225,7 +226,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
     init_mode = 1
     init_mode_k = 1
     binary_search_steps = 1
-    max_iterations = 5
+    max_iterations = 500
     learning_rate = 1e-2
     initial_const = 1.
     max_linf = None
@@ -237,8 +238,11 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
     # Ensure the DNN model is in evaluation mode
     if model.training:
         model.eval()
-        
-    #all labels of the data_loader + range of labels
+
+    # shape of the input tensor
+    input_shape = tuple(x_orig.size())
+
+    # all labels of the data_loader + range of labels
     labels, labels_uniq = get_labels(data_loader)
     
     # Get the range of values in `x_orig`
@@ -261,9 +265,6 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
     assert type(label_orig) == type(label_adv)
     assert label_orig.shape == label_adv.shape
 
-    # shape of the input tensor
-    input_shape = tuple(x_orig.size())
-    
     def to_attack_space(x):
         # map from [min_, max_] to [-1, +1]
         a = (min_ + max_) / 2.
@@ -294,7 +295,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model):
     check_valid_values(x_recon, name='x_recon')
 
     # declare tensors that keep track of constants and binary search
-    #note: might not need them all
+    # note: might not need them all
     const = torch.zeros(batch_size, device=device)
     const += initial_const
     lower_bound = torch.zeros_like(const)
