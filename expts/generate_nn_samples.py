@@ -19,7 +19,8 @@ from helpers.constants import (
     SEED_DEFAULT,
     CROSS_VAL_SIZE,
     NORMALIZE_IMAGES,
-    BATCH_SIZE_DEF
+    BATCH_SIZE_DEF,
+    NEIGHBORHOOD_CONST
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -51,6 +52,8 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
     parser.add_argument('--det-model-file', '--dmf', default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl', help='Path to the saved detector model file')
 
+    parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
+                        help='distance metric to use')
     '''
     parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
                         help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
@@ -148,8 +151,12 @@ def main():
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
         labels_te = labels[ind_te]
+
+        # Set number of nearest neighbors based on the data size and the neighborhood constant
+        n_neighbors = int(np.ceil(labels_tr.shape[0] ** NEIGHBORHOOD_CONST))
+        # print("Number of nearest neighbors = {:d}".format(n_neighbors))
         
-        #make dir based on fold to save data
+        # make dir based on fold to save data
         numpy_save_path = os.path.join(output_dir, "fold_" + str(i))
         if not os.path.isdir(numpy_save_path):
             os.makedirs(numpy_save_path)
@@ -165,7 +172,7 @@ def main():
         else:
             labels_tr = np.load(os.path.join(numpy_save_path, "labels_tr.npy"))
         
-        #save test fold to numpy_save_path or load if it exists already
+        # save test fold to numpy_save_path or load if it exists already
         if not os.path.isfile(os.path.join(numpy_save_path, 'data_te.npy')):
             np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
         else:
@@ -194,7 +201,8 @@ def main():
                 label = target
                 break
                 #exit()
-            _ = attack(model, device, train_fold_loader, x_orig, label, models_dknn[i - 1])
+            _ = attack(model, device, train_fold_loader, x_orig, label, models_dknn[i - 1],
+                       dist_metric=args.dist_metric, n_neighbors=n_neighbors)
             exit()
 
         else:
