@@ -168,15 +168,13 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
     max_label = max(reps.keys())
     # double summation based on the paper
     adv_loss = torch.zeros(batch_size, device=device)
-    for i in range(n_layers):
-        for c, ind_c in input_indices.items():
-            # TODO: `c_hat` needs to be changed after testing
-            c_hat = max_label - c
-            # input1 = x_embeddings[i][ind_c, :]
-            # input2 = reps[c][i]
+    for c, ind_c in input_indices.items():
+        # TODO: `c_hat` needs to be changed after testing
+        c_hat = max_label - c
+        for i in range(n_layers):
+            # print("x_embeddings", x_embeddings[i][ind_c, :].requires_grad)
             # print("reps1", reps[c][i].requires_grad)
-
-            # embeddings from layer `i` for the samples from class `c`
+            # embeddings from layer `i` for the samples from classes `c` and `c_hat`
             adv_loss[ind_c] = (
                     adv_loss[ind_c] +
                     sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma, metric=dist_metric) -
