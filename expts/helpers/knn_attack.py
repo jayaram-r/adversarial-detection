@@ -101,9 +101,21 @@ def extract_input_embeddings(model, device, x_input):
     return outputs_layers
 
 
-def set_kernel_sigma(x, reps, metric, n_neighbors):
-    n_samp, n_dim = x.size()
-    n_reps = reps.size(0)
+def set_kernel_sigma(x_embeddings, reps, metric=None, n_neighbors=10, n_jobs=1):
+    num_layers = len(reps)
+    for i in range(num_layers):
+        index_knn = KNNIndex(reps[i].cpu().numpy(),
+                n_neighbors=n_neighbors, 
+                metric=metric, 
+                approx_nearest_neighbors=True, 
+                n_jobs=n_jobs
+                )
+        nn_indices, nn_distances = index_knn.query(x_embeddings[i].cpu().numpy(), k=n_neighbors)
+        for n in range(nn_indices.shape[0]):
+            indices = nn_indices[n]
+            s = reps[i][indices].size()
+            print(reps[i][indices].view(1, s[0], s[1]).size())
+        exit()
 
     # Compute the median distance from `x` to the points in `reps`
 
@@ -255,7 +267,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, dist_metr
     
     init_mode = 1
     init_mode_k = 1
-    binary_search_steps = 1
+    binary_search_steps = 5
     max_iterations = 500
     learning_rate = 1e-2
     initial_const = 1.
@@ -343,7 +355,12 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, dist_metr
     input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
 
     target_indices = {}     # not used
-    
+   
+    x_embeddings = extract_input_embeddings(model, device, x_recon)
+    reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=False)
+    _ = set_kernel_sigma(x_embeddings, reps, dist_metric, n_neighbors)
+    del reps
+
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
     reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=True)
@@ -394,6 +411,20 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, dist_metr
                 print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
 
         for i in range(batch_size):
+            if is_adv[i]:
+                upper_bound[i] = const[i]
+            else:
+                lower_bound[i] = const[i]
+            # set new const
+            if upper_bound[i] == INFTY:
+                # exponential search if adv has not been found
+                const[i] *= 10
+            elif lower_bound[i] == 0:
+                const[i] /= 10
+            else:
+                # binary search if adv has been found
+                const[i] = (lower_bound[i] + upper_bound[i]) / 2
+            
             # only keep adv with smallest l2dist
             if is_adv[i] and best_dist[i] > dist[i]:
                 x_adv[i] = x[i]

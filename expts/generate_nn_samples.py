@@ -48,7 +48,7 @@ def main():
     parser.add_argument('--generate-attacks', type=bool, default=True, help='should attack samples be generated/not (default:True)')
     parser.add_argument('--adv-attack', '--aa', choices=['Custom'], default='Custom',
                         help='type of adversarial attack')
-    parser.add_argument('--gpu', type=str, default="2", help='which gpus to execute code on')
+    parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
     parser.add_argument('--det-model-file', '--dmf', default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl', help='Path to the saved detector model file')
 
