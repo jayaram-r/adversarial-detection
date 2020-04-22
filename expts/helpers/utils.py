@@ -20,7 +20,7 @@ from helpers.constants import (
     BATCH_SIZE_DEF,
     COLORS
 )
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import Dataset, TensorDataset, DataLoader
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -30,14 +30,30 @@ def convert_to_list(array):
     #array is a numpy ndarray
     return [r for r in array]
 
+class MyDataset(Dataset):
+    def __init__(self, dataset):
+        self.dataset = dataset
 
-def convert_to_loader(x, y, dtype_x=None, dtype_y=None, device=None, batch_size=BATCH_SIZE_DEF):
+    def __getitem__(self, index):
+        data, target = self.dataset[index]
+
+        return data, target, index
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+
+def convert_to_loader(x, y, dtype_x=None, dtype_y=None, device=None, batch_size=BATCH_SIZE_DEF, custom=False):
     # transform to torch tensors
     x_ten = torch.tensor(x, dtype=dtype_x, device=device)
     y_ten = torch.tensor(y, dtype=dtype_y, device=device)
     # create the dataset and data loader
     dataset = TensorDataset(x_ten, y_ten)
-
+    
+    if custom:
+        dataset = MyDataset(dataset)
+    
     return DataLoader(dataset, batch_size=batch_size)
 
 

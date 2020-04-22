@@ -187,23 +187,35 @@ def main():
         if generate_attacks:
 
             # data loader for the training and test data split
-            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size)
-            train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size)
+            print(data_tr.shape, labels_tr.shape)
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
+            train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, custom=True)
 
             adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
             if not os.path.isdir(adv_save_path):
                 os.makedirs(adv_save_path)
 
             #testing code below
-            for batch_idx, (data, target) in enumerate(train_fold_loader):
-                print(type(data), data.size(0), data.shape)
+            for batch_idx, (data, target, index) in enumerate(train_fold_loader):
+                index_list = index.cpu().numpy().tolist()
+                desired_data = np.delete(data_tr, index_list, axis=0)
+                desired_labels = np.delete(labels_tr, index_list, axis=0)
+                #print(desired_data.shape, desired_labels.shape)
+                data_loader = convert_to_loader(desired_data, desired_labels, batch_size=args.batch_size)
                 x_orig = data.to(device)
                 label = target
-                break
-                #exit()
-            _ = attack(model, device, train_fold_loader, x_orig, label, models_dknn[i - 1],
+                _ = attack(model, device, data_loader, x_orig, label, models_dknn[i - 1],
                        dist_metric=args.dist_metric, n_neighbors=n_neighbors)
-            exit()
+
+            for batch_idx, (data, target, index) in enumerate(test_fold_loader):
+                index_list = index.cpu().numpy().tolist()
+                desired_data = np.delete(data_te, index_list, axis=0)
+                desired_labels = np.delete(labels_te, index_list, axis=0)
+                data_loader = convert_to_loader(desired_data, desired_labels, batch_size=args.batch_size)
+                x_orig = data.to(device)
+                label = target
+                _ = attack(model, device, data_loader, x_orig, label, models_dknn[i - 1],
+                        dist_metric=args.dist_metric, n_neighbors=n_neighbors)
 
         else:
             print("generated original data split for fold : ", i)

@@ -189,8 +189,8 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
             # embeddings from layer `i` for the samples from classes `c` and `c_hat`
             adv_loss[ind_c] = (
                     adv_loss[ind_c] +
-                    sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma, metric=dist_metric) -
-                    sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma, metric=dist_metric)
+                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma, metric=dist_metric)) -
+                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma, metric=dist_metric))
             )
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
