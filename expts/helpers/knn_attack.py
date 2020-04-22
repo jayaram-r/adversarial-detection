@@ -173,7 +173,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
-def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const, sigma=1.0,
+def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const, sigma=[1.0],
                   dist_metric='euclidean'):
 
     batch_size = x.size(0)
@@ -184,13 +184,17 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
         # TODO: `c_hat` needs to be changed after testing
         c_hat = max_label - c
         for i in range(n_layers):
+            if len(sigma) > 1:
+                sigma_val = sigma[i]
+            else:
+                sigma_val = sigma[0]
             # print("x_embeddings", x_embeddings[i][ind_c, :].requires_grad)
             # print("reps1", reps[c][i].requires_grad)
             # embeddings from layer `i` for the samples from classes `c` and `c_hat`
             adv_loss[ind_c] = (
                     adv_loss[ind_c] +
-                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma, metric=dist_metric)) -
-                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma, metric=dist_metric))
+                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma_val, metric=dist_metric)) -
+                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma_val, metric=dist_metric))
             )
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
@@ -261,7 +265,7 @@ def preprocess_input(x_embeddings, indices):
 # Set the kernel scale `sigma` per layer
 # Set the constant in the loss function via binary search
 # main attack function
-def attack(model, device, data_loader, x_orig, label_orig, dknn_model, dist_metric='euclidean', n_neighbors=10):
+def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, dist_metric='euclidean', n_neighbors=10):
     # x_orig is a torch tensor
     # label_orig is a torch tensor
     
@@ -356,10 +360,12 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, dist_metr
 
     target_indices = {}     # not used
    
+    '''
     x_embeddings = extract_input_embeddings(model, device, x_recon)
     reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=False)
     _ = set_kernel_sigma(x_embeddings, reps, dist_metric, n_neighbors)
     del reps
+    '''
 
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
@@ -387,7 +393,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, dist_metr
             # classwise_x = preprocess_input(x_embeddings, input_indices)
             
             loss, dist = loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const,
-                                       dist_metric=dist_metric)
+                                       sigma=sigma, dist_metric=dist_metric)
             torch.cuda.empty_cache() #added here
             loss.backward()
             optimizer.step()
