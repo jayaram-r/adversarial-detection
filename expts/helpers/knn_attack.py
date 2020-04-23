@@ -173,36 +173,37 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
 
 
-def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const, sigma=[1.0],
+def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const, sigma=1.0,
                   dist_metric='euclidean'):
 
     batch_size = x.size(0)
     max_label = max(reps.keys())
+    if not hasattr(sigma, '__iter__'):
+        sigma = [sigma] * n_layers
+    elif len(sigma) == 1:
+        sigma = [sigma[0]] * n_layers
+
     # double summation based on the paper
-    adv_loss = torch.zeros(batch_size, device=device)
+    adv_loss1 = torch.zeros(batch_size, device=device)
+    adv_loss2 = torch.zeros(batch_size, device=device)
     for c, ind_c in input_indices.items():
         # TODO: `c_hat` needs to be changed after testing
         c_hat = max_label - c
         for i in range(n_layers):
-            if len(sigma) > 1:
-                sigma_val = sigma[i]
-            else:
-                sigma_val = sigma[0]
             # print("x_embeddings", x_embeddings[i][ind_c, :].requires_grad)
             # print("reps1", reps[c][i].requires_grad)
             # embeddings from layer `i` for the samples from classes `c` and `c_hat`
-            adv_loss[ind_c] = (
-                    adv_loss[ind_c] +
-                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma_val, metric=dist_metric)) -
-                    torch.log(sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma_val, metric=dist_metric))
-            )
+            adv_loss1[ind_c] = adv_loss1[ind_c] + sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i],
+                                                                       sigma[i], metric=dist_metric)
+            adv_loss2[ind_c] = adv_loss2[ind_c] + sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i],
+                                                                       sigma[i], metric=dist_metric)
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
 
     # `const` multiplies the loss term to be consistent with CW attack formulation.
     # Smaller values of `const` lead to solutions with smaller perturbation norm
-    total_loss = dist.to(device) + const * adv_loss
+    total_loss = dist.to(device) + const * (torch.log(adv_loss1) - torch.log(adv_loss2))
 
     # returned output
     return total_loss.mean(), dist.sqrt()
@@ -412,6 +413,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
 
         # check how many attacks have succeeded
         with torch.no_grad():
+            # Should we extract the layer embeddings again with `x_adv` instead of `x`?
             is_adv = check_adv(x_embeddings, label_orig, dknn_model)
             if verbose:
                 print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
@@ -421,15 +423,16 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
                 upper_bound[i] = const[i]
             else:
                 lower_bound[i] = const[i]
+
             # set new const
-            if upper_bound[i] == INFTY:
+            if upper_bound[i] >= INFTY:
                 # exponential search if adv has not been found
-                const[i] *= 10
-            elif lower_bound[i] == 0:
-                const[i] /= 10
+                const[i] *= 10.
+            elif lower_bound[i] <= 0:
+                const[i] /= 10.
             else:
                 # binary search if adv has been found
-                const[i] = (lower_bound[i] + upper_bound[i]) / 2
+                const[i] = (lower_bound[i] + upper_bound[i]) / 2.
             
             # only keep adv with smallest l2dist
             if is_adv[i] and best_dist[i] > dist[i]:
