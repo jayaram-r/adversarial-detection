@@ -129,9 +129,10 @@ def set_kernel_sigma(x_embeddings, reps, metric=None, n_neighbors=10, n_jobs=1):
 
 
 
-def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
+def log_sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     """
-    Compute the sum of Gaussian kernels evaluated at the set of representative points `reps` and centered on `x`.
+    Compute the log of the sum of Gaussian kernels evaluated at the set of representative points `reps` and
+    centered on `x`.
 
     :param x: torch tensor with a particular layer embedding of the perturbed inputs. Specifically, `f_l(x + delta)`.
               It is expected to be a tensor of shape `(n_samp, n_dim)`, where `n_samp` is the number of inputs and
@@ -143,7 +144,7 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     :param sigma: scale or standard deviation of the Gaussian kernel for layer `l`.
     :param metric: distance metric. Set to 'euclidean' or 'cosine'.
 
-    :return: torch tensor of shape `(n_samp, )` with the sum of the Gaussian kernels for each of the `n_samp`
+    :return: torch tensor of shape `(n_samp, )` with the log sum of the Gaussian kernels for each of the `n_samp`
              inputs in `x`.
     """
     n_samp, d = x.size()
@@ -167,10 +168,12 @@ def sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
     dist_mat = torch.squeeze(torch.cdist(torch.unsqueeze(x_n, 0), torch.unsqueeze(reps_n, 0), p=2), 0)
     temp_ten = (-1. / (sigma * sigma)) * torch.pow(dist_mat, 2)
     # `dist_mat` and `temp_ten` will have the same size `(n_samp, n_reps)`
-    max_val, _ = torch.max(temp_ten, dim=1)
-    # `max_val` will have size `(n_samp, )`
+    with torch.no_grad():
+        max_val, _ = torch.max(temp_ten, dim=1)
+        # `max_val` will have size `(n_samp, )`
 
-    return torch.exp(max_val) * torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)
+    # numerically stable computation of log-sum-exp
+    return torch.log(torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)) + max_val
 
 
 def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const, sigma=1.0,
@@ -184,28 +187,37 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
         sigma = [sigma[0]] * n_layers
 
     # double summation based on the paper
-    adv_loss1 = torch.zeros(batch_size, device=device)
-    adv_loss2 = torch.zeros(batch_size, device=device)
+    adv_loss = torch.zeros(batch_size, device=device)
     for c, ind_c in input_indices.items():
         # TODO: `c_hat` needs to be changed after testing
         c_hat = max_label - c
+        num_c = ind_c.shape[0]
+        temp_sum1 = torch.zeros(num_c, n_layers, device=device)
+        temp_sum2 = torch.zeros(num_c, n_layers, device=device)
         for i in range(n_layers):
             # print("x_embeddings", x_embeddings[i][ind_c, :].requires_grad)
             # print("reps1", reps[c][i].requires_grad)
             # embeddings from layer `i` for the samples from classes `c` and `c_hat`
-            adv_loss1[ind_c] = adv_loss1[ind_c] + sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i],
-                                                                       sigma[i], metric=dist_metric)
-            adv_loss2[ind_c] = adv_loss2[ind_c] + sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i],
-                                                                       sigma[i], metric=dist_metric)
+            temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[i],
+                                                       metric=dist_metric)
+            temp_sum2[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_hat][i], sigma[i],
+                                                       metric=dist_metric)
+
+        with torch.no_grad():
+            max_val1, _ = torch.max(temp_sum1, dim=1)
+            max_val2, _ = torch.max(temp_sum2, dim=1)
+
+        adv_loss[ind_c] = (adv_loss[ind_c] +
+                           torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1 +
+                           torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2)
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
 
     # `const` multiplies the loss term to be consistent with CW attack formulation.
     # Smaller values of `const` lead to solutions with smaller perturbation norm
-    total_loss = dist.to(device) + const * (torch.log(adv_loss1) - torch.log(adv_loss2))
+    total_loss = dist.to(device) + const * adv_loss
 
-    # returned output
     return total_loss.mean(), dist.sqrt()
     
 
