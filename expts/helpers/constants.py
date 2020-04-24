@@ -75,11 +75,14 @@ SCORE_TYPES = ['density', 'pvalue', 'klpe']
 # preceding the logit layer.
 LAYERS_TRUST_SCORE = ['input', 'logit', 'prelogit']
 
+CUSTOM_ATTACK = 'Custom'
+
 # norm type used for the different attack methods
 ATTACK_NORM_MAP = {
     'FGSM': 'inf',
     'PGD': 'inf',
-    'CW': '2'
+    'CW': '2',
+    CUSTOM_ATTACK: '2'
 }
 
 # epsilon values used for the PGD and FGSM attacks

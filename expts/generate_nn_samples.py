@@ -1,5 +1,6 @@
 """
-Main script for generating adversarial data (from custom attack) from the cross-validation folds and saving them to numpy files.
+Main script for generating adversarial data (from custom KNN attack) from the cross-validation folds and saving
+them to numpy files.
 """
 from __future__ import absolute_import, division, print_function
 import sys
@@ -20,7 +21,8 @@ from helpers.constants import (
     CROSS_VAL_SIZE,
     NORMALIZE_IMAGES,
     BATCH_SIZE_DEF,
-    NEIGHBORHOOD_CONST
+    NEIGHBORHOOD_CONST,
+    CUSTOM_ATTACK
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -46,14 +48,14 @@ def main():
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--generate-attacks', type=bool, default=True, help='should attack samples be generated/not (default:True)')
-    parser.add_argument('--adv-attack', '--aa', choices=['Custom'], default='Custom',
-                        help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
     parser.add_argument('--det-model-file', '--dmf',
                         default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl',
                         help='Path to the saved detector model file')
-
+    parser.add_argument('--gen-train-fold', '--gtf', action='store_true', default=False,
+                        help='Specify this option to generate adversarial samples from the training folds. '
+                             'By default adversarial data is generated only for the test folds.')
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
                         help='distance metric to use')
     parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
@@ -66,8 +68,6 @@ def main():
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
-
-    generate_attacks = args.generate_attacks
 
     if not args.output_dir:
         output_dir = os.path.join(ROOT, 'numpy_data', args.model_type)
@@ -151,7 +151,8 @@ def main():
 
         # Set number of nearest neighbors based on the data size and the neighborhood constant
         n_neighbors = int(np.ceil(labels_tr.shape[0] ** NEIGHBORHOOD_CONST))
-        # print("Number of nearest neighbors = {:d}".format(n_neighbors))
+        print("\nProcessing fold {:d}".format(i))
+        print("Number of nearest neighbors = {:d}".format(n_neighbors))
         
         # make dir based on fold to save data
         numpy_save_path = os.path.join(output_dir, "fold_" + str(i))
@@ -180,42 +181,45 @@ def main():
         else:
             labels_te = np.load(os.path.join(numpy_save_path, "labels_te.npy"))
 
-        # if attack samples are to be generated
-        if generate_attacks:
-            # data loader for the training and test data split
+        if args.generate_attacks:
             print(data_tr.shape, labels_tr.shape)
-            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
-            # train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, custom=True)
-
-            adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), args.adv_attack)
+            adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), CUSTOM_ATTACK)
             if not os.path.isdir(adv_save_path):
                 os.makedirs(adv_save_path)
 
-            # Commenting this out because we plan to use only the test fold attack data
-            '''
-            # Create attack data for the train fold
-            # Search for suitable kernel scale per layer.
-            # `sigma_per_layer` should be a torch tensor of size `(data_tr.shape[0], n_layers)`
-            sigma_per_layer = knn_attack.set_kernel_scale(model, device, train_fold_loader, metric=args.dist_metric,
-                                                          n_neighbors=n_neighbors, n_jobs=args.n_jobs)
-            for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(train_fold_loader):
-                index_temp = index_temp.cpu().numpy()
-                data_batch_excl = np.delete(data_tr, index_temp, axis=0)
-                labels_batch_excl = np.delete(labels_tr, index_temp, axis=0)
-                # print(data_batch_excl.shape, labels_batch_excl.shape)
-                data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
+            if args.gen_train_fold:
+                # Create attack data for the train fold
+                train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, custom=True)
 
-                _ = knn_attack.attack(
-                    model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
-                    models_dknn[i - 1], sigma_per_layer[index_temp, :], dist_metric=args.dist_metric
+                # Search for suitable kernel scale per layer.
+                # `sigma_per_layer` should be a torch tensor of size `(data_tr.shape[0], n_layers)`
+                print("Setting the kernel scale values for the train fold data.")
+                sigma_per_layer = knn_attack.set_kernel_scale(
+                    model, device, train_fold_loader, metric=args.dist_metric, n_neighbors=n_neighbors,
+                    n_jobs=args.n_jobs
                 )
-                
-            '''
+                print("Creating adversarial samples from the train fold.")
+                for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(train_fold_loader):
+                    index_temp = index_temp.cpu().numpy()
+                    data_batch_excl = np.delete(data_tr, index_temp, axis=0)
+                    labels_batch_excl = np.delete(labels_tr, index_temp, axis=0)
+                    # print(data_batch_excl.shape, labels_batch_excl.shape)
+                    data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
+
+                    _ = knn_attack.attack(
+                        model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
+                        models_dknn[i - 1], sigma_per_layer[index_temp, :], dist_metric=args.dist_metric
+                    )
+
             # Create attack data for the test fold
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
+
             # Search for suitable kernel scale per layer.
             # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
+            print("Setting the kernel scale values for the test fold data.")
             sigma_per_layer = knn_attack.set_kernel_scale(model, device, test_fold_loader, metric=args.dist_metric,
                                                           n_neighbors=n_neighbors, n_jobs=args.n_jobs)
+            print("Creating adversarial samples from the test fold.")
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
                 index_temp = index_temp.cpu().numpy()
                 data_batch_excl = np.delete(data_te, index_temp, axis=0)
