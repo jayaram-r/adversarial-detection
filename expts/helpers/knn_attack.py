@@ -262,25 +262,18 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-# TODO:
-# Set the kernel scale `sigma` per layer
-# Set the constant in the loss function via binary search
+# TODO: Set the kernel scale `sigma` per layer
 # main attack function
-def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, dist_metric='euclidean', n_neighbors=10):
+def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, dist_metric='euclidean', verbose=True):
     # x_orig is a torch tensor
     # label_orig is a torch tensor
-    
-    init_mode = 1
-    init_mode_k = 1
-    binary_search_steps = 5
+
+    binary_search_steps = 10
     max_iterations = 500
+    check_adv_steps = 100
     learning_rate = 1e-2
     initial_const = 1.
-    max_linf = None
     random_start = False
-    thres_steps = 100
-    check_adv_steps = 100
-    verbose = True
 
     # Ensure the DNN model is in evaluation mode
     if model.training:
@@ -297,12 +290,6 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
 
     # Get the range of values in `x_orig`
     min_, max_ = get_data_bounds(x_orig, alpha=0.99)
-    # min_ = torch.tensor(0., device=device)
-    # max_ = torch.tensor(1., device=device)
-    if max_linf is not None:
-        min_ = torch.max(x_orig - max_linf, min_)
-        max_ = torch.min(x_orig + max_linf, max_)
-
     batch_size = x_orig.size(0)
     x_adv = x_orig.clone()
     
@@ -360,19 +347,30 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
     input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
 
     target_indices = {}     # not used
-   
-    '''
-    x_embeddings = extract_input_embeddings(model, device, x_recon)
-    reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=False)
-    _ = set_kernel_sigma(x_embeddings, reps, dist_metric, n_neighbors)
-    del reps
-    '''
+
+    # obtain layer embeddings for the clean inputs `x_orig`; gradients not needed here
+    with torch.no_grad():
+        x_embeddings = extract_input_embeddings(model, device, x_orig)
+
+    # mis-classifications with clean inputs
+    is_error = check_adv(x_embeddings, label_orig, dknn_model)
+    is_correct = np.logical_not(is_error)
+    n_correct = is_correct.sum()
+    print("\n{:d} out of {:d} samples are correctly classified without any perturbation.".format(n_correct,
+                                                                                                 batch_size))
+    is_adv = np.zeros(batch_size, dtype=np.bool)
+    # `best_dist` is set to 0 for clean inputs that are already mis-classified
+    best_dist[is_error] = 0.
+    if n_correct == 0:
+        print("All samples from this batch are mis-classified without any perturbation. Nothing to do.")
+        return x_orig
 
     # `reps` contains the layer wise embeddings for the entire dataloader
     # gradients are not required for the representative samples
     reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=True)
+
     n_layers = len(reps[labels_uniq[0]])
-    
+    log_interval = int(np.ceil(max_iterations / 10.))
     for binary_search_step in range(binary_search_steps):
         # initialize perturbation in transformed space
         if not random_start:
@@ -395,29 +393,29 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
             
             loss, dist = loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, device, const,
                                        sigma=sigma, dist_metric=dist_metric)
-            torch.cuda.empty_cache() #added here
+            # makes code slower; uncomment if necessary
+            # torch.cuda.empty_cache()
             loss.backward()
             optimizer.step()
 
-            if verbose and iteration % (np.ceil(max_iterations / 10)) == 0:
+            if verbose and iteration % log_interval == 0:
                 print('    step: %d; loss: %.6f; dist: %.4f' % (iteration, loss.item(), dist.mean().item()))
 
-            # every <check_adv_steps>, save adversarial samples
-            # with minimal perturbation
-            if ((iteration + 1) % check_adv_steps) == 0 or iteration == max_iterations:
+            # every `check_adv_steps` and in the final iteration, save adversarial samples with minimal perturbation
+            if ((iteration + 1) % check_adv_steps) == 0 or iteration == (max_iterations - 1):
                 is_adv = check_adv(x_embeddings, label_orig, dknn_model)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
                         best_dist[i] = dist[i]
 
-        # check how many attacks have succeeded
-        with torch.no_grad():
-            # Should we extract the layer embeddings again with `x_adv` instead of `x`?
-            is_adv = check_adv(x_embeddings, label_orig, dknn_model)
-            if verbose:
-                print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, is_adv.sum(), batch_size))
+        # `check_adv` would have been called in the last iteration. No need to call it again
+        # is_adv = check_adv(x_embeddings, label_orig, dknn_model)
+        if verbose:
+            mask = np.logical_and(is_adv, is_correct)
+            print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask.sum(), batch_size))
 
+        count_bisection = 0
         for i in range(batch_size):
             if is_adv[i]:
                 upper_bound[i] = const[i]
@@ -433,20 +431,20 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
             else:
                 # binary search if adv has been found
                 const[i] = (lower_bound[i] + upper_bound[i]) / 2.
-            
-            # only keep adv with smallest l2dist
-            if is_adv[i] and best_dist[i] > dist[i]:
-                x_adv[i] = x[i]
-                best_dist[i] = dist[i]
+                count_bisection += 1
+
+        # obtain embeddings for the inputs `x_adv`; gradients not needed here
+        with torch.no_grad():
+            x_embeddings = extract_input_embeddings(model, device, x_adv)
 
         # check the final attack success rate (combined with previous binary search steps)
+        is_adv_final = check_adv(x_embeddings, label_orig, dknn_model)
         if verbose:
-            # obtain embeddings for the inputs `x_adv`
-            x_embeddings = extract_input_embeddings(model, device, x_adv)
-            with torch.no_grad():
-                is_adv = check_adv(x_embeddings, label_orig, dknn_model)
-                print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, is_adv.sum(),
-                                                                             batch_size))
+            mask = np.logical_and(is_adv_final, is_correct)
+            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask.sum(), batch_size))
+
+    if verbose:
+        print("\n{:d} out of {:d} samples entered the bisection search phase".format(count_bisection, batch_size))
 
     check_valid_values(x_adv, name='x_adv')
     return x_adv
