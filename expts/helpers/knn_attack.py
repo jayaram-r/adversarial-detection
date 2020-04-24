@@ -140,7 +140,8 @@ def log_sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
                  Specifically, `f_l(x_n)` for the set of `n` from a given class. Expected to be a tensor of shape
                  `(n_reps, n_dim)`, where `n_reps` is the number of representative samples and `n_dim` is the number
                  of dimensions.
-    :param sigma: scale or standard deviation of the Gaussian kernel for layer `l`.
+    :param sigma: torch tensor with the scale or standard deviation values of the Gaussian kernel. Should have
+                  shape `(n_samp, )`.
     :param metric: distance metric. Set to 'euclidean' or 'cosine'.
 
     :return: torch tensor of shape `(n_samp, )` with the log sum of the Gaussian kernels for each of the `n_samp`
@@ -165,7 +166,7 @@ def log_sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
 
     # Compute pairwise euclidean distances
     dist_mat = torch.squeeze(torch.cdist(torch.unsqueeze(x_n, 0), torch.unsqueeze(reps_n, 0), p=2), 0)
-    temp_ten = (-1. / (sigma * sigma)) * torch.pow(dist_mat, 2)
+    temp_ten = -1. * torch.pow(torch.div(dist_mat, sigma.view(n_samp, 1)), 2)
     # `dist_mat` and `temp_ten` will have the same size `(n_samp, n_reps)`
     with torch.no_grad():
         max_val, _ = torch.max(temp_ten, dim=1)
@@ -180,9 +181,7 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
 
     batch_size = x.size(0)
     if not hasattr(sigma, '__iter__'):
-        sigma = [sigma] * n_layers
-    elif len(sigma) == 1:
-        sigma = [sigma[0]] * n_layers
+        sigma = sigma * torch.ones(batch_size, n_layers)
 
     # first double summation based on the paper for the original class `c`
     adv_loss1 = torch.zeros(batch_size, device=device)
@@ -190,7 +189,7 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
         temp_sum1 = torch.zeros(ind_c.shape[0], n_layers, device=device)
         for i in range(n_layers):
             # embeddings from layer `i` for the samples from class `c`
-            temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[i],
+            temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[ind_c, i],
                                                        metric=dist_metric)
 
         with torch.no_grad():
@@ -204,7 +203,7 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
         temp_sum2 = torch.zeros(ind_c.shape[0], n_layers, device=device)
         for i in range(n_layers):
             # embeddings from layer `i` for the samples from class `c_prime`
-            temp_sum2[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i], sigma[i],
+            temp_sum2[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i], sigma[ind_c, i],
                                                        metric=dist_metric)
 
         with torch.no_grad():
@@ -277,7 +276,8 @@ def preprocess_input(x_embeddings, indices):
 
 # TODO: Set the kernel scale `sigma` per layer
 # main attack function
-def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, dist_metric='euclidean', verbose=True):
+def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, sigma_per_layer,
+           dist_metric='euclidean', verbose=True):
     # x_orig is a torch tensor
     # label_orig is a torch tensor
 
@@ -298,8 +298,8 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
     if dist_metric not in ['euclidean', 'cosine']:
         raise ValueError("Specified distance metric '{}' is not supported".format(dist_metric))
 
-    # all labels of the data_loader + range of labels
-    labels, labels_uniq = get_labels(data_loader)
+    # unique labels in sorted order
+    labels_uniq = np.unique(labels)
 
     # Get the range of values in `x_orig`
     min_, max_ = get_data_bounds(x_orig, alpha=0.99)
@@ -381,6 +381,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
     reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=True)
 
     n_layers = len(reps[labels_uniq[0]])
+    assert sigma_per_layer.shape == (batch_size, n_layers), "Input 'sigma_per_layer' does not have the expected shape"
     log_interval = int(np.ceil(max_iterations / 10.))
     for binary_search_step in range(binary_search_steps):
         # initialize perturbation in transformed space
@@ -404,7 +405,7 @@ def attack(model, device, data_loader, x_orig, label_orig, dknn_model, sigma, di
             
             loss, dist = loss_function(
                 x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
-                sigma=sigma, dist_metric=dist_metric
+                sigma=sigma_per_layer, dist_metric=dist_metric
             )
             # makes code slower; uncomment if necessary
             # torch.cuda.empty_cache()

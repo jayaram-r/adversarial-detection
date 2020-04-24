@@ -194,30 +194,27 @@ def main():
             if not os.path.isdir(adv_save_path):
                 os.makedirs(adv_save_path)
 
-            # Create attack data for the train fold
             # Commenting this out because we plan to use only the test fold attack data
-            '''
-            for batch_idx, (data, target, index) in enumerate(train_fold_loader):
-                index_list = index.cpu().numpy()
-                desired_data = np.delete(data_tr, index_list, axis=0)
-                desired_labels = np.delete(labels_tr, index_list, axis=0)
-                # print(desired_data.shape, desired_labels.shape)
-                data_loader = convert_to_loader(desired_data, desired_labels, batch_size=args.batch_size)
-                x_orig = data.to(device)
-                _ = attack(model, device, data_loader, x_orig, target, models_dknn[i - 1],
-                           dist_metric=args.dist_metric, n_neighbors=n_neighbors)
-                           
-            '''
+            # Create attack data for the train fold
+            for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(train_fold_loader):
+                index_temp = index_temp.cpu().numpy()
+                data_batch_excl = np.delete(data_tr, index_temp, axis=0)
+                labels_batch_excl = np.delete(labels_tr, index_temp, axis=0)
+                # print(data_batch_excl.shape, labels_batch_excl.shape)
+                data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
+
+                _ = attack(model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
+                           models_dknn[i - 1], dist_metric=args.dist_metric)
 
             # Create attack data for the test fold
-            for batch_idx, (data, target, index) in enumerate(test_fold_loader):
-                index_list = index.cpu().numpy()
-                desired_data = np.delete(data_te, index_list, axis=0)
-                desired_labels = np.delete(labels_te, index_list, axis=0)
-                data_loader = convert_to_loader(desired_data, desired_labels, batch_size=args.batch_size)
-                x_orig = data.to(device)
-                _ = attack(model, device, data_loader, x_orig, target, models_dknn[i - 1],
-                           dist_metric=args.dist_metric, n_neighbors=n_neighbors)
+            for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
+                index_temp = index_temp.cpu().numpy()
+                data_batch_excl = np.delete(data_te, index_temp, axis=0)
+                labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
+                data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
+
+                _ = attack(model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
+                           models_dknn[i - 1], dist_metric=args.dist_metric)
 
         else:
             print("generated original data split for fold : ", i)
