@@ -31,8 +31,8 @@ from helpers.utils import (
     get_data_bounds,
     verify_data_loader
 )
-from helpers.knn_attack import *
-from detectors.detector_odds_are_odd import get_samples_as_ndarray
+from helpers import knn_attack
+from helpers.utils import get_samples_as_ndarray
 
 
 def main():
@@ -50,19 +50,16 @@ def main():
                         help='type of adversarial attack')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
-    parser.add_argument('--det-model-file', '--dmf', default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl', help='Path to the saved detector model file')
+    parser.add_argument('--det-model-file', '--dmf',
+                        default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl',
+                        help='Path to the saved detector model file')
 
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
                         help='distance metric to use')
+    parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
     '''
-    parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
-                        help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
-    parser.add_argument('--confidence', type=int, default=0, help='confidence needed by CW')
-    parser.add_argument('--epsilon', type=float, default=0.3, help='epsilon value')
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
-    parser.add_argument('--iterations', type=int, default=40, help='num. of iterations')
-    parser.add_argument('--max-epsilon', type=float, default=1., help='max. value of epsilon')
     '''
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
@@ -195,7 +192,12 @@ def main():
                 os.makedirs(adv_save_path)
 
             # Commenting this out because we plan to use only the test fold attack data
+            '''
             # Create attack data for the train fold
+            # Search for suitable kernel scale per layer.
+            # `sigma_per_layer` should be a torch tensor of size `(data_tr.shape[0], n_layers)`
+            sigma_per_layer = knn_attack.set_kernel_scale(model, device, train_fold_loader, metric=args.dist_metric,
+                                                          n_neighbors=n_neighbors, n_jobs=args.n_jobs)
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(train_fold_loader):
                 index_temp = index_temp.cpu().numpy()
                 data_batch_excl = np.delete(data_tr, index_temp, axis=0)
@@ -203,18 +205,27 @@ def main():
                 # print(data_batch_excl.shape, labels_batch_excl.shape)
                 data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
 
-                _ = attack(model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
-                           models_dknn[i - 1], dist_metric=args.dist_metric)
-
+                _ = knn_attack.attack(
+                    model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
+                    models_dknn[i - 1], sigma_per_layer[index_temp, :], dist_metric=args.dist_metric
+                )
+                
+            '''
             # Create attack data for the test fold
+            # Search for suitable kernel scale per layer.
+            # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
+            sigma_per_layer = knn_attack.set_kernel_scale(model, device, test_fold_loader, metric=args.dist_metric,
+                                                          n_neighbors=n_neighbors, n_jobs=args.n_jobs)
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
                 index_temp = index_temp.cpu().numpy()
                 data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
                 data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
 
-                _ = attack(model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
-                           models_dknn[i - 1], dist_metric=args.dist_metric)
+                _ = knn_attack.attack(
+                    model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
+                    models_dknn[i - 1], sigma_per_layer[index_temp, :], dist_metric=args.dist_metric
+                )
 
         else:
             print("generated original data split for fold : ", i)

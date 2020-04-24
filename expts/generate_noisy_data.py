@@ -34,13 +34,13 @@ from helpers.utils import (
     load_model_checkpoint,
     load_numpy_data,
     get_clean_data_path,
-    verify_data_loader
+    verify_data_loader,
+    get_samples_as_ndarray
 )
 from helpers.noisy import (
     get_noise_stdev,
     create_noisy_samples
 )
-from detectors.detector_odds_are_odd import get_samples_as_ndarray
 
 
 def main():

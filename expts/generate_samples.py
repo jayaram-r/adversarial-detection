@@ -27,10 +27,10 @@ from helpers.utils import (
     get_clean_data_path,
     get_adversarial_data_path,
     get_data_bounds,
-    verify_data_loader
+    verify_data_loader,
+    get_samples_as_ndarray
 )
 from helpers.attacks import foolbox_attack
-from detectors.detector_odds_are_odd import get_samples_as_ndarray
 
 
 def main():

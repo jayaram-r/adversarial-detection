@@ -7,10 +7,10 @@ import numpy as np
 import scipy
 import os
 from numpy import linalg as LA
-from torch.distributions.multivariate_normal import MultivariateNormal
 from helpers.constants import ROOT, NEIGHBORHOOD_CONST
 from helpers.utils import combine_and_vectorize, get_data_bounds
 from helpers.knn_index import KNNIndex
+from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 INFTY = 1e20
 
@@ -101,31 +101,16 @@ def extract_input_embeddings(model, device, x_input):
     return outputs_layers
 
 
-def set_kernel_sigma(x_embeddings, reps, metric=None, n_neighbors=10, n_jobs=1):
-    num_layers = len(reps)
-    for i in range(num_layers):
-        index_knn = KNNIndex(reps[i].cpu().numpy(),
-                n_neighbors=n_neighbors, 
-                metric=metric, 
-                approx_nearest_neighbors=True, 
-                n_jobs=n_jobs
-                )
-        nn_indices, nn_distances = index_knn.query(x_embeddings[i].cpu().numpy(), k=n_neighbors)
-        for n in range(nn_indices.shape[0]):
-            indices = nn_indices[n]
-            s = reps[i][indices].size()
-            print(reps[i][indices].view(1, s[0], s[1]).size())
-        exit()
+def set_kernel_scale(model, device, data_loader, metric=None, n_neighbors=10, n_jobs=1):
+    layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings_numpy(
+        model, device, data_loader, method='dknn'
+    )
+    n_layers = len(layer_embeddings)
+    n_samp = labels.shape[0]
 
-    # Compute the median distance from `x` to the points in `reps`
-
-    # Build a KNN index on the set of points in `reps`
-
-    # Query the k nearest neighbors from `reps` of each row in `x`
-
-    # Define a coarse list of search values for `sigma`
-
-    # Define a finer list of search values for sigma
+    # TODO
+    sigma = torch.ones(n_samp, n_layers)
+    return sigma
 
 
 def log_sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
@@ -274,7 +259,9 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-# TODO: Set the kernel scale `sigma` per layer
+# TODO:
+# Set the kernel scale `sigma` per layer
+# Modify the function `get_adv_labels` to get the adversarial labels
 # main attack function
 def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, sigma_per_layer,
            dist_metric='euclidean', verbose=True):
