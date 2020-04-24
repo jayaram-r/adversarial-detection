@@ -207,9 +207,8 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, n_layers, devic
             max_val1, _ = torch.max(temp_sum1, dim=1)
             max_val2, _ = torch.max(temp_sum2, dim=1)
 
-        adv_loss[ind_c] = (adv_loss[ind_c] +
-                           torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1 +
-                           torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2)
+        adv_loss[ind_c] = (torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1 -
+                           torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) - max_val2)
 
     # obtaining the distance between the input (with noise added) and the original input (with no noise)
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
