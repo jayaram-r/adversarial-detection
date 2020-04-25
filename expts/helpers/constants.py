@@ -77,6 +77,10 @@ LAYERS_TRUST_SCORE = ['input', 'logit', 'prelogit']
 
 CUSTOM_ATTACK = 'Custom'
 
+# Maximum number of representative samples used by the custom attack. Limiting this size speeds up the custom attack
+# generation and uses less memory
+MAX_NUM_REPS = 2000
+
 # norm type used for the different attack methods
 ATTACK_NORM_MAP = {
     'FGSM': 'inf',
