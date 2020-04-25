@@ -26,10 +26,6 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
-def convert_to_list(array):
-    #array is a numpy ndarray
-    return [r for r in array]
-
 class MyDataset(Dataset):
     def __init__(self, dataset):
         self.dataset = dataset
@@ -41,7 +37,6 @@ class MyDataset(Dataset):
 
     def __len__(self):
         return len(self.dataset)
-
 
 
 def convert_to_loader(x, y, dtype_x=None, dtype_y=None, device=None, batch_size=BATCH_SIZE_DEF, custom=False):

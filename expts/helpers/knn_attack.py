@@ -4,13 +4,13 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 import numpy as np
+import math
 import scipy
 import os
 from numpy import linalg as LA
 from helpers.constants import ROOT, NEIGHBORHOOD_CONST
 from helpers.utils import combine_and_vectorize, get_data_bounds
 from helpers.knn_index import KNNIndex
-from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 INFTY = 1e20
 
@@ -101,10 +101,7 @@ def extract_input_embeddings(model, device, x_input):
     return outputs_layers
 
 
-def set_kernel_scale(model, device, data_loader, metric=None, n_neighbors=10, n_jobs=1):
-    layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings_numpy(
-        model, device, data_loader, method='dknn'
-    )
+def set_kernel_scale(layer_embeddings, labels, metric='euclidean', n_neighbors=10, n_jobs=1):
     n_layers = len(layer_embeddings)
     n_samp = labels.shape[0]
 
@@ -113,7 +110,7 @@ def set_kernel_scale(model, device, data_loader, metric=None, n_neighbors=10, n_
     return sigma
 
 
-def log_sum_gaussian_kernels(x, reps, sigma, metric='euclidean'):
+def log_sum_gaussian_kernels(x, reps, sigma, metric):
     """
     Compute the log of the sum of Gaussian kernels evaluated at the set of representative points `reps` and
     centered on `x`.
@@ -175,12 +172,13 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
         for i in range(n_layers):
             # embeddings from layer `i` for the samples from class `c`
             temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[ind_c, i],
-                                                       metric=dist_metric)
+                                                       dist_metric)
 
         with torch.no_grad():
             max_val1, _ = torch.max(temp_sum1, dim=1)
 
-        adv_loss1[ind_c] = torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1
+        adv_loss1[ind_c] = torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1 - \
+                           math.log(reps[c][0].size(0))
 
     # second double summation based on the paper for the target class `c_prime`
     adv_loss2 = torch.zeros(batch_size, device=device)
@@ -189,12 +187,13 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
         for i in range(n_layers):
             # embeddings from layer `i` for the samples from class `c_prime`
             temp_sum2[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i], sigma[ind_c, i],
-                                                       metric=dist_metric)
+                                                       dist_metric)
 
         with torch.no_grad():
             max_val2, _ = torch.max(temp_sum2, dim=1)
 
-        adv_loss2[ind_c] = torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2
+        adv_loss2[ind_c] = torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2 - \
+                           math.log(reps[c_prime][0].size(0))
 
     # distance between the original and perturbed inputs
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
@@ -291,7 +290,7 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
     # Get the range of values in `x_orig`
     min_, max_ = get_data_bounds(x_orig, alpha=0.99)
     batch_size = x_orig.size(0)
-    x_adv = x_orig.clone()
+    x_adv = x_orig.clone().detach()
     
     # label_orig is converted to ndarray
     label_orig = label_orig.detach().cpu().numpy()
@@ -448,4 +447,4 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
         print("\n{:d} out of {:d} samples entered the bisection search phase".format(count_bisection, batch_size))
 
     check_valid_values(x_adv, name='x_adv')
-    return x_adv
+    return x_adv.detach()
