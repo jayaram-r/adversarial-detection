@@ -291,7 +291,7 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
     # Get the range of values in `x_orig`
     min_, max_ = get_data_bounds(x_orig, alpha=0.99)
     batch_size = x_orig.size(0)
-    x_adv = x_orig.clone()
+    x_adv = x_orig.clone().detach()
     
     # label_orig is converted to ndarray
     label_orig = label_orig.detach().cpu().numpy()
@@ -448,4 +448,4 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
         print("\n{:d} out of {:d} samples entered the bisection search phase".format(count_bisection, batch_size))
 
     check_valid_values(x_adv, name='x_adv')
-    return x_adv
+    return x_adv.detach()
