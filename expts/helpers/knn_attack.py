@@ -13,6 +13,7 @@ from helpers.knn_index import KNNIndex
 from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 INFTY = 1e20
+NORM_REG = 1e-16
 
 
 def get_labels(data_loader):
@@ -94,51 +95,67 @@ def extract_input_embeddings(model, device, x_input):
         if len(s) > 2:
             tens = tens.view(s[0], -1)
 
-        # TODO: Check if `tens` has its `requires_grad` set because it is derived from `x_input`
-        # tens.requires_grad = True
         outputs_layers[i] = tens
 
     return outputs_layers
 
 
 def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
-                     metric='euclidean', n_neighbors=10, n_jobs=1):
+                     metric='euclidean', n_neighbors=10, n_jobs=1,
+                     search_size=20):
     # Extract the layer embeddings for samples from the train and test split
     layer_embeddings_train, _, _, _ = extract_layer_embeddings_numpy(model, device, train_fold_loader,
                                                                      method='proposed')
     layer_embeddings_test, _, _, _ = extract_layer_embeddings_numpy(model, device, test_fold_loader,
                                                                     method='proposed')
     # `layer_embeddings_train` and `layer_embeddings_test` will both be a list of numpy arrays
-
     n_layers = len(layer_embeddings_test)
     n_test = layer_embeddings_test[0].shape[0]
     n_train = layer_embeddings_train[0].shape[0]
-    sigma = np.ones((n_test, n_layers))
+
+    # `1 - epsilon` values
+    v = 1. - np.linspace(0.01, 0.95, num=search_size)
+    sigma_multiplier = np.sqrt(-1. / np.log(v))
+
+    sigma_per_layer = np.ones((n_test, n_layers))
     for i in range(n_layers):
+        if metric == 'cosine':
+            # For cosine distance, we scale the layer embedding vectors to have unit norm
+            norm_train = np.linalg.norm(layer_embeddings_train[i], axis=1) + NORM_REG
+            x_train = layer_embeddings_train[i] / norm_train[:, np.newaxis]
+            norm_test = np.linalg.norm(layer_embeddings_test[i], axis=1) + NORM_REG
+            x_test = layer_embeddings_test[i] / norm_test[:, np.newaxis]
+        else:
+            x_train = layer_embeddings_train[i]
+            x_test = layer_embeddings_test[i]
 
         # Build a KNN index on the layer embeddings from the train split
         index_knn = KNNIndex(
-            layer_embeddings_train[i],
+            x_train,
             n_neighbors=n_neighbors,
-            metric=metric,
+            metric='euclidean',
             approx_nearest_neighbors=True,
             n_jobs=n_jobs
         )
         # Query the index of nearest neighbors of the layer embeddings from the test split
-        nn_indices, nn_distances = index_knn.query(layer_embeddings_test[i], k=n_neighbors)
+        nn_indices, nn_distances = index_knn.query(x_test, k=n_neighbors)
         # `nn_indices` and `nn_distances` should have shape `(n_test, n_neighbors)`
+
+        # Candidate sigma values are obtained by multiplying the distance to the k-th nearest neighbor of each point
+        # in `n_test` with the `sigma_multiplier` defined earlier
+        sigma_cand_vals = nn_distances[:, -1].reshape(n_test, 1) * sigma_multiplier.reshape(1, search_size)
+        # `sigma_cand_vals` should have shape `(n_test, search_size)`
 
         # Compute pairwise distances between points in `layer_embeddings_test` and `layer_embeddings_train`
         dist_mat = pairwise_distances(
-            layer_embeddings_test,
-            Y=layer_embeddings_train,
-            metric=metric,
+            x_test,
+            Y=x_train,
+            metric='euclidean',
             n_jobs=n_jobs
         )
         # `dist_mat` should have shape `(n_test, n_train)`
 
-
-    return sigma
+    return torch.from_numpy(sigma_per_layer).to(device)
 
 
 def log_sum_gaussian_kernels(x, reps, sigma, metric):
@@ -165,11 +182,11 @@ def log_sum_gaussian_kernels(x, reps, sigma, metric):
     assert d == n_dim, "Mismatch in the input dimensions"
 
     if metric == 'cosine':
-        # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
-        # a scale factor)
-        norm_x = torch.norm(x, p=2, dim=1) + 1e-16
+        # Rescale the vectors to unit norm, which makes the squared euclidean distance equal to twice the
+        # cosine distance
+        norm_x = torch.norm(x, p=2, dim=1) + NORM_REG
         x_n = torch.div(x, norm_x.view(n_samp, 1))
-        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-16
+        norm_reps = torch.norm(reps, p=2, dim=1) + NORM_REG
         reps_n = torch.div(reps, norm_reps.view(n_reps, 1))
     elif metric == 'euclidean':
         x_n = x
