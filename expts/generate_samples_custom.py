@@ -59,6 +59,8 @@ def main():
     parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
     parser.add_argument('--skip-subsampling', action='store_true', default=False,
                         help='Use this option to skip random sub-sampling of the train data split')
+    parser.add_argument('--untargeted', action='store_true', default=False,
+                        help='Use this option to create untargeted adversarial samples from this attack')
     '''
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
@@ -225,16 +227,38 @@ def main():
                 model, device, train_fold_loader, indices_per_class, split_by_class=True
             )
             print("Creating adversarial samples from the test fold.")
+            data_adver = []
+            labels_adver = []
+            data_clean = []
+            labels_clean = []
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
                 index_temp = index_temp.cpu().numpy()
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
-
-                data_adv_batch, labels_adv_batch = knn_attack.attack(
-                    model, device, data_temp.to(device), labels_temp, layer_embeddings_per_class_train, labels_uniq,
-                    models_dknn[i - 1], sigma_per_layer[index_temp, :], dist_metric=args.dist_metric
+                # main attack function
+                data_adver_batch, labels_adver_batch, data_clean_batch, labels_clean_batch = knn_attack.attack(
+                    model, device, data_temp.to(device), labels_temp, layer_embeddings_per_class_train,
+                    labels_uniq, models_dknn[i - 1], sigma_per_layer[index_temp, :],
+                    untargeted=args.untargeted, dist_metric=args.dist_metric
                 )
+                # all returned outputs are numpy arrays
+                if labels_adver_batch.shape[0] > 0:
+                    data_adver.append(data_adver_batch)
+                    labels_adver.append(labels_adver_batch)
+                    data_clean.append(data_clean_batch)
+                    labels_clean.append(labels_clean_batch)
 
+            data_adver = np.concatenate(data_adver, axis=0)
+            labels_adver = np.asarray(np.concatenate(labels_adver), dtype=labels_te.dtype)
+            data_clean = np.concatenate(data_clean, axis=0)
+            labels_clean = np.asarray(np.concatenate(labels_clean), dtype=labels_te.dtype)
+            print("\nCreated {:d} adversarial samples from test fold of size {:d}".format(labels_adver.shape[0],
+                                                                                          labels_te.shape[0]))
+            # save data to numpy files
+            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
+            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
+            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
+            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
         else:
             print("generated original data split for fold : ", i)
 

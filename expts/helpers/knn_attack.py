@@ -258,16 +258,16 @@ def log_sum_gaussian_kernels(x, reps, sigma, metric):
     return torch.log(torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)) + max_val
 
 
-def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
-                  sigma, dist_metric='euclidean'):
-
+def loss_function_targeted(x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device,
+                           const, sigma, dist_metric='euclidean'):
+    # Loss function the targeted attack
     batch_size = x.size(0)
     # first double summation based on the paper for the original class `c`
     adv_loss1 = torch.zeros(batch_size, device=device)
     for c, ind_c in input_indices.items():
         temp_sum1 = torch.zeros(ind_c.shape[0], n_layers, device=device)
         for i in range(n_layers):
-            # embeddings from layer `i` for the samples from class `c`
+            # log-sum of kernels from layer `i` for the samples from class `c`
             temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[ind_c, i],
                                                        dist_metric)
 
@@ -282,7 +282,7 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
     for c_prime, ind_c in target_indices.items():
         temp_sum2 = torch.zeros(ind_c.shape[0], n_layers, device=device)
         for i in range(n_layers):
-            # embeddings from layer `i` for the samples from class `c_prime`
+            # log-sum of kernels from layer `i` for the samples from class `c_prime`
             temp_sum2[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i], sigma[ind_c, i],
                                                        dist_metric)
 
@@ -291,6 +291,49 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
 
         adv_loss2[ind_c] = torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2 - \
                            math.log(reps[c_prime][0].size(0))
+
+    # distance between the original and perturbed inputs
+    dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
+
+    # `const` multiplies the loss term to be consistent with CW attack formulation.
+    # Smaller values of `const` lead to solutions with smaller perturbation norm
+    total_loss = dist.to(device) + const * (adv_loss1 - adv_loss2)
+
+    return total_loss.mean(), dist.sqrt()
+
+
+def loss_function_untargeted(x, x_recon, x_embeddings, reps, input_indices, labels_uniq, n_reps, n_layers, device,
+                             const, sigma, dist_metric='euclidean'):
+    # Loss function the untargeted attack
+    batch_size = x.size(0)
+    n_classes = labels_uniq.shape[0]
+
+    # double summations based on the paper for the original class `c`
+    adv_loss1 = torch.zeros(batch_size, device=device)
+    adv_loss2 = torch.zeros(batch_size, device=device)
+    for c, ind_c in input_indices.items():
+        temp_sum1 = torch.zeros(ind_c.shape[0], n_layers, device=device)
+        temp_sum2 = torch.zeros(ind_c.shape[0], n_layers * (n_classes - 1), device=device)
+        j = 0
+        for i in range(n_layers):
+            # log-sum of kernels from layer `i` for the samples from class `c`
+            temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[ind_c, i],
+                                                       dist_metric)
+            # log-sum of kernels from layer `i` for the samples from all classes excluding `c`
+            for c_prime in labels_uniq:
+                if c_prime != c:
+                    temp_sum2[:, j] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i],
+                                                               sigma[ind_c, i], dist_metric)
+                    j += 1
+
+        with torch.no_grad():
+            max_val1, _ = torch.max(temp_sum1, dim=1)
+            max_val2, _ = torch.max(temp_sum2, dim=1)
+
+        adv_loss1[ind_c] = torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1 - \
+                           math.log(reps[c][0].size(0))
+        adv_loss2[ind_c] = torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2 - \
+                           math.log(n_reps - reps[c][0].size(0))
 
     # distance between the original and perturbed inputs
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
@@ -356,7 +399,7 @@ def preprocess_input(x_embeddings, indices):
 
 
 def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sigma_per_layer,
-           dist_metric='euclidean', verbose=True):
+           untargeted=False, dist_metric='euclidean', verbose=True):
     """
     Main function implementing the custom attack on KNN based methods.
 
@@ -372,9 +415,11 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
     :param dknn_model: Deep KNN model that is already trained.
     :param sigma_per_layer: Scale of the Gaussian kernel per layer for each sample in the batch. A torch tensor of
                             size `(batch_size, n_layers)`.
+    :param untargeted: Set to True to run the untargeted version of the attack.
     :param dist_metric: distance metric to use. Valid values are 'euclidean' and 'cosine'.
     :param verbose: set to True to print log messages.
-    :return:
+
+    :return: (x_adv, labels_pred_adv, x_clean, labels_clean)
     """
     binary_search_steps = 10
     max_iterations = 500
@@ -404,10 +449,15 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
     # label_orig is converted to ndarray
     label_orig = label_orig.detach().cpu().numpy()
     label_orig_uniq = np.unique(label_orig)
+    # indices for each distinct label
+    input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
 
-    # get adversarial labels i.e. the labels we want the inputs to be misclassified as
-    label_adv = get_adv_labels(label_orig, labels_uniq)
-    label_adv_uniq = np.unique(label_adv)
+    if not untargeted:
+        # get adversarial labels i.e. the labels we want the inputs to be misclassified as
+        label_adv = get_adv_labels(label_orig, labels_uniq)
+        label_adv_uniq = np.unique(label_adv)
+        # indices for each distinct label
+        target_indices = {i: return_indices(label_adv, i) for i in label_adv_uniq}
 
 
     def to_attack_space(x):
@@ -448,10 +498,6 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
     upper_bound = torch.zeros_like(const) + INFTY
     best_dist = torch.zeros_like(const) + INFTY
 
-    # indices for each distinct label in `label_orig` and `label_adv`. Needs to be computed only once
-    input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
-    target_indices = {i: return_indices(label_adv, i) for i in label_adv_uniq}
-
     # obtain layer embeddings for the clean inputs `x_orig`; gradients not needed here
     with torch.no_grad():
         x_embeddings = extract_input_embeddings(model, device, x_orig)
@@ -473,6 +519,7 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
         labels_clean = label_orig[mask_adver].detach().cpu().numpy()
         return x_orig[mask_adver, :].detach().cpu().numpy(), labels_pred_adv[mask_adver], x_clean, labels_clean
 
+    n_reps = sum([reps[c][0].size(0) for c in labels_uniq])
     log_interval = int(np.ceil(max_iterations / 10.))
     for binary_search_step in range(binary_search_steps):
         # initialize perturbation in transformed space
@@ -492,12 +539,17 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
 
             # obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
-            # classwise_x = preprocess_input(x_embeddings, input_indices)
-            
-            loss, dist = loss_function(
-                x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
-                sigma_per_layer, dist_metric=dist_metric
-            )
+            if not untargeted:
+                loss, dist = loss_function_targeted(
+                    x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
+                    sigma_per_layer, dist_metric=dist_metric
+                )
+            else:
+                loss, dist = loss_function_untargeted(
+                    x, x_recon, x_embeddings, reps, input_indices, labels_uniq, n_reps, n_layers, device, const,
+                    sigma_per_layer, dist_metric=dist_metric
+                )
+
             # makes code slower; uncomment if necessary
             # torch.cuda.empty_cache()
             loss.backward()
@@ -555,7 +607,7 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
     check_valid_values(x_adv, name='x_adv')
     # Return only the successful adversarial inputs and the corresponding clean inputs as numpy arrays
     x_adv = x_adv[mask_adver, :].detach().cpu().numpy()
-    labels_pred_adv = labels_pred_adv[mask_adver]       # `labels_pred_adv` is already a numpy array
+    labels_pred_adv = labels_pred_adv[mask_adver]   # already a numpy array
     x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
     labels_clean = label_orig[mask_adver].detach().cpu().numpy()
 
