@@ -22,8 +22,7 @@ from helpers.constants import (
     NORMALIZE_IMAGES,
     BATCH_SIZE_DEF,
     NEIGHBORHOOD_CONST,
-    CUSTOM_ATTACK,
-    MAX_NUM_REPS
+    CUSTOM_ATTACK
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -216,7 +215,6 @@ def main():
                 model, device, test_fold_loader, train_fold_loader,
                 metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
             )
-
             # Index of samples from each class in `labels_tr_sample`
             labels_uniq = np.unique(labels_tr_sample)
             indices_per_class = {c: np.where(labels_tr_sample == c)[0] for c in labels_uniq}
