@@ -2,17 +2,23 @@
 import torch
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision
 import numpy as np
 import math
-import scipy
 import os
-from numpy import linalg as LA
-from helpers.constants import ROOT, NEIGHBORHOOD_CONST
-from helpers.utils import combine_and_vectorize, get_data_bounds
+import sys
+import multiprocessing
+from functools import partial
+from sklearn.metrics import pairwise_distances
+from scipy.special import softmax, logsumexp
+from helpers.utils import (
+    combine_and_vectorize,
+    get_data_bounds
+)
 from helpers.knn_index import KNNIndex
+from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 INFTY = 1e20
+NORM_REG = 1e-16
 
 
 def get_labels(data_loader):
@@ -94,20 +100,114 @@ def extract_input_embeddings(model, device, x_input):
         if len(s) > 2:
             tens = tens.view(s[0], -1)
 
-        # TODO: Check if `tens` has its `requires_grad` set because it is derived from `x_input`
-        # tens.requires_grad = True
         outputs_layers[i] = tens
 
     return outputs_layers
 
 
-def set_kernel_scale(layer_embeddings, labels, metric='euclidean', n_neighbors=10, n_jobs=1):
-    n_layers = len(layer_embeddings)
-    n_samp = labels.shape[0]
+def objective_kernel_scale(dist_neighbors, dist_all, alpha, sigma):
+    """
+    Objective function that is to be maximized for selecting the kernel scale.
 
-    # TODO
-    sigma = torch.ones(n_samp, n_layers)
-    return sigma
+    :param dist_neighbors: numpy array with the pairwise distances between test samples and their `k` nearest
+                           neighbors. Has shape like `(n_test, k)`.
+    :param dist_all: numpy array with the pairwise distances between test samples and all the representative samples.
+                     Has shape like `(n_test, n_reps)`.
+    :param alpha: float value between 0 and 1 specifying the relative weight of the two terms in the objective
+                  function.
+    :param sigma: numpy array of kernel sigma values. Has shape like `(n_test, )`.
+
+    :return: objective function value for each of the test samples. Has shape `(n_test, )`.
+    """
+    sigma = sigma[:, np.newaxis]
+    expo_arr_neigh = np.negative((dist_neighbors / sigma) ** 2)
+    temp_arr1 = softmax(expo_arr_neigh, axis=1)
+    entropy = -1. * np.sum(temp_arr1 * np.log(np.clip(temp_arr1, sys.float_info.min, None)), axis=1)
+
+    expo_arr_all = np.negative((dist_all / sigma) ** 2)
+    proba = np.exp(logsumexp(expo_arr_neigh, axis=1) - logsumexp(expo_arr_all, axis=1))
+
+    return (1. - alpha) * proba + alpha * entropy
+
+
+# Helper function used by multiprocessing
+def helper_objective(dist_neighbors, dist_all, alpha, sigma_cand_vals, index_cand):
+    return objective_kernel_scale(dist_neighbors, dist_all, alpha, sigma_cand_vals[:, index_cand])
+
+
+def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
+                     metric='euclidean', n_neighbors=10, n_jobs=1, search_size=20, alpha=0.5):
+    # Extract the layer embeddings for samples from the train and test split
+    layer_embeddings_train, _, _, _ = extract_layer_embeddings_numpy(model, device, train_fold_loader,
+                                                                     method='proposed')
+    layer_embeddings_test, _, _, _ = extract_layer_embeddings_numpy(model, device, test_fold_loader,
+                                                                    method='proposed')
+    # `layer_embeddings_train` and `layer_embeddings_test` will both be a list of numpy arrays
+    n_layers = len(layer_embeddings_test)
+    n_test = layer_embeddings_test[0].shape[0]
+    # n_train = layer_embeddings_train[0].shape[0]
+
+    # `1 - epsilon` values
+    v = np.linspace(0.05, 0.95, num=search_size)
+    sigma_multiplier = np.sqrt(-1. / np.log(v))
+    sigma_per_layer = np.ones((n_test, n_layers))
+    for i in range(n_layers):
+        if metric == 'cosine':
+            # For cosine distance, we scale the layer embedding vectors to have unit norm
+            norm_train = np.linalg.norm(layer_embeddings_train[i], axis=1) + NORM_REG
+            x_train = layer_embeddings_train[i] / norm_train[:, np.newaxis]
+            norm_test = np.linalg.norm(layer_embeddings_test[i], axis=1) + NORM_REG
+            x_test = layer_embeddings_test[i] / norm_test[:, np.newaxis]
+        else:
+            x_train = layer_embeddings_train[i]
+            x_test = layer_embeddings_test[i]
+
+        # Build a KNN index on the layer embeddings from the train split
+        index_knn = KNNIndex(
+            x_train,
+            n_neighbors=n_neighbors,
+            metric='euclidean',
+            approx_nearest_neighbors=True,
+            n_jobs=n_jobs
+        )
+        # Query the index of nearest neighbors of the layer embeddings from the test split
+        nn_indices, nn_distances = index_knn.query(x_test, k=n_neighbors)
+        # `nn_indices` and `nn_distances` should have shape `(n_test, n_neighbors)`
+
+        # Candidate sigma values are obtained by multiplying the distance to the k-th nearest neighbor of each point
+        # in `n_test` with the `sigma_multiplier` defined earlier
+        sigma_cand_vals = nn_distances[:, -1].reshape(n_test, 1) * sigma_multiplier.reshape(1, search_size)
+        # `sigma_cand_vals` should have shape `(n_test, search_size)`
+
+        # Compute pairwise distances between points in `layer_embeddings_test` and `layer_embeddings_train`
+        dist_mat = pairwise_distances(
+            x_test,
+            Y=x_train,
+            metric='euclidean',
+            n_jobs=n_jobs
+        )
+        # `dist_mat` should have shape `(n_test, n_train)`
+        # Calculate the objective function to maximize for different candidate `sigma` values
+        if n_jobs == 1:
+            out = [helper_objective(nn_distances, dist_mat, alpha, sigma_cand_vals, t) for t in range(search_size)]
+        else:
+            # partial function called by multiprocessing
+            helper_objective_partial = partial(helper_objective, nn_distances, dist_mat, alpha, sigma_cand_vals)
+            pool_obj = multiprocessing.Pool(processes=n_jobs)
+            out = []
+            _ = pool_obj.map_async(helper_objective_partial, range(search_size), callback=out.extend)
+            pool_obj.close()
+            pool_obj.join()
+
+        # `out` will be a list of length `search_size`, where each element is a numpy array with the objective
+        # function values for the `n_test` samples.
+        # `objec_arr` will have shape `(search_size, n_test)`
+        objec_arr = np.array(out)
+        # Find the sigma value corresponding to the maximum objective function for each test sample
+        ind_max = np.argmax(objec_arr, axis=0)
+        sigma_per_layer[:, i] = [sigma_cand_vals[j, ind_max[j]] for j in range(n_test)]
+
+    return torch.from_numpy(sigma_per_layer).to(device)
 
 
 def log_sum_gaussian_kernels(x, reps, sigma, metric):
@@ -134,11 +234,11 @@ def log_sum_gaussian_kernels(x, reps, sigma, metric):
     assert d == n_dim, "Mismatch in the input dimensions"
 
     if metric == 'cosine':
-        # Rescale the vectors to unit norm, which makes the euclidean distance equal to the cosine distance (times
-        # a scale factor)
-        norm_x = torch.norm(x, p=2, dim=1) + 1e-16
+        # Rescale the vectors to unit norm, which makes the squared euclidean distance equal to twice the
+        # cosine distance
+        norm_x = torch.norm(x, p=2, dim=1) + NORM_REG
         x_n = torch.div(x, norm_x.view(n_samp, 1))
-        norm_reps = torch.norm(reps, p=2, dim=1) + 1e-16
+        norm_reps = torch.norm(reps, p=2, dim=1) + NORM_REG
         reps_n = torch.div(reps, norm_reps.view(n_reps, 1))
     elif metric == 'euclidean':
         x_n = x
@@ -158,19 +258,16 @@ def log_sum_gaussian_kernels(x, reps, sigma, metric):
     return torch.log(torch.exp(temp_ten - torch.unsqueeze(max_val, 1)).sum(1)) + max_val
 
 
-def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
-                  sigma=1.0, dist_metric='euclidean'):
-
+def loss_function_targeted(x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device,
+                           const, sigma, dist_metric='euclidean'):
+    # Loss function the targeted attack
     batch_size = x.size(0)
-    if not hasattr(sigma, '__iter__'):
-        sigma = sigma * torch.ones(batch_size, n_layers)
-
     # first double summation based on the paper for the original class `c`
     adv_loss1 = torch.zeros(batch_size, device=device)
     for c, ind_c in input_indices.items():
         temp_sum1 = torch.zeros(ind_c.shape[0], n_layers, device=device)
         for i in range(n_layers):
-            # embeddings from layer `i` for the samples from class `c`
+            # log-sum of kernels from layer `i` for the samples from class `c`
             temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[ind_c, i],
                                                        dist_metric)
 
@@ -185,7 +282,7 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
     for c_prime, ind_c in target_indices.items():
         temp_sum2 = torch.zeros(ind_c.shape[0], n_layers, device=device)
         for i in range(n_layers):
-            # embeddings from layer `i` for the samples from class `c_prime`
+            # log-sum of kernels from layer `i` for the samples from class `c_prime`
             temp_sum2[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i], sigma[ind_c, i],
                                                        dist_metric)
 
@@ -194,6 +291,49 @@ def loss_function(x, x_recon, x_embeddings, reps, input_indices, target_indices,
 
         adv_loss2[ind_c] = torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2 - \
                            math.log(reps[c_prime][0].size(0))
+
+    # distance between the original and perturbed inputs
+    dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
+
+    # `const` multiplies the loss term to be consistent with CW attack formulation.
+    # Smaller values of `const` lead to solutions with smaller perturbation norm
+    total_loss = dist.to(device) + const * (adv_loss1 - adv_loss2)
+
+    return total_loss.mean(), dist.sqrt()
+
+
+def loss_function_untargeted(x, x_recon, x_embeddings, reps, input_indices, labels_uniq, n_reps, n_layers, device,
+                             const, sigma, dist_metric='euclidean'):
+    # Loss function the untargeted attack
+    batch_size = x.size(0)
+    n_classes = labels_uniq.shape[0]
+
+    # double summations based on the paper for the original class `c`
+    adv_loss1 = torch.zeros(batch_size, device=device)
+    adv_loss2 = torch.zeros(batch_size, device=device)
+    for c, ind_c in input_indices.items():
+        temp_sum1 = torch.zeros(ind_c.shape[0], n_layers, device=device)
+        temp_sum2 = torch.zeros(ind_c.shape[0], n_layers * (n_classes - 1), device=device)
+        j = 0
+        for i in range(n_layers):
+            # log-sum of kernels from layer `i` for the samples from class `c`
+            temp_sum1[:, i] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c][i], sigma[ind_c, i],
+                                                       dist_metric)
+            # log-sum of kernels from layer `i` for the samples from all classes excluding `c`
+            for c_prime in labels_uniq:
+                if c_prime != c:
+                    temp_sum2[:, j] = log_sum_gaussian_kernels(x_embeddings[i][ind_c, :], reps[c_prime][i],
+                                                               sigma[ind_c, i], dist_metric)
+                    j += 1
+
+        with torch.no_grad():
+            max_val1, _ = torch.max(temp_sum1, dim=1)
+            max_val2, _ = torch.max(temp_sum2, dim=1)
+
+        adv_loss1[ind_c] = torch.log(torch.exp(temp_sum1 - torch.unsqueeze(max_val1, 1)).sum(1)) + max_val1 - \
+                           math.log(reps[c][0].size(0))
+        adv_loss2[ind_c] = torch.log(torch.exp(temp_sum2 - torch.unsqueeze(max_val2, 1)).sum(1)) + max_val2 - \
+                           math.log(n_reps - reps[c][0].size(0))
 
     # distance between the original and perturbed inputs
     dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
@@ -213,8 +353,8 @@ def check_adv(x_embeddings, labels, det_model):
     # scores and class predictions from the detection model
     _, labels_pred = det_model.score(x_embeddings_np)
 
-    # check if labels_pred == labels; the output will be a boolean ndarray of shape == labels.shape
-    return labels_pred != labels
+    # check if labels_pred == labels; the first output will be a boolean ndarray of shape == labels.shape
+    return labels_pred != labels, labels_pred
 
 
 def return_indices(labels, label):
@@ -258,15 +398,29 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-# TODO:
-# Set the kernel scale `sigma` per layer
-# Modify the function `get_adv_labels` to get the adversarial labels
-# main attack function
-def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, sigma_per_layer,
-           dist_metric='euclidean', verbose=True):
-    # x_orig is a torch tensor
-    # label_orig is a torch tensor
+def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sigma_per_layer,
+           untargeted=False, dist_metric='euclidean', verbose=True):
+    """
+    Main function implementing the custom attack on KNN based methods.
 
+    :param model: Trained DNN model in torch format.
+    :param device: CPU or GPU device
+    :param x_orig: torch tensor with a batch of clean samples for which to create attack samples. Expected to have
+                   size like `(batch_size, dim1, dim2, dim3)`
+    :param label_orig: torch tensor with the correct labels corresponding to samples in `x_orig`.
+    :param reps: dict mapping each class in `labels_uniq` to a list of torch tensors. List has length equal to the
+                 number of layers and each torch tensor corresponds to the layer embeddings from the particular
+                 class. These layer embeddings are used as the representative samples in the loss function.
+    :param labels_uniq: list or numpy array with the distinct class labels.
+    :param dknn_model: Deep KNN model that is already trained.
+    :param sigma_per_layer: Scale of the Gaussian kernel per layer for each sample in the batch. A torch tensor of
+                            size `(batch_size, n_layers)`.
+    :param untargeted: Set to True to run the untargeted version of the attack.
+    :param dist_metric: distance metric to use. Valid values are 'euclidean' and 'cosine'.
+    :param verbose: set to True to print log messages.
+
+    :return: (x_adv, labels_pred_adv, x_clean, labels_clean)
+    """
     binary_search_steps = 10
     max_iterations = 500
     check_adv_steps = 100
@@ -284,21 +438,27 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
     if dist_metric not in ['euclidean', 'cosine']:
         raise ValueError("Specified distance metric '{}' is not supported".format(dist_metric))
 
-    # unique labels in sorted order
-    labels_uniq = np.unique(labels)
-
     # Get the range of values in `x_orig`
     min_, max_ = get_data_bounds(x_orig, alpha=0.99)
     batch_size = x_orig.size(0)
     x_adv = x_orig.clone().detach()
+
+    n_layers = len(reps[labels_uniq[0]])
+    assert sigma_per_layer.shape == (batch_size, n_layers), "Input 'sigma_per_layer' does not have the expected shape"
     
     # label_orig is converted to ndarray
     label_orig = label_orig.detach().cpu().numpy()
     label_orig_uniq = np.unique(label_orig)
+    # indices for each distinct label
+    input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
 
-    # get adversarial labels i.e. the labels we want the inputs to be misclassified as
-    label_adv = get_adv_labels(label_orig, labels_uniq)
-    label_adv_uniq = np.unique(label_adv)
+    if not untargeted:
+        # get adversarial labels i.e. the labels we want the inputs to be misclassified as
+        label_adv = get_adv_labels(label_orig, labels_uniq)
+        label_adv_uniq = np.unique(label_adv)
+        # indices for each distinct label
+        target_indices = {i: return_indices(label_adv, i) for i in label_adv_uniq}
+
 
     def to_attack_space(x):
         # map from [min_, max_] to [-1, +1]
@@ -323,6 +483,7 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
 
         return b * x + a
 
+
     # variables representing inputs in attack space will be prefixed with z
     z_orig = to_attack_space(x_orig)
     check_valid_values(z_orig, name='z_orig')
@@ -337,37 +498,28 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
     upper_bound = torch.zeros_like(const) + INFTY
     best_dist = torch.zeros_like(const) + INFTY
 
-    # contains the indices of the dataset corresponding to a particular label i.e. indices[i] contains the indices
-    # of all elements whose label is i
-    indices = {i: return_indices(labels, i) for i in labels_uniq}
-
-    # indices for each distinct label in `label_orig` and `label_adv`. Needs to be computed only once
-    input_indices = {i: return_indices(label_orig, i) for i in label_orig_uniq}
-    target_indices = {i: return_indices(label_adv, i) for i in label_adv_uniq}
-
     # obtain layer embeddings for the clean inputs `x_orig`; gradients not needed here
     with torch.no_grad():
         x_embeddings = extract_input_embeddings(model, device, x_orig)
 
     # mis-classifications with clean inputs
-    is_error = check_adv(x_embeddings, label_orig, dknn_model)
+    is_error, labels_pred_adv = check_adv(x_embeddings, label_orig, dknn_model)
     is_correct = np.logical_not(is_error)
     n_correct = is_correct.sum()
     print("\n{:d} out of {:d} samples are correctly classified without any perturbation.".format(n_correct,
                                                                                                  batch_size))
     is_adv = np.zeros(batch_size, dtype=np.bool)
+    mask_adver = is_adv
     # `best_dist` is set to 0 for clean inputs that are already mis-classified
     best_dist[is_error] = 0.
     if n_correct == 0:
         print("All samples from this batch are mis-classified without any perturbation. Nothing to do.")
-        return x_orig
+        # returns empty arrays
+        x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
+        labels_clean = label_orig[mask_adver].detach().cpu().numpy()
+        return x_clean, labels_pred_adv[mask_adver], x_clean, labels_clean
 
-    # `reps` contains the layer wise embeddings for the entire dataloader
-    # gradients are not required for the representative samples
-    reps = extract_layer_embeddings(model, device, data_loader, indices, split_by_class=True)
-
-    n_layers = len(reps[labels_uniq[0]])
-    assert sigma_per_layer.shape == (batch_size, n_layers), "Input 'sigma_per_layer' does not have the expected shape"
+    n_reps = sum([reps[c][0].size(0) for c in labels_uniq])
     log_interval = int(np.ceil(max_iterations / 10.))
     for binary_search_step in range(binary_search_steps):
         # initialize perturbation in transformed space
@@ -387,12 +539,17 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
 
             # obtain embeddings for the input x
             x_embeddings = extract_input_embeddings(model, device, x)
-            # classwise_x = preprocess_input(x_embeddings, input_indices)
-            
-            loss, dist = loss_function(
-                x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
-                sigma=sigma_per_layer, dist_metric=dist_metric
-            )
+            if not untargeted:
+                loss, dist = loss_function_targeted(
+                    x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
+                    sigma_per_layer, dist_metric=dist_metric
+                )
+            else:
+                loss, dist = loss_function_untargeted(
+                    x, x_recon, x_embeddings, reps, input_indices, labels_uniq, n_reps, n_layers, device, const,
+                    sigma_per_layer, dist_metric=dist_metric
+                )
+
             # makes code slower; uncomment if necessary
             # torch.cuda.empty_cache()
             loss.backward()
@@ -403,17 +560,17 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
 
             # every `check_adv_steps` and in the final iteration, save adversarial samples with minimal perturbation
             if ((iteration + 1) % check_adv_steps) == 0 or iteration == (max_iterations - 1):
-                is_adv = check_adv(x_embeddings, label_orig, dknn_model)
+                is_adv, _ = check_adv(x_embeddings, label_orig, dknn_model)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
                         best_dist[i] = dist[i]
 
         # `check_adv` would have been called in the last iteration. No need to call it again
-        # is_adv = check_adv(x_embeddings, label_orig, dknn_model)
+        # is_adv, _ = check_adv(x_embeddings, label_orig, dknn_model)
         if verbose:
-            mask = np.logical_and(is_adv, is_correct)
-            print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask.sum(), batch_size))
+            mask_adver = np.logical_and(is_adv, is_correct)
+            print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
 
         count_bisection = 0
         for i in range(batch_size):
@@ -438,13 +595,21 @@ def attack(model, device, data_loader, labels, x_orig, label_orig, dknn_model, s
             x_embeddings = extract_input_embeddings(model, device, x_adv)
 
         # check the final attack success rate (combined with previous binary search steps)
-        is_adv_final = check_adv(x_embeddings, label_orig, dknn_model)
+        is_adv, labels_pred_adv = check_adv(x_embeddings, label_orig, dknn_model)
         if verbose:
-            mask = np.logical_and(is_adv_final, is_correct)
-            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask.sum(), batch_size))
+            mask_adver = np.logical_and(is_adv, is_correct)
+            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask_adver.sum(),
+                                                                         batch_size))
 
     if verbose:
         print("\n{:d} out of {:d} samples entered the bisection search phase".format(count_bisection, batch_size))
 
     check_valid_values(x_adv, name='x_adv')
-    return x_adv.detach()
+    # Return only the successful adversarial inputs and the corresponding clean inputs as numpy arrays
+    x_adv = x_adv[mask_adver, :].detach().cpu().numpy()
+    labels_pred_adv = labels_pred_adv[mask_adver]   # already a numpy array
+    x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
+    labels_clean = label_orig[mask_adver].detach().cpu().numpy()
+
+    # Returning in the same format as the function `helpers.attacks.foolbox_attack`
+    return x_adv, labels_pred_adv, x_clean, labels_clean

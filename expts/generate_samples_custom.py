@@ -10,7 +10,7 @@ import pickle
 import numpy as np
 import torch
 from torchvision import datasets, transforms
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import StratifiedKFold, StratifiedShuffleSplit
 from nets.mnist import *
 from nets.cifar10 import *
 from nets.svhn import *
@@ -22,8 +22,7 @@ from helpers.constants import (
     NORMALIZE_IMAGES,
     BATCH_SIZE_DEF,
     NEIGHBORHOOD_CONST,
-    CUSTOM_ATTACK,
-    MAX_NUM_REPS
+    CUSTOM_ATTACK
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -36,7 +35,6 @@ from helpers.utils import (
     get_samples_as_ndarray
 )
 from helpers import knn_attack
-from detectors.detector_proposed import extract_layer_embeddings
 
 
 def main():
@@ -58,6 +56,10 @@ def main():
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
                         help='distance metric to use')
     parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
+    parser.add_argument('--skip-subsampling', action='store_true', default=False,
+                        help='Use this option to skip random sub-sampling of the train data split')
+    parser.add_argument('--untargeted', action='store_true', default=False,
+                        help='Use this option to create untargeted adversarial samples from this attack')
     '''
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
@@ -181,37 +183,80 @@ def main():
             labels_te = np.load(os.path.join(numpy_save_path, "labels_te.npy"))
 
         if args.generate_attacks:
-            print(data_tr.shape, labels_tr.shape)
+            # print(data_tr.shape, labels_tr.shape)
             adv_save_path = os.path.join(output_dir, 'fold_{}'.format(i), CUSTOM_ATTACK)
             if not os.path.isdir(adv_save_path):
                 os.makedirs(adv_save_path)
 
-            # Data loaders for the train and test split
-            train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, custom=True)
-            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
+            if not args.skip_subsampling:
+                # Select a random, class-stratified sample from the training data of size `n_test`.
+                # This is done to speed-up the attack optimization
+                n_test = labels_te.shape[0]
+                n_train = labels_tr.shape[0]
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=n_test, random_state=args.seed)
+                _, ind_sample = next(sss.split(data_tr, labels_tr))
+                data_tr_sample = data_tr[ind_sample, :]
+                labels_tr_sample = labels_tr[ind_sample]
+                print("\nRandomly sampling the train split from {:d} to {:d} samples".format(n_train, n_test))
+            else:
+                data_tr_sample = data_tr
+                labels_tr_sample = labels_tr
 
-            # Extract the layer embeddings for samples from the test split
-            layer_embeddings_test, _, _, _ = extract_layer_embeddings(model, device, test_fold_loader, method='dknn')
-            # `layer_embeddings_test` will be a list of numpy arrays
+            # Data loaders for the train and test split
+            train_fold_loader = convert_to_loader(data_tr_sample, labels_tr_sample, batch_size=args.batch_size,
+                                                  custom=True)
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
 
             # Create attack data for samples from the test split
             # Search for suitable kernel scale per layer.
             # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
             print("Setting the kernel scale values for the test fold data.")
-            sigma_per_layer = knn_attack.set_kernel_scale(layer_embeddings_test, labels_te, metric=args.dist_metric,
-                                                          n_neighbors=n_neighbors, n_jobs=args.n_jobs)
+            sigma_per_layer = knn_attack.set_kernel_scale(
+                model, device, test_fold_loader, train_fold_loader,
+                metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
+            )
+            # Index of samples from each class in `labels_tr_sample`
+            labels_uniq = np.unique(labels_tr_sample)
+            indices_per_class = {c: np.where(labels_tr_sample == c)[0] for c in labels_uniq}
+
+            # `layer_embeddings_per_class_train` contains the layer wise embeddings corresponding to each class
+            # from the `train_fold_loader`. It is a dict mapping each class to a list of torch tensors per layer
+            layer_embeddings_per_class_train = knn_attack.extract_layer_embeddings(
+                model, device, train_fold_loader, indices_per_class, split_by_class=True
+            )
             print("Creating adversarial samples from the test fold.")
+            data_adver = []
+            labels_adver = []
+            data_clean = []
+            labels_clean = []
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
                 index_temp = index_temp.cpu().numpy()
-                data_batch_excl = np.delete(data_te, index_temp, axis=0)
-                labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
-                data_loader = convert_to_loader(data_batch_excl, labels_batch_excl, batch_size=args.batch_size)
-
-                data_adv_batch = knn_attack.attack(
-                    model, device, data_loader, labels_batch_excl, data_temp.to(device), labels_temp,
-                    models_dknn[i - 1], sigma_per_layer[index_temp, :], dist_metric=args.dist_metric
+                # data_batch_excl = np.delete(data_te, index_temp, axis=0)
+                # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
+                # main attack function
+                data_adver_batch, labels_adver_batch, data_clean_batch, labels_clean_batch = knn_attack.attack(
+                    model, device, data_temp.to(device), labels_temp, layer_embeddings_per_class_train,
+                    labels_uniq, models_dknn[i - 1], sigma_per_layer[index_temp, :],
+                    untargeted=args.untargeted, dist_metric=args.dist_metric
                 )
+                # all returned outputs are numpy arrays
+                if labels_adver_batch.shape[0] > 0:
+                    data_adver.append(data_adver_batch)
+                    labels_adver.append(labels_adver_batch)
+                    data_clean.append(data_clean_batch)
+                    labels_clean.append(labels_clean_batch)
 
+            data_adver = np.concatenate(data_adver, axis=0)
+            labels_adver = np.asarray(np.concatenate(labels_adver), dtype=labels_te.dtype)
+            data_clean = np.concatenate(data_clean, axis=0)
+            labels_clean = np.asarray(np.concatenate(labels_clean), dtype=labels_te.dtype)
+            print("\nCreated {:d} adversarial samples from test fold of size {:d}".format(labels_adver.shape[0],
+                                                                                          labels_te.shape[0]))
+            # save data to numpy files
+            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
+            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
+            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
+            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
         else:
             print("generated original data split for fold : ", i)
 
