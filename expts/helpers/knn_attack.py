@@ -4,11 +4,16 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import math
-from sklearn.metrics import pairwise_distances
 import os
-from numpy import linalg as LA
-from helpers.constants import ROOT, NEIGHBORHOOD_CONST
-from helpers.utils import combine_and_vectorize, get_data_bounds
+import sys
+import multiprocessing
+from functools import partial
+from sklearn.metrics import pairwise_distances
+from scipy.special import softmax, logsumexp
+from helpers.utils import (
+    combine_and_vectorize,
+    get_data_bounds
+)
 from helpers.knn_index import KNNIndex
 from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
@@ -100,9 +105,38 @@ def extract_input_embeddings(model, device, x_input):
     return outputs_layers
 
 
+def objective_kernel_scale(dist_neighbors, dist_all, alpha, sigma):
+    """
+    Objective function that is to be maximized for selecting the kernel scale.
+
+    :param dist_neighbors: numpy array with the pairwise distances between test samples and their `k` nearest
+                           neighbors. Has shape like `(n_test, k)`.
+    :param dist_all: numpy array with the pairwise distances between test samples and all the representative samples.
+                     Has shape like `(n_test, n_reps)`.
+    :param alpha: float value between 0 and 1 specifying the relative weight of the two terms in the objective
+                  function.
+    :param sigma: numpy array of kernel sigma values. Has shape like `(n_test, )`.
+
+    :return: objective function value for each of the test samples. Has shape `(n_test, )`.
+    """
+    sigma = sigma[:, np.newaxis]
+    expo_arr_neigh = np.negative((dist_neighbors / sigma) ** 2)
+    temp_arr1 = softmax(expo_arr_neigh, axis=1)
+    entropy = -1. * np.sum(temp_arr1 * np.log(np.clip(temp_arr1, sys.float_info.min, None)), axis=1)
+
+    expo_arr_all = np.negative((dist_all / sigma) ** 2)
+    proba = np.exp(logsumexp(expo_arr_neigh, axis=1) - logsumexp(expo_arr_all, axis=1))
+
+    return (1. - alpha) * proba + alpha * entropy
+
+
+# Helper function used by multiprocessing
+def helper_objective(dist_neighbors, dist_all, alpha, sigma_cand_vals, index_cand):
+    return objective_kernel_scale(dist_neighbors, dist_all, alpha, sigma_cand_vals[:, index_cand])
+
+
 def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
-                     metric='euclidean', n_neighbors=10, n_jobs=1,
-                     search_size=20):
+                     metric='euclidean', n_neighbors=10, n_jobs=1, search_size=20, alpha=0.5):
     # Extract the layer embeddings for samples from the train and test split
     layer_embeddings_train, _, _, _ = extract_layer_embeddings_numpy(model, device, train_fold_loader,
                                                                      method='proposed')
@@ -111,12 +145,11 @@ def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
     # `layer_embeddings_train` and `layer_embeddings_test` will both be a list of numpy arrays
     n_layers = len(layer_embeddings_test)
     n_test = layer_embeddings_test[0].shape[0]
-    n_train = layer_embeddings_train[0].shape[0]
+    # n_train = layer_embeddings_train[0].shape[0]
 
     # `1 - epsilon` values
-    v = 1. - np.linspace(0.01, 0.95, num=search_size)
+    v = np.linspace(0.05, 0.95, num=search_size)
     sigma_multiplier = np.sqrt(-1. / np.log(v))
-
     sigma_per_layer = np.ones((n_test, n_layers))
     for i in range(n_layers):
         if metric == 'cosine':
@@ -154,6 +187,25 @@ def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
             n_jobs=n_jobs
         )
         # `dist_mat` should have shape `(n_test, n_train)`
+        # Calculate the objective function to maximize for different candidate `sigma` values
+        if n_jobs == 1:
+            out = [helper_objective(nn_distances, dist_mat, alpha, sigma_cand_vals, t) for t in range(search_size)]
+        else:
+            # partial function called by multiprocessing
+            helper_objective_partial = partial(helper_objective, nn_distances, dist_mat, alpha, sigma_cand_vals)
+            pool_obj = multiprocessing.Pool(processes=n_jobs)
+            out = []
+            _ = pool_obj.map_async(helper_objective_partial, range(search_size), callback=out.extend)
+            pool_obj.close()
+            pool_obj.join()
+
+        # `out` will be a list of length `search_size`, where each element is a numpy array with the objective
+        # function values for the `n_test` samples.
+        # `objec_arr` will have shape `(search_size, n_test)`
+        objec_arr = np.array(out)
+        # Find the sigma value corresponding to the maximum objective function for each test sample
+        ind_max = np.argmax(objec_arr, axis=0)
+        sigma_per_layer[:, i] = [sigma_cand_vals[j, ind_max[j]] for j in range(n_test)]
 
     return torch.from_numpy(sigma_per_layer).to(device)
 
@@ -303,9 +355,6 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-# TODO:
-# Set the kernel scale `sigma` per layer
-# Modify the function `get_adv_labels` to get the adversarial labels
 def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sigma_per_layer,
            dist_metric='euclidean', verbose=True):
     """
@@ -414,11 +463,15 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
     print("\n{:d} out of {:d} samples are correctly classified without any perturbation.".format(n_correct,
                                                                                                  batch_size))
     is_adv = np.zeros(batch_size, dtype=np.bool)
+    mask_adver = is_adv
     # `best_dist` is set to 0 for clean inputs that are already mis-classified
     best_dist[is_error] = 0.
     if n_correct == 0:
         print("All samples from this batch are mis-classified without any perturbation. Nothing to do.")
-        return x_orig.detach().cpu().numpy(), labels_pred_adv
+        # returns empty arrays
+        x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
+        labels_clean = label_orig[mask_adver].detach().cpu().numpy()
+        return x_orig[mask_adver, :].detach().cpu().numpy(), labels_pred_adv[mask_adver], x_clean, labels_clean
 
     log_interval = int(np.ceil(max_iterations / 10.))
     for binary_search_step in range(binary_search_steps):
@@ -464,8 +517,8 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
         # `check_adv` would have been called in the last iteration. No need to call it again
         # is_adv, _ = check_adv(x_embeddings, label_orig, dknn_model)
         if verbose:
-            mask = np.logical_and(is_adv, is_correct)
-            print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask.sum(), batch_size))
+            mask_adver = np.logical_and(is_adv, is_correct)
+            print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
 
         count_bisection = 0
         for i in range(batch_size):
@@ -490,13 +543,21 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
             x_embeddings = extract_input_embeddings(model, device, x_adv)
 
         # check the final attack success rate (combined with previous binary search steps)
-        is_adv_final, labels_pred_adv = check_adv(x_embeddings, label_orig, dknn_model)
+        is_adv, labels_pred_adv = check_adv(x_embeddings, label_orig, dknn_model)
         if verbose:
-            mask = np.logical_and(is_adv_final, is_correct)
-            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask.sum(), batch_size))
+            mask_adver = np.logical_and(is_adv, is_correct)
+            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask_adver.sum(),
+                                                                         batch_size))
 
     if verbose:
         print("\n{:d} out of {:d} samples entered the bisection search phase".format(count_bisection, batch_size))
 
     check_valid_values(x_adv, name='x_adv')
-    return x_adv.detach().cpu().numpy(), labels_pred_adv
+    # Return only the successful adversarial inputs and the corresponding clean inputs as numpy arrays
+    x_adv = x_adv[mask_adver, :].detach().cpu().numpy()
+    labels_pred_adv = labels_pred_adv[mask_adver]       # `labels_pred_adv` is already a numpy array
+    x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
+    labels_clean = label_orig[mask_adver].detach().cpu().numpy()
+
+    # Returning in the same format as the function `helpers.attacks.foolbox_attack`
+    return x_adv, labels_pred_adv, x_clean, labels_clean
