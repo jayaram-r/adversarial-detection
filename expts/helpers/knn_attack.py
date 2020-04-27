@@ -122,8 +122,9 @@ def objective_kernel_scale(dist_neighbors, dist_all, alpha, sigma):
     sigma = sigma[:, np.newaxis]
     expo_arr_neigh = np.negative((dist_neighbors / sigma) ** 2)
     temp_arr1 = softmax(expo_arr_neigh, axis=1)
-    entropy = -1. * np.sum(temp_arr1 * np.log(np.clip(temp_arr1, sys.float_info.min, None)), axis=1)
-
+    # Entropy normalized to the range [0, 1]
+    entropy = (np.sum(temp_arr1 * np.log(np.clip(temp_arr1, sys.float_info.min, None)), axis=1) /
+               np.log(1. / dist_neighbors.shape[1]))
     expo_arr_all = np.negative((dist_all / sigma) ** 2)
     proba = np.exp(logsumexp(expo_arr_neigh, axis=1) - logsumexp(expo_arr_all, axis=1))
 
@@ -174,9 +175,11 @@ def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
         nn_indices, nn_distances = index_knn.query(x_test, k=n_neighbors)
         # `nn_indices` and `nn_distances` should have shape `(n_test, n_neighbors)`
 
-        # Candidate sigma values are obtained by multiplying the distance to the k-th nearest neighbor of each point
-        # in `n_test` with the `sigma_multiplier` defined earlier
-        sigma_cand_vals = nn_distances[:, -1].reshape(n_test, 1) * sigma_multiplier.reshape(1, search_size)
+        # Candidate sigma values are obtained by multiplying `sqrt(\eta_k^2 - \eta_1^2)` of each test point with
+        # the `sigma_multiplier` defined earlier. Here `eta_k` and `eta_1` denote distance to the k-th and the 1-st
+        # nearest neighbor respectively
+        sigma_cand_vals = (np.sqrt(nn_distances[:, -1] ** 2 - nn_distances[:, 0] ** 2).reshape(n_test, 1) *
+                           sigma_multiplier.reshape(1, search_size))
         # `sigma_cand_vals` should have shape `(n_test, search_size)`
 
         # Compute pairwise distances between points in `layer_embeddings_test` and `layer_embeddings_train`

@@ -204,8 +204,8 @@ def main():
 
             # Data loaders for the train and test split
             train_fold_loader = convert_to_loader(data_tr_sample, labels_tr_sample, batch_size=args.batch_size,
-                                                  custom=True)
-            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
+                                                  custom=False)
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
 
             # Create attack data for samples from the test split
             # Search for suitable kernel scale per layer.
@@ -215,6 +215,8 @@ def main():
                 model, device, test_fold_loader, train_fold_loader,
                 metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
             )
+            del test_fold_loader
+
             # Index of samples from each class in `labels_tr_sample`
             labels_uniq = np.unique(labels_tr_sample)
             indices_per_class = {c: np.where(labels_tr_sample == c)[0] for c in labels_uniq}
@@ -225,6 +227,8 @@ def main():
                 model, device, train_fold_loader, indices_per_class, split_by_class=True
             )
             print("Creating adversarial samples from the test fold.")
+            # Recreating the test fold loader with `custom = True` in order to get the sample indices
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
             data_adver = []
             labels_adver = []
             data_clean = []
