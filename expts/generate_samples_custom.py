@@ -135,11 +135,11 @@ def main():
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
         raise ValueError("Data loader verification failed")
 
-    # Load the deep KNN models from a pickle file
+    # Load the detection models (from each cross-validation fold) from a pickle file
     with open(args.det_model_file, 'rb') as fp:
-        models_dknn = pickle.load(fp)
+        models_detec = pickle.load(fp)
 
-    # `models_dknn` will be a list of trained deep KNN models from each fold
+    # `models_detec` will be a list of trained detection models from each fold
 
     # repeat for each fold in the cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
@@ -202,21 +202,28 @@ def main():
                 data_tr_sample = data_tr
                 labels_tr_sample = labels_tr
 
-            # Data loaders for the train and test split
+            # Data loader for the train split
             train_fold_loader = convert_to_loader(data_tr_sample, labels_tr_sample, batch_size=args.batch_size,
                                                   custom=False)
-            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
+            # Load kernel sigma values from file if available
+            sigma_filename = os.path.join(adv_save_path, 'kernel_sigma.npy')
+            if os.path.isfile(sigma_filename):
+                sigma_per_layer = np.load(sigma_filename)
+            else:
+                # Search for suitable kernel scale per layer.
+                # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
+                print("Setting the kernel scale values for the test fold data.")
+                # Data loader for the test split
+                test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
+                sigma_per_layer = knn_attack.set_kernel_scale(
+                    model, device, test_fold_loader, train_fold_loader,
+                    metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
+                )
+                del test_fold_loader
+                np.save(sigma_filename, sigma_per_layer)
 
-            # Create attack data for samples from the test split
-            # Search for suitable kernel scale per layer.
-            # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
-            print("Setting the kernel scale values for the test fold data.")
-            sigma_per_layer = knn_attack.set_kernel_scale(
-                model, device, test_fold_loader, train_fold_loader,
-                metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
-            )
-            del test_fold_loader
-
+            # numpy array to torch tensor
+            sigma_per_layer = torch.from_numpy(sigma_per_layer).to(device)
             # Index of samples from each class in `labels_tr_sample`
             labels_uniq = np.unique(labels_tr_sample)
             indices_per_class = {c: np.where(labels_tr_sample == c)[0] for c in labels_uniq}
@@ -240,7 +247,7 @@ def main():
                 # main attack function
                 data_adver_batch, labels_adver_batch, data_clean_batch, labels_clean_batch = knn_attack.attack(
                     model, device, data_temp.to(device), labels_temp, layer_embeddings_per_class_train,
-                    labels_uniq, models_dknn[i - 1], sigma_per_layer[index_temp, :],
+                    labels_uniq, models_detec[i - 1], sigma_per_layer[index_temp, :],
                     untargeted=args.untargeted, dist_metric=args.dist_metric
                 )
                 # all returned outputs are numpy arrays

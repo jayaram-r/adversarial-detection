@@ -210,7 +210,7 @@ def set_kernel_scale(model, device, test_fold_loader, train_fold_loader,
         ind_max = np.argmax(objec_arr, axis=0)
         sigma_per_layer[:, i] = [sigma_cand_vals[j, ind_max[j]] for j in range(n_test)]
 
-    return torch.from_numpy(sigma_per_layer).to(device)
+    return sigma_per_layer
 
 
 def log_sum_gaussian_kernels(x, reps, sigma, metric):
@@ -348,13 +348,13 @@ def loss_function_untargeted(x, x_recon, x_embeddings, reps, input_indices, labe
     return total_loss.mean(), dist.sqrt()
     
 
-def check_adv(x_embeddings, labels, det_model):
+def check_adv(x_embeddings, labels, model_detector):
     # `x_embeddings` will be a list of torch tensors. It needs to be converted into a list of numpy arrays before
-    # calling the deep KNN score method
+    # calling the detector's score method
     x_embeddings_np = [tens.detach().cpu().numpy() for tens in x_embeddings]
 
     # scores and class predictions from the detection model
-    _, labels_pred = det_model.score(x_embeddings_np)
+    _, labels_pred = model_detector.score(x_embeddings_np)
 
     # check if labels_pred == labels; the first output will be a boolean ndarray of shape == labels.shape
     return labels_pred != labels, labels_pred
@@ -401,12 +401,12 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sigma_per_layer,
+def attack(model_dnn, device, x_orig, label_orig, reps, labels_uniq, model_detector, sigma_per_layer,
            untargeted=False, dist_metric='euclidean', verbose=True):
     """
     Main function implementing the custom attack on KNN based methods.
 
-    :param model: Trained DNN model in torch format.
+    :param model_dnn: Trained DNN model in torch format.
     :param device: CPU or GPU device
     :param x_orig: torch tensor with a batch of clean samples for which to create attack samples. Expected to have
                    size like `(batch_size, dim1, dim2, dim3)`
@@ -415,7 +415,7 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
                  number of layers and each torch tensor corresponds to the layer embeddings from the particular
                  class. These layer embeddings are used as the representative samples in the loss function.
     :param labels_uniq: list or numpy array with the distinct class labels.
-    :param dknn_model: Deep KNN model that is already trained.
+    :param model_detector: Detector model that is to be attacked.
     :param sigma_per_layer: Scale of the Gaussian kernel per layer for each sample in the batch. A torch tensor of
                             size `(batch_size, n_layers)`.
     :param untargeted: Set to True to run the untargeted version of the attack.
@@ -432,8 +432,8 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
     random_start = False
 
     # Ensure the DNN model is in evaluation mode
-    if model.training:
-        model.eval()
+    if model_dnn.training:
+        model_dnn.eval()
 
     # shape of the input tensor
     input_shape = tuple(x_orig.size())
@@ -503,10 +503,10 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
 
     # obtain layer embeddings for the clean inputs `x_orig`; gradients not needed here
     with torch.no_grad():
-        x_embeddings = extract_input_embeddings(model, device, x_orig)
+        x_embeddings = extract_input_embeddings(model_dnn, device, x_orig)
 
     # mis-classifications with clean inputs
-    is_error, labels_pred_adv = check_adv(x_embeddings, label_orig, dknn_model)
+    is_error, labels_pred_adv = check_adv(x_embeddings, label_orig, model_detector)
     is_correct = np.logical_not(is_error)
     n_correct = is_correct.sum()
     print("\n{:d} out of {:d} samples are correctly classified without any perturbation.".format(n_correct,
@@ -541,7 +541,7 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
             # `requires_grad` flag should be automatically set for `x`
 
             # obtain embeddings for the input x
-            x_embeddings = extract_input_embeddings(model, device, x)
+            x_embeddings = extract_input_embeddings(model_dnn, device, x)
             if not untargeted:
                 loss, dist = loss_function_targeted(
                     x, x_recon, x_embeddings, reps, input_indices, target_indices, n_layers, device, const,
@@ -563,14 +563,14 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
 
             # every `check_adv_steps` and in the final iteration, save adversarial samples with minimal perturbation
             if ((iteration + 1) % check_adv_steps) == 0 or iteration == (max_iterations - 1):
-                is_adv, _ = check_adv(x_embeddings, label_orig, dknn_model)
+                is_adv, _ = check_adv(x_embeddings, label_orig, model_detector)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
                         best_dist[i] = dist[i]
 
         # `check_adv` would have been called in the last iteration. No need to call it again
-        # is_adv, _ = check_adv(x_embeddings, label_orig, dknn_model)
+        # is_adv, _ = check_adv(x_embeddings, label_orig, model_detector)
         if verbose:
             mask_adver = np.logical_and(is_adv, is_correct)
             print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
@@ -595,10 +595,10 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
 
         # obtain embeddings for the inputs `x_adv`; gradients not needed here
         with torch.no_grad():
-            x_embeddings = extract_input_embeddings(model, device, x_adv)
+            x_embeddings = extract_input_embeddings(model_dnn, device, x_adv)
 
         # check the final attack success rate (combined with previous binary search steps)
-        is_adv, labels_pred_adv = check_adv(x_embeddings, label_orig, dknn_model)
+        is_adv, labels_pred_adv = check_adv(x_embeddings, label_orig, model_detector)
         if verbose:
             mask_adver = np.logical_and(is_adv, is_correct)
             print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask_adver.sum(),
