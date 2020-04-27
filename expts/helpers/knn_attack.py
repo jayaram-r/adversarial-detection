@@ -517,7 +517,7 @@ def attack(model, device, x_orig, label_orig, reps, labels_uniq, dknn_model, sig
         # returns empty arrays
         x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
         labels_clean = label_orig[mask_adver].detach().cpu().numpy()
-        return x_orig[mask_adver, :].detach().cpu().numpy(), labels_pred_adv[mask_adver], x_clean, labels_clean
+        return x_clean, labels_pred_adv[mask_adver], x_clean, labels_clean
 
     n_reps = sum([reps[c][0].size(0) for c in labels_uniq])
     log_interval = int(np.ceil(max_iterations / 10.))
