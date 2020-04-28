@@ -35,6 +35,7 @@ from helpers.utils import (
     get_samples_as_ndarray
 )
 from helpers import knn_attack
+from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 
 def main():
@@ -47,12 +48,14 @@ def main():
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
-    parser.add_argument('--generate-attacks', type=bool, default=True, help='should attack samples be generated/not (default:True)')
+    parser.add_argument('--generate-attacks', type=bool, default=True,
+                        help='should attack samples be generated/not (default:True)')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
-    parser.add_argument('--det-model-file', '--dmf',
-                        default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl',
-                        help='Path to the saved detector model file')
+    parser.add_argument('--detection-method', '--dm', choices=['dknn', 'proposed'], default='dknn',
+                        help="Detection method to attack. Choices are 'dknn' and 'proposed'")
+    parser.add_argument('--det-model-file', '--dmf', default='',
+                        help='Path to the saved detector model file. Loads from a default location of not specified.')
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
                         help='distance metric to use')
     parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
@@ -70,6 +73,7 @@ def main():
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
+    # Output directory
     if not args.output_dir:
         output_dir = os.path.join(ROOT, 'numpy_data', args.model_type)
     else:
@@ -77,6 +81,17 @@ def main():
 
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
+
+    # Path to the detection model file
+    if args.det_model_file:
+        det_model_file = args.det_model_file
+    else:
+        # default path the the saved detection model file
+        det_model_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
+                                      'models_{}.pkl'.format(args.detection_method))
+
+    print("Detection method: {}".format(args.detection_method))
+    print("Loading saved detection models from the file: {}".format(det_model_file))
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -136,7 +151,7 @@ def main():
         raise ValueError("Data loader verification failed")
 
     # Load the detection models (from each cross-validation fold) from a pickle file
-    with open(args.det_model_file, 'rb') as fp:
+    with open(det_model_file, 'rb') as fp:
         models_detec = pickle.load(fp)
 
     # `models_detec` will be a list of trained detection models from each fold
@@ -152,7 +167,7 @@ def main():
 
         # Set number of nearest neighbors based on the data size and the neighborhood constant
         n_neighbors = int(np.ceil(labels_tr.shape[0] ** NEIGHBORHOOD_CONST))
-        print("\nProcessing fold {:d}".format(i))
+        print("Processing fold {:d}".format(i))
         print("Number of nearest neighbors = {:d}".format(n_neighbors))
         
         # make dir based on fold to save data
@@ -202,26 +217,32 @@ def main():
                 data_tr_sample = data_tr
                 labels_tr_sample = labels_tr
 
-            # Data loader for the train split
+            # Data loader for the train and test split
             train_fold_loader = convert_to_loader(data_tr_sample, labels_tr_sample, batch_size=args.batch_size,
                                                   custom=False)
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
+            # Extract the layer embeddings for samples from the train and test split
+            layer_embeddings_train, _, _, _ = extract_layer_embeddings_numpy(model, device, train_fold_loader,
+                                                                             method='proposed')
+            layer_embeddings_test, _, labels_pred_test, _ = extract_layer_embeddings_numpy(
+                model, device, test_fold_loader, method='proposed'
+            )
+
             # Load kernel sigma values from file if available
-            sigma_filename = os.path.join(adv_save_path, 'kernel_sigma.npy')
+            sigma_filename = os.path.join(adv_save_path, 'kernel_sigma_{}.npy'.format(args.dist_metric))
             if os.path.isfile(sigma_filename):
                 sigma_per_layer = np.load(sigma_filename)
             else:
                 # Search for suitable kernel scale per layer.
-                # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
+                # `sigma_per_layer` should be a numpy array of size `(data_te.shape[0], n_layers)`
                 print("Setting the kernel scale values for the test fold data.")
-                # Data loader for the test split
-                test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
                 sigma_per_layer = knn_attack.set_kernel_scale(
-                    model, device, test_fold_loader, train_fold_loader,
+                    layer_embeddings_train, layer_embeddings_test,
                     metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
                 )
-                del test_fold_loader
                 np.save(sigma_filename, sigma_per_layer)
 
+            del test_fold_loader, layer_embeddings_train, layer_embeddings_test
             # numpy array to torch tensor
             sigma_per_layer = torch.from_numpy(sigma_per_layer).to(device)
             # Index of samples from each class in `labels_tr_sample`
@@ -245,10 +266,11 @@ def main():
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
                 # main attack function
+                labels_pred_temp = labels_pred_test[index_temp]
                 data_adver_batch, labels_adver_batch, data_clean_batch, labels_clean_batch = knn_attack.attack(
-                    model, device, data_temp.to(device), labels_temp, layer_embeddings_per_class_train,
-                    labels_uniq, models_detec[i - 1], sigma_per_layer[index_temp, :],
-                    untargeted=args.untargeted, dist_metric=args.dist_metric
+                    model, device, data_temp.to(device), labels_temp, labels_pred_temp,
+                    layer_embeddings_per_class_train, labels_uniq, models_detec[i - 1],
+                    sigma_per_layer[index_temp, :], untargeted=args.untargeted, dist_metric=args.dist_metric
                 )
                 # all returned outputs are numpy arrays
                 if labels_adver_batch.shape[0] > 0:
