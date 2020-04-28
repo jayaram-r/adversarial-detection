@@ -15,7 +15,6 @@ from helpers.utils import (
     get_data_bounds
 )
 from helpers.knn_index import KNNIndex
-from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 INFTY = 1e20
 NORM_REG = 1e-16

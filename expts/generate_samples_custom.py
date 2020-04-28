@@ -35,6 +35,7 @@ from helpers.utils import (
     get_samples_as_ndarray
 )
 from helpers import knn_attack
+from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 
 def main():
