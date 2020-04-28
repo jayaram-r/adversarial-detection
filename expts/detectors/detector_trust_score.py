@@ -39,6 +39,7 @@ class TrustScore:
     Jiang, Heinrich, et al. "To trust or not to trust a classifier." Advances in neural information processing
     systems. 2018.
     """
+    _name = 'trust'
     def __init__(self,
                  alpha=0.0,     # fraction of outliers
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,

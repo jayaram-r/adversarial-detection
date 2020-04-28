@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 
 class DetectorLID:
+    _name = 'lid'
     def __init__(self,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric='euclidean', metric_kwargs=None,
@@ -392,6 +393,7 @@ class DetectorLIDBatch:
     It leverages the implementation of `DetectorLIDClassCond` by passing it randomly assigned labels and predicted
     labels.
     """
+    _name = 'lid'
     def __init__(self,
                  n_batches=10,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
@@ -477,6 +479,7 @@ class DetectorLIDBatch:
 
 
 class DetectorLIDClassCond:
+    _name = 'lid_class_cond'
     def __init__(self,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric='euclidean', metric_kwargs=None,

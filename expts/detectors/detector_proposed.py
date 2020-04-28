@@ -180,6 +180,7 @@ class DetectorLayerStatistics:
     Fisher's method for combining p-values from multiple tests:
         https://en.wikipedia.org/wiki/Fisher%27s_method
     """
+    _name = 'proposed'
     def __init__(self,
                  layer_statistic='multinomial',
                  score_type='pvalue',
