@@ -48,12 +48,14 @@ def main():
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
-    parser.add_argument('--generate-attacks', type=bool, default=True, help='should attack samples be generated/not (default:True)')
+    parser.add_argument('--generate-attacks', type=bool, default=True,
+                        help='should attack samples be generated/not (default:True)')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
-    parser.add_argument('--det-model-file', '--dmf',
-                        default='/nobackup/varun/adversarial-detection/expts/outputs/mnist/detection/CW/deep_knn/models_deep_KNN.pkl',
-                        help='Path to the saved detector model file')
+    parser.add_argument('--detection-method', '--dm', choices=['dknn', 'proposed'], default='dknn',
+                        help="Detection method to attack. Choices are 'dknn' and 'proposed'")
+    parser.add_argument('--det-model-file', '--dmf', default='',
+                        help='Path to the saved detector model file. Loads from a default location of not specified.')
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
                         help='distance metric to use')
     parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
@@ -71,6 +73,7 @@ def main():
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
 
+    # Output directory
     if not args.output_dir:
         output_dir = os.path.join(ROOT, 'numpy_data', args.model_type)
     else:
@@ -78,6 +81,17 @@ def main():
 
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
+
+    # Path to the detection model file
+    if args.det_model_file:
+        det_model_file = args.det_model_file
+    else:
+        # default path the the saved detection model file
+        det_model_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
+                                      'models_{}.pkl'.format(args.detection_method))
+
+    print("Detection method: {}".format(args.detection_method))
+    print("Loading saved detection models from the file: {}".format(det_model_file))
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -137,7 +151,7 @@ def main():
         raise ValueError("Data loader verification failed")
 
     # Load the detection models (from each cross-validation fold) from a pickle file
-    with open(args.det_model_file, 'rb') as fp:
+    with open(det_model_file, 'rb') as fp:
         models_detec = pickle.load(fp)
 
     # `models_detec` will be a list of trained detection models from each fold
@@ -153,7 +167,7 @@ def main():
 
         # Set number of nearest neighbors based on the data size and the neighborhood constant
         n_neighbors = int(np.ceil(labels_tr.shape[0] ** NEIGHBORHOOD_CONST))
-        print("\nProcessing fold {:d}".format(i))
+        print("Processing fold {:d}".format(i))
         print("Number of nearest neighbors = {:d}".format(n_neighbors))
         
         # make dir based on fold to save data
@@ -215,7 +229,7 @@ def main():
             )
 
             # Load kernel sigma values from file if available
-            sigma_filename = os.path.join(adv_save_path, 'kernel_sigma.npy')
+            sigma_filename = os.path.join(adv_save_path, 'kernel_sigma_{}.npy'.format(args.dist_metric))
             if os.path.isfile(sigma_filename):
                 sigma_per_layer = np.load(sigma_filename)
             else:
