@@ -35,6 +35,7 @@ from helpers.utils import (
     get_samples_as_ndarray
 )
 from helpers import knn_attack
+from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 
 def main():
@@ -202,26 +203,32 @@ def main():
                 data_tr_sample = data_tr
                 labels_tr_sample = labels_tr
 
-            # Data loader for the train split
+            # Data loader for the train and test split
             train_fold_loader = convert_to_loader(data_tr_sample, labels_tr_sample, batch_size=args.batch_size,
                                                   custom=False)
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
+            # Extract the layer embeddings for samples from the train and test split
+            layer_embeddings_train, _, _, _ = extract_layer_embeddings_numpy(model, device, train_fold_loader,
+                                                                             method='proposed')
+            layer_embeddings_test, _, labels_pred_test, _ = extract_layer_embeddings_numpy(
+                model, device, test_fold_loader, method='proposed'
+            )
+
             # Load kernel sigma values from file if available
             sigma_filename = os.path.join(adv_save_path, 'kernel_sigma.npy')
             if os.path.isfile(sigma_filename):
                 sigma_per_layer = np.load(sigma_filename)
             else:
                 # Search for suitable kernel scale per layer.
-                # `sigma_per_layer` should be a torch tensor of size `(data_te.shape[0], n_layers)`
+                # `sigma_per_layer` should be a numpy array of size `(data_te.shape[0], n_layers)`
                 print("Setting the kernel scale values for the test fold data.")
-                # Data loader for the test split
-                test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=False)
                 sigma_per_layer = knn_attack.set_kernel_scale(
-                    model, device, test_fold_loader, train_fold_loader,
+                    layer_embeddings_train, layer_embeddings_test,
                     metric=args.dist_metric, n_neighbors=n_neighbors, n_jobs=args.n_jobs
                 )
-                del test_fold_loader
                 np.save(sigma_filename, sigma_per_layer)
 
+            del test_fold_loader, layer_embeddings_train, layer_embeddings_test
             # numpy array to torch tensor
             sigma_per_layer = torch.from_numpy(sigma_per_layer).to(device)
             # Index of samples from each class in `labels_tr_sample`
@@ -245,10 +252,11 @@ def main():
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
                 # main attack function
+                labels_pred_temp = labels_pred_test[index_temp]
                 data_adver_batch, labels_adver_batch, data_clean_batch, labels_clean_batch = knn_attack.attack(
-                    model, device, data_temp.to(device), labels_temp, layer_embeddings_per_class_train,
-                    labels_uniq, models_detec[i - 1], sigma_per_layer[index_temp, :],
-                    untargeted=args.untargeted, dist_metric=args.dist_metric
+                    model, device, data_temp.to(device), labels_temp, labels_pred_temp,
+                    layer_embeddings_per_class_train, labels_uniq, models_detec[i - 1],
+                    sigma_per_layer[index_temp, :], untargeted=args.untargeted, dist_metric=args.dist_metric
                 )
                 # all returned outputs are numpy arrays
                 if labels_adver_batch.shape[0] > 0:

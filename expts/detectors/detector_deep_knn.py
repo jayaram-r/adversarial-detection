@@ -39,6 +39,7 @@ class DeepKNN:
     Papernot, Nicolas, and Patrick McDaniel. "Deep k-nearest neighbors: Towards confident, interpretable and robust
     deep learning." arXiv preprint arXiv:1803.04765 (2018).
     """
+    _name = 'dknn'
     def __init__(self,
                  neighborhood_constant=NEIGHBORHOOD_CONST, n_neighbors=None,
                  metric=METRIC_DEF, metric_kwargs=None,
