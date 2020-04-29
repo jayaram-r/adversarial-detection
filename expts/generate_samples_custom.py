@@ -303,8 +303,8 @@ def main():
             accu = (100. * n_correct) / n_test
             n_adver = is_adver[is_adver].shape[0]
             print("\nTest fold {:d}: #samples = {:d}, accuracy of defense method = {:.4f}, #adversarial samples "
-                  "= {:d}, avg. perturbation norm = {:.6f}".format(i, n_test, accu, n_adver, np.mean(norm_perturb)))
-
+                  "= {:d}, avg. perturbation norm = {:.6f}".format(i, n_test, accu, n_adver,
+                                                                   np.mean(norm_perturb[is_adver])))
             # save data to numpy files
             np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
             np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
