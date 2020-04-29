@@ -615,11 +615,11 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
         if verbose:
             # average perturbation norm of adversarial samples and correctly classified samples
             norm_avg_adv = best_dist[mask_adver].mean().item()
-            norm_avg_all = best_dist[is_correct].mean().item()
-            print('binary step: %d; num successful adv so far: %d/%d; avg_diff_bounds: %.4f' %
-                  (binary_search_step, mask_adver.sum(), batch_size, diff_bounds_avg))
-            print('binary step: %d; avg_norm_adver: %.6f; avg_norm_all: %.6f' %
-                  (binary_search_step, norm_avg_adv, norm_avg_all))
+            # norm_avg_all = best_dist[is_correct].mean().item()
+            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask_adver.sum(),
+                                                                         batch_size))
+            print('binary step: %d; avg_norm_adver: %.6f; avg_diff_bounds: %.4f' % (binary_search_step, norm_avg_adv,
+                                                                                    diff_bounds_avg))
 
         if diff_bounds_avg < thresh_bounds:
             print("Exiting bisection search early based on the average interval width")
