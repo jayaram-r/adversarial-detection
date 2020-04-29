@@ -1,6 +1,10 @@
 """
 Main script for generating adversarial data (from custom KNN attack) from the cross-validation folds and saving
 them to numpy files.
+
+Example usage:
+python generate_samples_custom.py -m mnist --gpu 3 --detection-method dknn --dist-metric euclidean --n-jobs 16
+
 """
 from __future__ import absolute_import, division, print_function
 import sys
@@ -203,11 +207,11 @@ def main():
             if not os.path.isdir(adv_save_path):
                 os.makedirs(adv_save_path)
 
+            n_test = labels_te.shape[0]
+            n_train = labels_tr.shape[0]
             if not args.skip_subsampling:
                 # Select a random, class-stratified sample from the training data of size `n_test`.
                 # This is done to speed-up the attack optimization
-                n_test = labels_te.shape[0]
-                n_train = labels_tr.shape[0]
                 sss = StratifiedShuffleSplit(n_splits=1, test_size=n_test, random_state=args.seed)
                 _, ind_sample = next(sss.split(data_tr, labels_tr))
                 data_tr_sample = data_tr[ind_sample, :]
@@ -261,35 +265,54 @@ def main():
             labels_adver = []
             data_clean = []
             labels_clean = []
+            norm_perturb = []
+            is_correct = []
+            is_adver = []
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
                 index_temp = index_temp.cpu().numpy()
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
                 # main attack function
                 labels_pred_temp = labels_pred_test[index_temp]
-                data_adver_batch, labels_adver_batch, data_clean_batch, labels_clean_batch = knn_attack.attack(
-                    model, device, data_temp.to(device), labels_temp, labels_pred_temp,
-                    layer_embeddings_per_class_train, labels_uniq, models_detec[i - 1],
-                    sigma_per_layer[index_temp, :], untargeted=args.untargeted, dist_metric=args.dist_metric
+                data_adver_batch, labels_adver_batch, norm_perturb_batch, is_correct_batch, is_adver_batch = \
+                    knn_attack.attack(
+                        model, device, data_temp.to(device), labels_temp, labels_pred_temp,
+                        layer_embeddings_per_class_train, labels_uniq, models_detec[i - 1],
+                        sigma_per_layer[index_temp, :], untargeted=args.untargeted, dist_metric=args.dist_metric,
+                        fast_mode=True, verbose=True
                 )
                 # all returned outputs are numpy arrays
-                if labels_adver_batch.shape[0] > 0:
-                    data_adver.append(data_adver_batch)
-                    labels_adver.append(labels_adver_batch)
-                    data_clean.append(data_clean_batch)
-                    labels_clean.append(labels_clean_batch)
+                # accumulate results from this batch
+                data_adver.append(data_adver_batch)
+                labels_adver.append(labels_adver_batch)
+                data_clean.append(data_temp.detach().cpu().numpy())
+                labels_clean.append(labels_temp.detach().cpu().numpy())
+                norm_perturb.append(norm_perturb_batch)
+                is_correct.append(is_correct_batch)
+                is_adver.append(is_adver_batch)
 
             data_adver = np.concatenate(data_adver, axis=0)
             labels_adver = np.asarray(np.concatenate(labels_adver), dtype=labels_te.dtype)
             data_clean = np.concatenate(data_clean, axis=0)
             labels_clean = np.asarray(np.concatenate(labels_clean), dtype=labels_te.dtype)
-            print("\nCreated {:d} adversarial samples from test fold of size {:d}".format(labels_adver.shape[0],
-                                                                                          labels_te.shape[0]))
+            norm_perturb = np.concatenate(norm_perturb)
+            is_correct = np.concatenate(is_correct)
+            is_adver = np.concatenate(is_adver)
+
+            n_correct = is_correct[is_correct].shape[0]
+            accu = (100. * n_correct) / n_test
+            n_adver = is_adver[is_adver].shape[0]
+            print("\nTest fold {:d}: #samples = {:d}, accuracy of defense method = {:.4f}, #adversarial samples "
+                  "= {:d}, avg. perturbation norm = {:.6f}".format(i, n_test, accu, n_adver, np.mean(norm_perturb)))
+
             # save data to numpy files
             np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
             np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
             np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
             np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
+            np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb)
+            np.save(os.path.join(adv_save_path, 'is_correct.npy'), is_correct)
+            np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
         else:
             print("generated original data split for fold : ", i)
 

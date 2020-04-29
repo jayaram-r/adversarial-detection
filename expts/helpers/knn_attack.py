@@ -401,7 +401,7 @@ def preprocess_input(x_embeddings, indices):
 
 
 def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, labels_uniq, model_detector,
-           sigma_per_layer, untargeted=False, dist_metric='euclidean', verbose=True):
+           sigma_per_layer, untargeted=False, dist_metric='euclidean', verbose=True, fast_mode=True):
     """
     Main function implementing the custom attack on KNN based methods.
 
@@ -421,14 +421,23 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
     :param untargeted: Set to True to run the untargeted version of the attack.
     :param dist_metric: distance metric to use. Valid values are 'euclidean' and 'cosine'.
     :param verbose: set to True to print log messages.
+    :param fast_mode: set to True to run a few number of iterations and binary steps.
 
     :return: (x_adv, labels_pred_adv, x_clean, labels_clean)
     """
-    binary_search_steps = 10
-    max_iterations = 500
+    if fast_mode:
+        binary_search_steps = 10
+        max_iterations = 500
+    else:
+        # Not all the binary search steps will be run each time because there is a convergence check based on the
+        # average interval width
+        binary_search_steps = 20
+        max_iterations = 1000
+
+    thresh_bounds = 0.01
     check_adv_steps = 100
     learning_rate = 1e-2
-    initial_const = 1.
+    initial_const = 1.0
     random_start = False
 
     # Ensure the DNN model is in evaluation mode
@@ -517,10 +526,9 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
     best_dist[is_error] = 0.
     if n_correct == 0:
         print("All samples from this batch are mis-classified without any perturbation. Nothing to do.")
-        # returns empty arrays
-        x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
-        labels_clean = label_orig[mask_adver].detach().cpu().numpy()
-        return x_clean, labels_pred_adv[mask_adver], x_clean, labels_clean
+        x_clean = x_orig.detach().cpu().numpy()
+
+        return x_clean, labels_pred_adv, best_dist.detach().cpu().numpy(), is_correct, mask_adver
 
     n_reps = sum([reps[c][0].size(0) for c in labels_uniq])
     log_interval = int(np.ceil(max_iterations / 10.))
@@ -529,7 +537,7 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
         if not random_start:
             z_delta = torch.zeros_like(z_orig, requires_grad=True, device=device)
         else:
-            rand = 1e-2 * np.random.randn(*input_shape)
+            rand = 1e-3 * np.random.randn(*input_shape)
             z_delta = torch.tensor(rand, dtype=torch.float32, requires_grad=True, device=device)
 
         # create a new optimizer
@@ -558,21 +566,22 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
             loss.backward()
             optimizer.step()
 
-            if verbose and iteration % log_interval == 0:
+            is_final_iter = iteration == (max_iterations - 1)
+            if verbose and ((iteration % log_interval == 0) or is_final_iter):
                 print('    step: %d; loss: %.6f; dist: %.4f' % (iteration, loss.item(), dist.mean().item()))
 
             # every `check_adv_steps` and in the final iteration, save adversarial samples with minimal perturbation
-            if ((iteration + 1) % check_adv_steps) == 0 or iteration == (max_iterations - 1):
+            if ((iteration + 1) % check_adv_steps) == 0 or is_final_iter:
                 is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
                         best_dist[i] = dist[i]
 
-        # `check_adv` would have been called in the last iteration. No need to call it again
+        # `check_adv` would have been called in the final iteration. No need to call it again
         # is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+        mask_adver = np.logical_and(is_adv, is_correct)
         if verbose:
-            mask_adver = np.logical_and(is_adv, is_correct)
             print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
 
         count_bisection = 0
@@ -599,20 +608,30 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
 
         # check the final attack success rate (combined with previous binary search steps)
         is_adv, labels_pred_adv = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+        mask_adver = np.logical_and(is_adv, is_correct)
+        # average (relative) difference between the upper and lower bound of the bisection interval
+        diff_bounds = (upper_bound - lower_bound) / torch.clamp(lower_bound, min=1e-16)
+        diff_bounds_avg = diff_bounds[is_correct].mean().item()
         if verbose:
-            mask_adver = np.logical_and(is_adv, is_correct)
-            print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, mask_adver.sum(),
-                                                                         batch_size))
+            # average perturbation norm of adversarial samples and correctly classified samples
+            norm_avg_adv = best_dist[mask_adver].mean().item()
+            norm_avg_all = best_dist[is_correct].mean().item()
+            print('binary step: %d; num successful adv so far: %d/%d; avg_diff_bounds: %.4f' %
+                  (binary_search_step, mask_adver.sum(), batch_size, diff_bounds_avg))
+            print('binary step: %d; avg_norm_adver: %.6f; avg_norm_all: %.6f' %
+                  (binary_search_step, norm_avg_adv, norm_avg_all))
 
-    if verbose:
-        print("\n{:d} out of {:d} samples entered the bisection search phase".format(count_bisection, batch_size))
+        if diff_bounds_avg < thresh_bounds:
+            print("Exiting bisection search early based on the average interval width")
+            break
+
+    if verbose and count_bisection < batch_size:
+        print("\n{:d} out of {:d} samples did not enter the bisection search phase".
+              format(batch_size - count_bisection, batch_size))
 
     check_valid_values(x_adv, name='x_adv')
-    # Return only the successful adversarial inputs and the corresponding clean inputs as numpy arrays
-    x_adv = x_adv[mask_adver, :].detach().cpu().numpy()
-    labels_pred_adv = labels_pred_adv[mask_adver]   # already a numpy array
-    x_clean = x_orig[mask_adver, :].detach().cpu().numpy()
-    labels_clean = label_orig[mask_adver].detach().cpu().numpy()
 
-    # Returning in the same format as the function `helpers.attacks.foolbox_attack`
-    return x_adv, labels_pred_adv, x_clean, labels_clean
+    # Returning the adversarial inputs and corresponding predicted labels as numpy arrays.
+    # Also returning the norm of the adversarial perturbations, and boolean arrays indicating which samples were
+    # correctly classified and which ones are adversarial.
+    return x_adv.detach().cpu().numpy(), labels_pred_adv, best_dist.detach().cpu().numpy(), is_correct, mask_adver
