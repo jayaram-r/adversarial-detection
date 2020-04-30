@@ -633,7 +633,7 @@ class DetectorLayerStatistics:
         elif self.score_type == 'pvalue':
             if test_layer_pairs:
                 n_pairs = int(0.5 * self.n_layers * (self.n_layers - 1))
-                logger.info("Estimating p-values for the test statistics from {:d} layer pairs.".format(n_pairs))
+                # logger.info("Estimating p-values for the test statistics from {:d} layer pairs.".format(n_pairs))
                 pvalues_pred_pairs = np.zeros((n_test, n_pairs))
                 pvalues_true_pairs = dict()
                 for c in self.labels_unique:

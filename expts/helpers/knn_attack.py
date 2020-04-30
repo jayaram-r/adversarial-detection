@@ -600,7 +600,8 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
             else:
                 # binary search if adv has been found
                 const[i] = (lower_bound[i] + upper_bound[i]) / 2.
-                count_bisection += 1
+                if is_correct[i]:
+                    count_bisection += 1
 
         # obtain embeddings for the inputs `x_adv`; gradients not needed here
         with torch.no_grad():
@@ -628,9 +629,9 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
             print("Exiting bisection search early based on the average interval width")
             break
 
-    if verbose and count_bisection < batch_size:
+    if verbose and count_bisection < n_correct:
         print("\n{:d} out of {:d} samples did not enter the bisection search phase".
-              format(batch_size - count_bisection, batch_size))
+              format(n_correct - count_bisection, n_correct))
 
     check_valid_values(x_adv, name='x_adv')
 
