@@ -565,24 +565,31 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
             # torch.cuda.empty_cache()
             loss.backward()
             optimizer.step()
-
-            is_final_iter = iteration == (max_iterations - 1)
-            if verbose and ((iteration % log_interval == 0) or is_final_iter):
+            # Note that `z_delta` is updated but `x` is not updated here
+            if verbose and ((iteration % log_interval == 0) or iteration == (max_iterations - 1)):
                 print('    step: %d; loss: %.6f; dist: %.4f' % (iteration, loss.item(), dist.mean().item()))
 
             # every `check_adv_steps` and in the final iteration, save adversarial samples with minimal perturbation
-            if ((iteration + 1) % check_adv_steps) == 0 or is_final_iter:
+            if (iteration + 1) % check_adv_steps == 0:
                 is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i]
                         best_dist[i] = dist[i]
 
-        # `check_adv` would have been called in the final iteration. No need to call it again
-        # is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
-        mask_adver = np.logical_and(is_adv, is_correct)
-        if verbose:
-            print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
+
+        # final `x` and its layer embeddings
+        x = to_model_space(z_orig + z_delta)
+        with torch.no_grad():
+            x_embeddings = extract_input_embeddings(model_dnn, device, x)
+            # distance between the original and perturbed inputs
+            dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
+
+        # check which inputs are adversarial
+        is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+        # mask_adver = np.logical_and(is_adv, is_correct)
+        # if verbose:
+        #    print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
 
         count_bisection = 0
         for i in range(batch_size):
@@ -602,6 +609,11 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
                 const[i] = (lower_bound[i] + upper_bound[i]) / 2.
                 if is_correct[i]:
                     count_bisection += 1
+
+            # Update `x_adv` based on the final `x`
+            if is_adv[i] and best_dist[i] > dist[i]:
+                x_adv[i] = x[i]
+                best_dist[i] = dist[i]
 
         # obtain embeddings for the inputs `x_adv`; gradients not needed here
         with torch.no_grad():
