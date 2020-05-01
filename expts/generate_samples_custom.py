@@ -3,7 +3,7 @@ Main script for generating adversarial data (from custom KNN attack) from the cr
 them to numpy files.
 
 Example usage:
-python generate_samples_custom.py -m mnist --gpu 3 --detection-method dknn --dist-metric euclidean --n-jobs 16
+python generate_samples_custom.py -m mnist --gpu 3 --defense-method dknn --dist-metric euclidean --n-jobs 16
 
 """
 from __future__ import absolute_import, division, print_function
@@ -70,8 +70,8 @@ def main():
                         help='should attack samples be generated/not (default:True)')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
-    parser.add_argument('--detection-method', '--dm', choices=['dknn', 'proposed'], default='dknn',
-                        help="Detection method to attack. Choices are 'dknn' and 'proposed'")
+    parser.add_argument('--defense-method', '--dm', choices=['dknn', 'proposed', 'dnn'], default='dknn',
+                        help="Defense method to attack. Choices are 'dnn', 'dknn' and 'proposed'")
     parser.add_argument('--det-model-file', '--dmf', default='',
                         help='Path to the saved detector model file. Loads from a default location of not specified.')
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
@@ -102,17 +102,6 @@ def main():
 
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
-
-    # Path to the detection model file
-    if args.det_model_file:
-        det_model_file = args.det_model_file
-    else:
-        # default path the the saved detection model file
-        det_model_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
-                                      'models_{}.pkl'.format(args.detection_method))
-
-    print("Detection method: {}".format(args.detection_method))
-    print("Loading saved detection models from the file: {}".format(det_model_file))
 
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
@@ -167,27 +156,35 @@ def main():
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
         raise ValueError("Data loader verification failed")
 
-    # Load the detection models (from each cross-validation fold) from a pickle file.
-    # `models_detec` will be a list of trained detection models from each fold
-    with open(det_model_file, 'rb') as fp:
-        models_detec = pickle.load(fp)
-
-    if args.detection_method == 'proposed':
-        models_detec_propo = models_detec
-        # Detection models for the dknn method. Used for comparison
-        fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_dknn.pkl')
-        with open(fname, 'rb') as fp:
-            models_detec_dknn = pickle.load(fp)
-
-    elif args.detection_method == 'dknn':
-        models_detec_dknn = models_detec
-        # Detection models for the proposed method. Used for comparison
-        fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_proposed.pkl')
-        with open(fname, 'rb') as fp:
-            models_detec_propo = pickle.load(fp)
-
+    # Path to the detection model file
+    det_model_file = ''
+    if args.det_model_file:
+        det_model_file = args.det_model_file
     else:
-        raise ValueError("Unexpected detection method: {}".format(args.detection_method))
+        if args.defense_method != 'dnn':
+            # default path the the saved detection model file
+            det_model_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
+                                          'models_{}.pkl'.format(args.defense_method))
+
+    print("Defense method: {}".format(args.defense_method))
+    if det_model_file:
+        print("Loading saved detection models from the file: {}".format(det_model_file))
+        # Load the detection models (from each cross-validation fold) from a pickle file.
+        # `models_detec` will be a list of trained detection models from each fold
+        with open(det_model_file, 'rb') as fp:
+            models_detec = pickle.load(fp)
+    else:
+        models_detec = [None] * args.num_folds
+
+    # Detection models for the dknn method. Used for comparison
+    fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_dknn.pkl')
+    with open(fname, 'rb') as fp:
+        models_detec_dknn = pickle.load(fp)
+
+    # Detection models for the proposed method. Used for comparison
+    fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_proposed.pkl')
+    with open(fname, 'rb') as fp:
+        models_detec_propo = pickle.load(fp)
 
     # repeat for each fold in the cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
@@ -313,9 +310,9 @@ def main():
                 data_adver_batch, labels_adver_batch, norm_perturb_batch, is_correct_batch, is_adver_batch = \
                     knn_attack.attack(
                         model, device, data_temp.to(device), labels_temp, labels_pred_temp,
-                        layer_embeddings_per_class_train, labels_uniq, models_detec[i - 1],
-                        sigma_per_layer[index_temp, :], untargeted=args.untargeted, dist_metric=args.dist_metric,
-                        fast_mode=True, verbose=True
+                        layer_embeddings_per_class_train, labels_uniq, sigma_per_layer[index_temp, :],
+                        model_detector=models_detec[i - 1], untargeted=args.untargeted,
+                        dist_metric=args.dist_metric, fast_mode=True, verbose=True
                 )
                 # all returned outputs are numpy arrays
                 # accumulate results from this batch

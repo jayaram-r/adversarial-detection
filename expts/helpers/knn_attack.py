@@ -104,6 +104,25 @@ def extract_input_embeddings(model, device, x_input):
     return outputs_layers
 
 
+def get_predicted_class(model, device, x_input):
+    # Get the DNN model predictions on a batch of inputs
+    with torch.no_grad():
+        x = x_input.to(device)
+        _, preds = model(x).max(1)
+
+    return preds.cpu().numpy()
+
+
+def get_runner_up_class(model, device, x_input):
+    # Get the second best DNN model predictions on a batch of inputs
+    with torch.no_grad():
+        x = x_input.to(device)
+        y = model(x)
+        ret = torch.argsort(y, dim=1)
+
+    return ret[:, -2].cpu().numpy()
+
+
 def objective_kernel_scale(dist_neighbors, dist_all, alpha, sigma):
     """
     Objective function that is to be maximized for selecting the kernel scale.
@@ -342,7 +361,7 @@ def loss_function_untargeted(x, x_recon, x_embeddings, reps, input_indices, labe
     return total_loss.mean(), dist.sqrt()
     
 
-def check_adv(x_embeddings, labels, labels_pred_dnn, model_detector, is_numpy=False):
+def check_adv_detec(x_embeddings, labels, labels_pred_dnn, model_detector, is_numpy=False):
     if not is_numpy:
         # If `x_embeddings` is a list of torch tensors, it needs to be converted into a list of numpy arrays
         # before calling the detector's score method
@@ -357,6 +376,12 @@ def check_adv(x_embeddings, labels, labels_pred_dnn, model_detector, is_numpy=Fa
         raise ValueError("Received model from unknown detection method")
 
     # check if labels_pred == labels; the first output will be a boolean ndarray of shape == labels.shape
+    return labels_pred != labels, labels_pred
+
+
+def check_adv_dnn(x, labels, model_dnn, device):
+    # Get the predicted labels of the DNN and find which ones are adversarial (mis-classified)
+    labels_pred = get_predicted_class(model_dnn, device, x)
     return labels_pred != labels, labels_pred
 
 
@@ -401,8 +426,8 @@ def preprocess_input(x_embeddings, indices):
     return output
 
 
-def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, labels_uniq, model_detector,
-           sigma_per_layer, untargeted=False, dist_metric='euclidean', verbose=True, fast_mode=True):
+def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, labels_uniq, sigma_per_layer,
+           model_detector=None, untargeted=False, dist_metric='euclidean', verbose=True, fast_mode=True):
     """
     Main function implementing the custom attack on KNN based methods.
 
@@ -416,7 +441,7 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
                  number of layers and each torch tensor corresponds to the layer embeddings from the particular
                  class. These layer embeddings are used as the representative samples in the loss function.
     :param labels_uniq: list or numpy array with the distinct class labels.
-    :param model_detector: Detector model that is to be attacked.
+    :param model_detector: Detector model that is to be attacked. Set to None in order to attack the DNN model.
     :param sigma_per_layer: Scale of the Gaussian kernel per layer for each sample in the batch. A torch tensor of
                             size `(batch_size, n_layers)`.
     :param untargeted: Set to True to run the untargeted version of the attack.
@@ -516,7 +541,11 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
         x_embeddings = extract_input_embeddings(model_dnn, device, x_orig)
 
     # mis-classifications with clean inputs
-    is_error, labels_pred_adv = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+    if model_detector is None:
+        is_error, labels_pred_adv = check_adv_dnn(x_orig, label_orig, model_dnn, device)
+    else:
+        is_error, labels_pred_adv = check_adv_detec(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+
     is_correct = np.logical_not(is_error)
     n_correct = is_correct.sum()
     print("\n{:d} out of {:d} samples are correctly classified without any perturbation.".format(n_correct,
@@ -570,27 +599,33 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
             if verbose and ((iteration % log_interval == 0) or iteration == (max_iterations - 1)):
                 print('    step: %d; loss: %.6f; dist: %.4f' % (iteration, loss.item(), dist.mean().item()))
 
-            # every `check_adv_steps` and in the final iteration, save adversarial samples with minimal perturbation
+            # every `check_adv_steps` save adversarial samples with minimal perturbation
             if (iteration + 1) % check_adv_steps == 0:
-                is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+                if model_detector is None:
+                    is_adv, _ = check_adv_dnn(x, label_orig, model_dnn, device)
+                else:
+                    is_adv, _ = check_adv_detec(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
                         x_adv[i] = x[i].detach()
                         best_dist[i] = dist[i].detach()
 
         # final `x` and its layer embeddings
-        x = to_model_space(z_orig + z_delta)
         with torch.no_grad():
-            x_embeddings = extract_input_embeddings(model_dnn, device, x)
+            x = to_model_space(z_orig + z_delta)
             # distance between the original and perturbed inputs
             dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1).sqrt()
 
         # check which inputs are adversarial
-        is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
-        # mask_adver = np.logical_and(is_adv, is_correct)
-        # if verbose:
-        #    print('binary step: %d; num successful adv: %d/%d' % (binary_search_step, mask_adver.sum(), batch_size))
+        if model_detector is None:
+            is_adv, _ = check_adv_dnn(x, label_orig, model_dnn, device)
+        else:
+            with torch.no_grad():
+                x_embeddings = extract_input_embeddings(model_dnn, device, x)
+                is_adv, _ = check_adv_detec(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
 
+        # mask_adver = np.logical_and(is_adv, is_correct)
         count_bisection = 0
         for i in range(batch_size):
             if is_adv[i]:
@@ -615,12 +650,16 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
                 x_adv[i] = x[i].detach()
                 best_dist[i] = dist[i].detach()
 
-        # obtain embeddings for the inputs `x_adv`; gradients not needed here
-        with torch.no_grad():
-            x_embeddings = extract_input_embeddings(model_dnn, device, x_adv)
-
         # check the final attack success rate (combined with previous binary search steps)
-        is_adv, labels_pred_adv = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
+        if model_detector is None:
+            is_adv, _ = check_adv_dnn(x_adv, label_orig, model_dnn, device)
+        else:
+            # obtain embeddings for the inputs `x_adv`; gradients not needed here
+            with torch.no_grad():
+                x_embeddings = extract_input_embeddings(model_dnn, device, x_adv)
+                is_adv, labels_pred_adv = check_adv_detec(x_embeddings, label_orig, labels_pred_dnn_orig,
+                                                          model_detector)
+
         mask_adver = np.logical_and(is_adv, is_correct)
         # average (relative) difference between the upper and lower bound of the bisection interval
         diff_bounds = (upper_bound - lower_bound) / torch.clamp(lower_bound, min=1e-16)
