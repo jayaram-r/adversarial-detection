@@ -578,13 +578,12 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
                         x_adv[i] = x[i].detach()
                         best_dist[i] = dist[i].detach()
 
-
         # final `x` and its layer embeddings
         x = to_model_space(z_orig + z_delta)
         with torch.no_grad():
             x_embeddings = extract_input_embeddings(model_dnn, device, x)
             # distance between the original and perturbed inputs
-            dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1)
+            dist = ((x - x_recon).view(batch_size, -1) ** 2).sum(1).sqrt()
 
         # check which inputs are adversarial
         is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
