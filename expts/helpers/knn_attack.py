@@ -391,13 +391,14 @@ def return_indices(labels, label):
     return np.where(labels == label)[0]
 
 
-def get_adv_labels(labels, labels_uniq):
-    # Given an ndarray `labels` and a list of unique labels, return an ndarray of adv. labels i.e. the labels the
-    # input should be misclassified as
-    max_ = labels_uniq[-1]
-    output = []
-    for element in labels:
-        output.append(max_ - element)
+def get_adv_labels(x, labels, model_dnn, device, labels_uniq, runner_up_class=True):
+    # Find the adversarial labels that the inputs should be mis-classified into.
+    # returns a numpy array of adversarial target labels
+    if runner_up_class:
+        output = get_runner_up_class(model_dnn, device, x)
+    else:
+        max_ = labels_uniq[-1]
+        output = [max_ - lab for lab in labels]
 
     return np.asarray(output, dtype=labels.dtype)
 
@@ -492,7 +493,7 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
 
     if not untargeted:
         # get adversarial labels i.e. the labels we want the inputs to be misclassified as
-        label_adv = get_adv_labels(label_orig, labels_uniq)
+        label_adv = get_adv_labels(x_orig, label_orig, model_dnn, device, labels_uniq, runner_up_class=True)
         label_adv_uniq = np.unique(label_adv)
         # indices for each distinct label
         target_indices = {i: return_indices(label_adv, i) for i in label_adv_uniq}
