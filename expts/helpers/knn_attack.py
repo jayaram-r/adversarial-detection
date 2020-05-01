@@ -342,16 +342,17 @@ def loss_function_untargeted(x, x_recon, x_embeddings, reps, input_indices, labe
     return total_loss.mean(), dist.sqrt()
     
 
-def check_adv(x_embeddings, labels, labels_pred_dnn, model_detector):
-    # `x_embeddings` will be a list of torch tensors. It needs to be converted into a list of numpy arrays before
-    # calling the detector's score method
-    x_embeddings_np = [tens.detach().cpu().numpy() for tens in x_embeddings]
+def check_adv(x_embeddings, labels, labels_pred_dnn, model_detector, is_numpy=False):
+    if not is_numpy:
+        # If `x_embeddings` is a list of torch tensors, it needs to be converted into a list of numpy arrays
+        # before calling the detector's score method
+        x_embeddings = [tens.detach().cpu().numpy() for tens in x_embeddings]
 
     # scores and class predictions from the detection model
     if model_detector._name == 'dknn':
-        _, labels_pred = model_detector.score(x_embeddings_np)
+        _, labels_pred = model_detector.score(x_embeddings)
     elif model_detector._name == 'proposed':
-        _, labels_pred = model_detector.score(x_embeddings_np, labels_pred_dnn, return_corrected_predictions=True)
+        _, labels_pred = model_detector.score(x_embeddings, labels_pred_dnn, return_corrected_predictions=True)
     else:
         raise ValueError("Received model from unknown detection method")
 

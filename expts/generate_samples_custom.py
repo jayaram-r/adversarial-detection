@@ -32,11 +32,10 @@ from helpers.utils import (
     load_model_checkpoint,
     convert_to_loader,
     load_numpy_data,
-    get_clean_data_path,
-    get_adversarial_data_path,
     get_data_bounds,
     verify_data_loader,
-    get_samples_as_ndarray
+    get_samples_as_ndarray,
+    get_predicted_classes
 )
 from helpers import knn_attack
 from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
@@ -96,6 +95,9 @@ def main():
 
     print("Detection method: {}".format(args.detection_method))
     print("Loading saved detection models from the file: {}".format(det_model_file))
+    # Detection model file for the proposed method
+    det_model_propo_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
+                                        'models_proposed.pkl')
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
@@ -154,11 +156,14 @@ def main():
     if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
         raise ValueError("Data loader verification failed")
 
-    # Load the detection models (from each cross-validation fold) from a pickle file
+    # Load the detection models (from each cross-validation fold) from a pickle file.
+    # `models_detec` will be a list of trained detection models from each fold
     with open(det_model_file, 'rb') as fp:
         models_detec = pickle.load(fp)
 
-    # `models_detec` will be a list of trained detection models from each fold
+    # Detection models for the proposed method. Used for comparison
+    with open(det_model_propo_file, 'rb') as fp:
+        models_detec_propo = pickle.load(fp)
 
     # repeat for each fold in the cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
@@ -228,7 +233,7 @@ def main():
             # Extract the layer embeddings for samples from the train and test split
             layer_embeddings_train, _, _, _ = extract_layer_embeddings_numpy(model, device, train_fold_loader,
                                                                              method='proposed')
-            layer_embeddings_test, _, labels_pred_test, _ = extract_layer_embeddings_numpy(
+            layer_embeddings_test, _, labels_pred_dnn_test, _ = extract_layer_embeddings_numpy(
                 model, device, test_fold_loader, method='proposed'
             )
 
@@ -273,7 +278,7 @@ def main():
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
                 # main attack function
-                labels_pred_temp = labels_pred_test[index_temp]
+                labels_pred_temp = labels_pred_dnn_test[index_temp]
                 data_adver_batch, labels_adver_batch, norm_perturb_batch, is_correct_batch, is_adver_batch = \
                     knn_attack.attack(
                         model, device, data_temp.to(device), labels_temp, labels_pred_temp,
@@ -299,19 +304,49 @@ def main():
             is_correct = np.concatenate(is_correct)
             is_adver = np.concatenate(is_adver)
 
-            n_correct = is_correct[is_correct].shape[0]
-            accu = (100. * n_correct) / n_test
+            # Accuracy of the detection method on clean and perturbed inputs
+            accu_clean_detec = (100. * is_correct[is_correct].shape[0]) / n_test
+            mask = labels_adver == labels_clean
+            accu_detec = (100. * mask[mask].shape[0]) / n_test
+
+            # Accuracy of the DNN classifier and the proposed detection method on clean inputs
+            data_loader = convert_to_loader(data_clean, labels_clean, batch_size=args.batch_size)
+            layer_embeddings, _, labels_pred_dnn, _ = extract_layer_embeddings_numpy(
+                model, device, data_loader, method='proposed'
+            )
+            mask = labels_pred_dnn == labels_clean
+            accu_clean_dnn = (100. * mask[mask].shape[0]) / n_test
+            is_error, _ = knn_attack.check_adv(layer_embeddings, labels_clean, labels_pred_dnn,
+                                               models_detec_propo[i - 1], is_numpy=True)
+            accu_clean_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
+
+            # Accuracy of the DNN classifier and the proposed detection method on perturbed inputs
+            data_loader = convert_to_loader(data_adver, labels_clean, batch_size=args.batch_size)
+            layer_embeddings, _, labels_pred_dnn, _ = extract_layer_embeddings_numpy(
+                model, device, data_loader, method='proposed'
+            )
+            mask = labels_pred_dnn == labels_clean
+            accu_dnn = (100. * mask[mask].shape[0]) / n_test
+            is_error, _ = knn_attack.check_adv(layer_embeddings, labels_clean, labels_pred_dnn,
+                                               models_detec_propo[i - 1], is_numpy=True)
+            accu_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
+
             n_adver = is_adver[is_adver].shape[0]
-            print("\nTest fold {:d}: #samples = {:d}, accuracy of defense method = {:.4f}, #adversarial samples "
-                  "= {:d}, avg. perturbation norm = {:.6f}".format(i, n_test, accu, n_adver,
-                                                                   np.mean(norm_perturb[is_adver])))
+            print("\nTest fold {:d}: #samples = {:d}, #adversarial samples = {:d}, avg. perturbation norm = {:.6f}".
+                  format(i, n_test, n_adver, np.mean(norm_perturb[is_adver])))
+            print("Accuracy on clean and adversarial data from test fold {:d}:".format(i))
+            print("method\t{}\t{}".format('accu. clean', 'accu. adver'))
+            print("{}\t{:.4f}\t{:.4f}".format(args.detection_method, accu_clean_detec, accu_detec))
+            print("{}\t{:.4f}\t{:.4f}".format('DNN', accu_clean_dnn, accu_dnn))
+            print("{}\t{:.4f}\t{:.4f}".format('proposed', accu_clean_propo, accu_propo))
+
             # save data to numpy files
             np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
             np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
             np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
             np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
             np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb)
-            np.save(os.path.join(adv_save_path, 'is_correct.npy'), is_correct)
+            # np.save(os.path.join(adv_save_path, 'is_correct_detec.npy'), is_correct)
             np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
         else:
             print("generated original data split for fold : ", i)
