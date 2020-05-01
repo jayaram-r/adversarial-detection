@@ -176,7 +176,7 @@ def main():
 
         # Set number of nearest neighbors based on the data size and the neighborhood constant
         n_neighbors = int(np.ceil(labels_tr.shape[0] ** NEIGHBORHOOD_CONST))
-        print("Processing fold {:d}".format(i))
+        print("\nProcessing fold {:d}".format(i))
         print("Number of nearest neighbors = {:d}".format(n_neighbors))
         
         # make dir based on fold to save data

@@ -575,8 +575,8 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
                 is_adv, _ = check_adv(x_embeddings, label_orig, labels_pred_dnn_orig, model_detector)
                 for i in range(batch_size):
                     if is_adv[i] and best_dist[i] > dist[i]:
-                        x_adv[i] = x[i]
-                        best_dist[i] = dist[i]
+                        x_adv[i] = x[i].detach()
+                        best_dist[i] = dist[i].detach()
 
 
         # final `x` and its layer embeddings
@@ -613,8 +613,8 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
 
             # Update `x_adv` based on the final `x`
             if is_adv[i] and best_dist[i] > dist[i]:
-                x_adv[i] = x[i]
-                best_dist[i] = dist[i]
+                x_adv[i] = x[i].detach()
+                best_dist[i] = dist[i].detach()
 
         # obtain embeddings for the inputs `x_adv`; gradients not needed here
         with torch.no_grad():
