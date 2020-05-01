@@ -47,10 +47,12 @@ def helper_accuracy(layer_embeddings, labels_pred_dnn, labels, model_detec_propo
     mask = labels_pred_dnn == labels
     accu_dnn = (100. * mask[mask].shape[0]) / n_test
     # Accuracy of the proposed method
-    is_error, _ = knn_attack.check_adv(layer_embeddings, labels, labels_pred_dnn, model_detec_propo, is_numpy=True)
+    is_error, _ = knn_attack.check_adv_detec(layer_embeddings, labels, labels_pred_dnn, model_detec_propo,
+                                             is_numpy=True)
     accu_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
     # Accuracy of deep KNN
-    is_error, _ = knn_attack.check_adv(layer_embeddings, labels, labels_pred_dnn, model_detec_dknn, is_numpy=True)
+    is_error, _ = knn_attack.check_adv_detec(layer_embeddings, labels, labels_pred_dnn, model_detec_dknn,
+                                             is_numpy=True)
     accu_dknn = (100. * (n_test - is_error[is_error].shape[0])) / n_test
 
     return accu_dnn, accu_propo, accu_dknn
