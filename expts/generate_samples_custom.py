@@ -163,7 +163,7 @@ def main():
     else:
         if args.defense_method != 'dnn':
             # default path the the saved detection model file
-            det_model_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
+            det_model_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', CUSTOM_ATTACK,
                                           'models_{}.pkl'.format(args.defense_method))
 
     print("Defense method: {}".format(args.defense_method))
@@ -177,12 +177,12 @@ def main():
         models_detec = [None] * args.num_folds
 
     # Detection models for the dknn method. Used for comparison
-    fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_dknn.pkl')
+    fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', CUSTOM_ATTACK, 'models_dknn.pkl')
     with open(fname, 'rb') as fp:
         models_detec_dknn = pickle.load(fp)
 
     # Detection models for the proposed method. Used for comparison
-    fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_proposed.pkl')
+    fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', CUSTOM_ATTACK, 'models_proposed.pkl')
     with open(fname, 'rb') as fp:
         models_detec_propo = pickle.load(fp)
 
