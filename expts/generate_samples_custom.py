@@ -41,6 +41,21 @@ from helpers import knn_attack
 from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 
+def helper_accuracy(layer_embeddings, labels_pred_dnn, labels, model_detec_propo, model_detec_dknn):
+    # Accuracy of the DNN classifier
+    n_test = labels.shape[0]
+    mask = labels_pred_dnn == labels
+    accu_dnn = (100. * mask[mask].shape[0]) / n_test
+    # Accuracy of the proposed method
+    is_error, _ = knn_attack.check_adv(layer_embeddings, labels, labels_pred_dnn, model_detec_propo, is_numpy=True)
+    accu_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
+    # Accuracy of deep KNN
+    is_error, _ = knn_attack.check_adv(layer_embeddings, labels, labels_pred_dnn, model_detec_dknn, is_numpy=True)
+    accu_dknn = (100. * (n_test - is_error[is_error].shape[0])) / n_test
+
+    return accu_dnn, accu_propo, accu_dknn
+
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
@@ -75,6 +90,9 @@ def main():
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    use_cuda = not args.no_cuda and torch.cuda.is_available()
+    device = torch.device("cuda" if use_cuda else "cpu")
+    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     # Output directory
     if not args.output_dir:
@@ -95,13 +113,6 @@ def main():
 
     print("Detection method: {}".format(args.detection_method))
     print("Loading saved detection models from the file: {}".format(det_model_file))
-    # Detection model file for the proposed method
-    det_model_propo_file = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom',
-                                        'models_proposed.pkl')
-
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-    device = torch.device("cuda" if use_cuda else "cpu")
-    kwargs = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
 
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
@@ -161,9 +172,22 @@ def main():
     with open(det_model_file, 'rb') as fp:
         models_detec = pickle.load(fp)
 
-    # Detection models for the proposed method. Used for comparison
-    with open(det_model_propo_file, 'rb') as fp:
-        models_detec_propo = pickle.load(fp)
+    if args.detection_method == 'proposed':
+        models_detec_propo = models_detec
+        # Detection models for the dknn method. Used for comparison
+        fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_dknn.pkl')
+        with open(fname, 'rb') as fp:
+            models_detec_dknn = pickle.load(fp)
+
+    elif args.detection_method == 'dknn':
+        models_detec_dknn = models_detec
+        # Detection models for the proposed method. Used for comparison
+        fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', 'Custom', 'models_proposed.pkl')
+        with open(fname, 'rb') as fp:
+            models_detec_propo = pickle.load(fp)
+
+    else:
+        raise ValueError("Unexpected detection method: {}".format(args.detection_method))
 
     # repeat for each fold in the cross-validation split
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
@@ -236,6 +260,13 @@ def main():
             layer_embeddings_test, _, labels_pred_dnn_test, _ = extract_layer_embeddings_numpy(
                 model, device, test_fold_loader, method='proposed'
             )
+            # Calculate accuracy of the DNN and the detection methods on clean data
+            accu_clean_dnn, accu_clean_propo, accu_clean_dknn = helper_accuracy(
+                layer_embeddings_test, labels_pred_dnn_test, labels_te, models_detec_propo[i - 1],
+                models_detec_dknn[i - 1]
+            )
+            print("Accuracy on clean data:\nDNN classifier: {:.4f}, proposed: {:.4f}, dknn: {:.4f}".
+                  format(accu_clean_dnn, accu_clean_propo, accu_clean_dknn))
 
             # Load kernel sigma values from file if available
             sigma_filename = os.path.join(adv_save_path, 'kernel_sigma_{}.npy'.format(args.dist_metric))
@@ -304,41 +335,23 @@ def main():
             is_correct = np.concatenate(is_correct)
             is_adver = np.concatenate(is_adver)
 
-            # Accuracy of the detection method on clean and perturbed inputs
-            accu_clean_detec = (100. * is_correct[is_correct].shape[0]) / n_test
-            mask = labels_adver == labels_clean
-            accu_detec = (100. * mask[mask].shape[0]) / n_test
-
-            # Accuracy of the DNN classifier and the proposed detection method on clean inputs
-            data_loader = convert_to_loader(data_clean, labels_clean, batch_size=args.batch_size)
-            layer_embeddings, _, labels_pred_dnn, _ = extract_layer_embeddings_numpy(
-                model, device, data_loader, method='proposed'
-            )
-            mask = labels_pred_dnn == labels_clean
-            accu_clean_dnn = (100. * mask[mask].shape[0]) / n_test
-            is_error, _ = knn_attack.check_adv(layer_embeddings, labels_clean, labels_pred_dnn,
-                                               models_detec_propo[i - 1], is_numpy=True)
-            accu_clean_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
-
-            # Accuracy of the DNN classifier and the proposed detection method on perturbed inputs
+            # Calculate accuracy of the DNN and the detection methods on adversarial inputs
             data_loader = convert_to_loader(data_adver, labels_clean, batch_size=args.batch_size)
             layer_embeddings, _, labels_pred_dnn, _ = extract_layer_embeddings_numpy(
                 model, device, data_loader, method='proposed'
             )
-            mask = labels_pred_dnn == labels_clean
-            accu_dnn = (100. * mask[mask].shape[0]) / n_test
-            is_error, _ = knn_attack.check_adv(layer_embeddings, labels_clean, labels_pred_dnn,
-                                               models_detec_propo[i - 1], is_numpy=True)
-            accu_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
+            accu_dnn, accu_propo, accu_dknn = helper_accuracy(
+                layer_embeddings, labels_pred_dnn, labels_clean, models_detec_propo[i - 1], models_detec_dknn[i - 1]
+            )
 
             n_adver = is_adver[is_adver].shape[0]
             print("\nTest fold {:d}: #samples = {:d}, #adversarial samples = {:d}, avg. perturbation norm = {:.6f}".
                   format(i, n_test, n_adver, np.mean(norm_perturb[is_adver])))
             print("Accuracy on clean and adversarial data from test fold {:d}:".format(i))
             print("method\t{}\t{}".format('accu. clean', 'accu. adver'))
-            print("{}\t{:.4f}\t{:.4f}".format(args.detection_method, accu_clean_detec, accu_detec))
             print("{}\t{:.4f}\t{:.4f}".format('DNN', accu_clean_dnn, accu_dnn))
             print("{}\t{:.4f}\t{:.4f}".format('proposed', accu_clean_propo, accu_propo))
+            print("{}\t{:.4f}\t{:.4f}".format('dknn', accu_clean_dknn, accu_dknn))
 
             # save data to numpy files
             np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
