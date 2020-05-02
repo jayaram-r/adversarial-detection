@@ -8,6 +8,7 @@ python generate_samples_custom.py -m mnist --gpu 3 --defense-method dknn --dist-
 """
 from __future__ import absolute_import, division, print_function
 import sys
+import time
 import argparse
 import os
 import pickle
@@ -192,6 +193,7 @@ def main():
     skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
     i = 1
     for ind_tr, ind_te in skf.split(data, labels):
+        t_init = time.time()
         data_tr = data[ind_tr, :]
         labels_tr = labels[ind_tr]
         data_te = data[ind_te, :]
@@ -303,7 +305,9 @@ def main():
             norm_perturb = []
             is_correct = []
             is_adver = []
+            n_batches = len(test_fold_loader)
             for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
+                print("Batch {:d}/{:d}".format(batch_idx + 1, n_batches))
                 index_temp = index_temp.cpu().numpy()
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
@@ -342,7 +346,6 @@ def main():
             accu_dnn, accu_propo, accu_dknn = helper_accuracy(
                 layer_embeddings, labels_pred_dnn, labels_clean, models_detec_propo[i - 1], models_detec_dknn[i - 1]
             )
-
             n_adver = is_adver[is_adver].shape[0]
             print("\nTest fold {:d}: #samples = {:d}, #adversarial samples = {:d}, avg. perturbation norm = {:.6f}".
                   format(i, n_test, n_adver, np.mean(norm_perturb[is_adver])))
@@ -352,14 +355,17 @@ def main():
             print("{}\t{:.4f}\t{:.4f}".format('proposed', accu_clean_propo, accu_propo))
             print("{}\t{:.4f}\t{:.4f}".format('dknn', accu_clean_dknn, accu_dknn))
 
+            t_del = (time.time() - t_init) / 3600.
+            print("\nTime take for fold {:d}: {:.2f} hours".format(i, t_del))
             # save data to numpy files
-            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
-            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
-            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
-            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
-            np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb)
+            # saving only the successful adversarial samples to be consistent with data generated earlier
+            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver[is_adver, :])
+            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver[is_adver])
+            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean[is_adver, :])
+            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean[is_adver])
+            np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb[is_adver])
             # np.save(os.path.join(adv_save_path, 'is_correct_detec.npy'), is_correct)
-            np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
+            # np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
         else:
             print("generated original data split for fold : ", i)
 
