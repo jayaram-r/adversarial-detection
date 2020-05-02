@@ -73,7 +73,7 @@ def main():
                         help='should attack samples be generated/not (default:True)')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
     parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
-    parser.add_argument('--defense-method', '--dm', choices=['dknn', 'proposed', 'dnn'], default='dknn',
+    parser.add_argument('--defense-method', '--dm', choices=['dknn', 'proposed', 'dnn'], default='proposed',
                         help="Defense method to attack. Choices are 'dnn', 'dknn' and 'proposed'")
     parser.add_argument('--det-model-file', '--dmf', default='',
                         help='Path to the saved detector model file. Loads from a default location of not specified.')
@@ -358,14 +358,13 @@ def main():
             t_del = (time.time() - t_init) / 3600.
             print("\nTime take for fold {:d}: {:.2f} hours".format(i, t_del))
             # save data to numpy files
-            # saving only the successful adversarial samples to be consistent with data generated earlier
-            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver[is_adver, :])
-            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver[is_adver])
-            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean[is_adver, :])
-            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean[is_adver])
-            np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb[is_adver])
+            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
+            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
+            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
+            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
+            np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb)
             # np.save(os.path.join(adv_save_path, 'is_correct_detec.npy'), is_correct)
-            # np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
+            np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
         else:
             print("generated original data split for fold : ", i)
 
