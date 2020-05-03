@@ -666,14 +666,15 @@ def attack(model_dnn, device, x_orig, label_orig, labels_pred_dnn_orig, reps, la
         diff_bounds = (upper_bound - lower_bound) / torch.clamp(lower_bound, min=1e-16)
         diff_bounds_avg = diff_bounds[is_correct].mean().item()
         if verbose:
-            # average perturbation norm of adversarial samples
-            norm_avg_adv = best_dist[mask_adver].mean().item()
             n_adver = mask_adver.sum()
             print('binary step: %d; num successful adv so far: %d/%d' % (binary_search_step, n_adver, batch_size))
             if n_adver:
-                if diff_bounds_avg < 100.:
+                # average perturbation norm of adversarial samples
+                norm_avg_adv = best_dist[mask_adver].mean().item()
+                diff_bounds_adv_avg = diff_bounds[mask_adver].mean().item()
+                if diff_bounds_adv_avg < 100.:
                     print('binary step: %d; avg_norm_adver: %.6f; avg_diff_bounds: %.4f' %
-                          (binary_search_step, norm_avg_adv, diff_bounds_avg))
+                          (binary_search_step, norm_avg_adv, diff_bounds_adv_avg))
                 else:
                     print('binary step: %d; avg_norm_adver: %.6f' % (binary_search_step, norm_avg_adv))
 

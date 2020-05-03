@@ -356,7 +356,7 @@ def main():
             print("{}\t{:.4f}\t{:.4f}".format('dknn', accu_clean_dknn, accu_dknn))
 
             t_del = (time.time() - t_init) / 3600.
-            print("\nTime take for fold {:d}: {:.2f} hours".format(i, t_del))
+            print("\nTime taken for fold {:d}: {:.2f} hours".format(i, t_del))
             # save data to numpy files
             np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
             np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
