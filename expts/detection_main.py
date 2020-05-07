@@ -107,6 +107,43 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
     return config_trust_score
 
 
+def save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, save_detec_model):
+    # Save the scores and detection labels from the cross-validation folds to a pickle file
+    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
+    tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
+    with open(fname, 'wb') as fp:
+        pickle.dump(tmp, fp)
+
+    if save_detec_model and models_folds:
+        # Save the detection models from the cross-validation folds to a pickle file
+        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
+        with open(fname, 'wb') as fp:
+            pickle.dump(models_folds, fp)
+
+
+def load_checkpoint(output_dir, method_name, save_detec_model):
+    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
+    with open(fname, 'rb') as fp:
+        tmp = pickle.load(fp)
+
+    scores_folds = tmp['scores_folds']
+    labels_folds = tmp['labels_folds']
+    # Load the models if required
+    if save_detec_model:
+        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
+        with open(fname, 'rb') as fp:
+            models_folds = pickle.load(fp)
+    else:
+        models_folds = []
+
+    n_folds = len(scores_folds)
+    assert len(labels_folds) == n_folds, "'scores_folds' and 'labels_folds' do not have the same length"
+    if models_folds:
+        assert len(models_folds) == n_folds, "'models_folds' and 'scores_folds' do not have the same length"
+
+    return scores_folds, labels_folds, models_folds, n_folds
+
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
@@ -115,6 +152,12 @@ def main():
                         help='model type or name of the dataset')
     parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
                         help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
+    parser.add_argument('--resume-from-ckpt', action='store_true', default=False,
+                        help='Use this option to load results and resume from a previous partially completed run. '
+                             'Cross-validation folds that were completed earlier will be skipped in the current run.')
+    parser.add_argument('--save-detec-model', action='store_true', default=False,
+                        help='Use this option to save the list of detection models from the CV folds to a pickle '
+                             'file. Note that the files tend to large in size.')
     ################ Optional arguments for the proposed method
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
@@ -331,6 +374,7 @@ def main():
     if not os.path.isdir(d):
         raise ValueError("Directory for the numpy data files not found: {}".format(d))
 
+    # Not used
     attack_params_list = [
         ('stepsize', ATTACK_PARAMS['stepsize']),
         ('confidence', ATTACK_PARAMS['confidence']),
@@ -341,12 +385,21 @@ def main():
         ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
     ]
 
+    # Initialization
+    if args.resume_from_ckpt:
+        scores_folds, labels_folds, models_folds, init_fold = load_checkpoint(output_dir, method_name,
+                                                                              args.save_detec_model)
+        print("Loading saved results from a previous run. Completed {:d} fold(s). Resuming from fold {:d}.".
+              format(init_fold, init_fold + 1))
+    else:
+        scores_folds = []
+        labels_folds = []
+        models_folds = []
+        init_fold = 0
+
     ti = time.time()
     # Cross-validation
-    scores_folds = []
-    labels_folds = []
-    models_folds = []
-    for i in range(args.num_folds):
+    for i in range(init_fold, args.num_folds):
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
@@ -486,7 +539,8 @@ def main():
             scores_adv2 = det_model.score(layer_embeddings_te_adv, cleanup=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            models_folds.append(det_model)
+            if args.save_detec_model:
+                models_folds.append(det_model)
 
         elif args.detection_method == 'lid_class_cond':
             # Set to `None` to skip noisy data
@@ -515,7 +569,8 @@ def main():
             scores_adv2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv, cleanup=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            models_folds.append(det_model)
+            if args.save_detec_model:
+                models_folds.append(det_model)
 
         elif args.detection_method == 'proposed':
             nl = len(layer_embeddings_tr)
@@ -558,7 +613,8 @@ def main():
             scores_adv2 = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv, test_layer_pairs=True)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            models_folds.append(det_model)
+            if args.save_detec_model:
+                models_folds.append(det_model)
 
         elif args.detection_method == 'dknn':
             det_model = DeepKNN(
@@ -579,7 +635,8 @@ def main():
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
             # labels_pred_dknn = np.concatenate([labels_pred_dknn1, labels_pred_dknn2])
-            models_folds.append(det_model)
+            if args.save_detec_model:
+                models_folds.append(det_model)
 
         elif args.detection_method == 'trust':
             ind_layer = config_trust_score['layer']
@@ -601,25 +658,15 @@ def main():
             scores_adv2 = det_model.score(layer_embeddings_te_adv[ind_layer], labels_pred_te_adv)
 
             scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            models_folds.append(det_model)
+            if args.save_detec_model:
+                models_folds.append(det_model)
+
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 
         scores_folds.append(scores_adv)
         labels_folds.append(labels_detec)
-
-    tf = time.time()
-    # Save the scores and detection labels from the cross-validation folds to a pickle file
-    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
-    tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
-    with open(fname, 'wb') as fp:
-        pickle.dump(tmp, fp)
-
-    # Save the detection models from the cross-validation folds to a pickle file
-    # Commenting out because model files tend to be large and use up disk space
-    # fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
-    # with open(fname, 'wb') as fp:
-    #    pickle.dump(models_folds, fp)
+        save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, args.save_detec_model)
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
@@ -627,6 +674,7 @@ def main():
         scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
     )
     print("Performance metrics saved to the file: {}".format(fname))
+    tf = time.time()
     print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
 
 
