@@ -3,7 +3,7 @@ Main script for generating adversarial data (from custom KNN attack) from the cr
 them to numpy files.
 
 Example usage:
-python generate_samples_custom.py -m mnist --gpu 3 --defense-method dknn --dist-metric euclidean --n-jobs 16
+python generate_samples_custom.py -m mnist max-num-adver 1000 --gpu 3 --defense-method proposed --dist-metric cosine --n-jobs 16
 
 """
 from __future__ import absolute_import, division, print_function
@@ -27,7 +27,8 @@ from helpers.constants import (
     NORMALIZE_IMAGES,
     BATCH_SIZE_DEF,
     NEIGHBORHOOD_CONST,
-    CUSTOM_ATTACK
+    CUSTOM_ATTACK,
+    MAX_NUM_REPS
 )
 from helpers.utils import (
     load_model_checkpoint,
@@ -90,17 +91,17 @@ def combine_and_save(save_path, data_adver, labels_adver, data_clean, labels_cle
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
-    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
-                        help='input batch size for testing (default: 1000)')
-    parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
-    parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training')
+    parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
+    parser.add_argument('--max-num-adver', type=int, default=-1,
+                        help='Maximum number of adversarial samples to generate. If set to the default of -1, it '
+                             'attempts to generate adversarial samples for every test fold sample.')
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
+    parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the output and model files')
     parser.add_argument('--seed', '-s', type=int, default=SEED_DEFAULT, help='seed for random number generation')
     parser.add_argument('--generate-attacks', type=bool, default=True,
                         help='should attack samples be generated/not (default:True)')
     parser.add_argument('--gpu', type=str, default="3", help='which gpus to execute code on')
-    parser.add_argument('--batch-size', type=int, default=64, help='batch size of evaluation')
     parser.add_argument('--defense-method', '--dm', choices=['dknn', 'proposed', 'dnn'], default='proposed',
                         help="Defense method to attack. Choices are 'dnn', 'dknn' and 'proposed'")
     parser.add_argument('--det-model-file', '--dmf', default='',
@@ -108,19 +109,20 @@ def main():
     parser.add_argument('--dist-metric', choices=['euclidean', 'cosine'], default='euclidean',
                         help='distance metric to use')
     parser.add_argument('--n-jobs', type=int, default=16, help='number of parallel jobs to use for multiprocessing')
-    parser.add_argument('--skip-subsampling', action='store_true', default=False,
-                        help='Use this option to skip random sub-sampling of the train data split')
     parser.add_argument('--untargeted', action='store_true', default=False,
                         help='Use this option to create untargeted adversarial samples from this attack')
-    parser.add_argument('--save-batches', action='store_true', default=False,
-                        help='Use this option to save intermediate data batches to numpy files. Cautious approach '
-                             'at the expense of some added time to combine and save the data.')
+    parser.add_argument('--skip-save-batches', action='store_true', default=False,
+                        help='Use this option to skip saving the intermediate data batches to numpy files. '
+                             'This will shave off some time and avoid frequent I/O')
+    parser.add_argument('--no-cuda', action='store_true', default=False, help='Disables CUDA training')
+    parser.add_argument('--test-batch-size', '--tb', type=int, default=1000, metavar='N',
+                        help='input batch size for testing (default: 1000)')
+    parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
+                        help='number of cross-validation folds')
     '''
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
     '''
-    parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
-                        help='number of cross-validation folds')
     args = parser.parse_args()
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
@@ -137,6 +139,7 @@ def main():
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
+    num_folds = args.num_folds
     data_path = os.path.join(ROOT, 'data')
     if args.model_type == 'mnist':
         transform = transforms.Compose(
@@ -208,7 +211,7 @@ def main():
         with open(det_model_file, 'rb') as fp:
             models_detec = pickle.load(fp)
     else:
-        models_detec = [None] * args.num_folds
+        models_detec = [None] * num_folds
 
     global models_detec_propo, models_detec_dknn
     # Detection models for the dknn method. Used for comparison
@@ -221,8 +224,13 @@ def main():
     with open(fname, 'rb') as fp:
         models_detec_propo = pickle.load(fp)
 
+    if args.max_num_adver > 0:
+        max_num_adver = args.max_num_adver // num_folds
+    else:
+        max_num_adver = args.max_num_adver
+
     # repeat for each fold in the cross-validation split
-    skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
+    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=args.seed)
     i = 1
     for ind_tr, ind_te in skf.split(data, labels):
         t_init = time.time()
@@ -271,14 +279,14 @@ def main():
 
             n_test = labels_te.shape[0]
             n_train = labels_tr.shape[0]
-            if not args.skip_subsampling:
-                # Select a random, class-stratified sample from the training data of size `n_test`.
+            if n_train > MAX_NUM_REPS:
+                # Select a random, class-stratified sample from the training data of size `MAX_NUM_REPS`.
                 # This is done to speed-up the attack optimization
-                sss = StratifiedShuffleSplit(n_splits=1, test_size=n_test, random_state=args.seed)
+                sss = StratifiedShuffleSplit(n_splits=1, test_size=MAX_NUM_REPS, random_state=args.seed)
                 _, ind_sample = next(sss.split(data_tr, labels_tr))
                 data_tr_sample = data_tr[ind_sample, :]
                 labels_tr_sample = labels_tr[ind_sample]
-                print("\nRandomly sampling the train split from {:d} to {:d} samples".format(n_train, n_test))
+                print("\nRandomly sampling the train split from {:d} to {:d} samples".format(n_train, MAX_NUM_REPS))
             else:
                 data_tr_sample = data_tr
                 labels_tr_sample = labels_tr
@@ -326,9 +334,16 @@ def main():
             layer_embeddings_per_class_train = knn_attack.extract_layer_embeddings(
                 model, device, train_fold_loader, indices_per_class, split_by_class=True
             )
-            print("Creating adversarial samples from the test fold.")
-            # Recreating the test fold loader with `custom = True` in order to get the sample indices
-            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, custom=True)
+            if max_num_adver > 0:
+                max_num_adver_fold = min(max_num_adver, n_test)
+            else:
+                max_num_adver_fold = n_test
+
+            print("Creating adversarial samples from the test fold. Maximum number of adversarial samples: {:d}".
+                  format(max_num_adver_fold))
+            # Recreating the test fold loader with `custom = True` in order to get the sample indices.
+            test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size,
+                                                 custom=True, shuffle=True)
             data_adver = []
             labels_adver = []
             data_clean = []
@@ -337,8 +352,9 @@ def main():
             is_correct = []
             is_adver = []
             n_batches = len(test_fold_loader)
-            for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader):
-                print("Batch {:d}/{:d}".format(batch_idx + 1, n_batches))
+            n_adver_curr = 0
+            for batch_idx, (data_temp, labels_temp, index_temp) in enumerate(test_fold_loader, start=1):
+                print("Batch {:d}/{:d}".format(batch_idx, n_batches))
                 index_temp = index_temp.cpu().numpy()
                 # data_batch_excl = np.delete(data_te, index_temp, axis=0)
                 # labels_batch_excl = np.delete(labels_te, index_temp, axis=0)
@@ -360,10 +376,16 @@ def main():
                 norm_perturb.append(norm_perturb_batch)
                 is_correct.append(is_correct_batch)
                 is_adver.append(is_adver_batch)
-                if args.save_batches:
+                if not args.skip_save_batches:
                     # combine data from the batches so far and save them to numpy files
                     _ = combine_and_save(adv_save_path, data_adver, labels_adver, data_clean, labels_clean,
                                          norm_perturb, is_correct, is_adver, labels_te)
+                    print("Saved data up to batch {:d}".format(batch_idx))
+
+                n_adver_curr += is_adver_batch[is_adver_batch].shape[0]
+                if n_adver_curr >= max_num_adver_fold:
+                    print("Found {:d} adversarial samples from {:d} data batches".format(n_adver_curr, batch_idx))
+                    break
 
             # combine data from the batches and save them to numpy files
             data_adver, labels_adver, data_clean, labels_clean, norm_perturb, is_correct, is_adver = \

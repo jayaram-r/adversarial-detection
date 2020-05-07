@@ -39,17 +39,18 @@ class MyDataset(Dataset):
         return len(self.dataset)
 
 
-def convert_to_loader(x, y, dtype_x=None, dtype_y=None, device=None, batch_size=BATCH_SIZE_DEF, custom=False):
+def convert_to_loader(x, y, dtype_x=None, dtype_y=None, device=None, batch_size=BATCH_SIZE_DEF, shuffle=False,
+                      custom=False):
+    # Setting `custom = True` gives a data loader that also returns the index of samples in the batch
     # transform to torch tensors
     x_ten = torch.tensor(x, dtype=dtype_x, device=device)
     y_ten = torch.tensor(y, dtype=dtype_y, device=device)
     # create the dataset and data loader
     dataset = TensorDataset(x_ten, y_ten)
-    
     if custom:
         dataset = MyDataset(dataset)
     
-    return DataLoader(dataset, batch_size=batch_size)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=shuffle)
 
 
 def combine_and_vectorize(data_batches):
