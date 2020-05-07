@@ -616,9 +616,10 @@ def main():
         pickle.dump(tmp, fp)
 
     # Save the detection models from the cross-validation folds to a pickle file
-    fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
-    with open(fname, 'wb') as fp:
-        pickle.dump(models_folds, fp)
+    # Commenting out because model files tend to be large and use up disk space
+    # fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
+    # with open(fname, 'wb') as fp:
+    #    pickle.dump(models_folds, fp)
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
