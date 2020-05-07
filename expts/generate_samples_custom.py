@@ -387,6 +387,7 @@ def main():
                     print("Found {:d} adversarial samples from {:d} data batches".format(n_adver_curr, batch_idx))
                     break
 
+            del test_fold_loader
             # combine data from the batches and save them to numpy files
             data_adver, labels_adver, data_clean, labels_clean, norm_perturb, is_correct, is_adver = \
                 combine_and_save(adv_save_path, data_adver, labels_adver, data_clean, labels_clean, norm_perturb,
