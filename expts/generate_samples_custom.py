@@ -41,22 +41,50 @@ from helpers.utils import (
 from helpers import knn_attack
 from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
 
+# Declaring global model objects to avoid copies in memory
+models_detec_propo = None
+models_detec_dknn = None
 
-def helper_accuracy(layer_embeddings, labels_pred_dnn, labels, model_detec_propo, model_detec_dknn):
+
+def helper_accuracy(layer_embeddings, labels_pred_dnn, labels, ind_fold):
+    global models_detec_propo, models_detec_dknn
+
     # Accuracy of the DNN classifier
     n_test = labels.shape[0]
     mask = labels_pred_dnn == labels
     accu_dnn = (100. * mask[mask].shape[0]) / n_test
     # Accuracy of the proposed method
-    is_error, _ = knn_attack.check_adv_detec(layer_embeddings, labels, labels_pred_dnn, model_detec_propo,
+    is_error, _ = knn_attack.check_adv_detec(layer_embeddings, labels, labels_pred_dnn, models_detec_propo[ind_fold],
                                              is_numpy=True)
     accu_propo = (100. * (n_test - is_error[is_error].shape[0])) / n_test
     # Accuracy of deep KNN
-    is_error, _ = knn_attack.check_adv_detec(layer_embeddings, labels, labels_pred_dnn, model_detec_dknn,
+    is_error, _ = knn_attack.check_adv_detec(layer_embeddings, labels, labels_pred_dnn, models_detec_dknn[ind_fold],
                                              is_numpy=True)
     accu_dknn = (100. * (n_test - is_error[is_error].shape[0])) / n_test
 
     return accu_dnn, accu_propo, accu_dknn
+
+
+def combine_and_save(save_path, data_adver, labels_adver, data_clean, labels_clean, norm_perturb, is_correct,
+                     is_adver, labels_te):
+    # Concatenate list of arrays into a single array
+    data_adver = np.concatenate(data_adver, axis=0)
+    labels_adver = np.asarray(np.concatenate(labels_adver), dtype=labels_te.dtype)
+    data_clean = np.concatenate(data_clean, axis=0)
+    labels_clean = np.asarray(np.concatenate(labels_clean), dtype=labels_te.dtype)
+    norm_perturb = np.concatenate(norm_perturb)
+    is_correct = np.concatenate(is_correct)
+    is_adver = np.concatenate(is_adver)
+    # save data to numpy files
+    np.save(os.path.join(save_path, 'data_te_adv.npy'), data_adver)
+    np.save(os.path.join(save_path, 'labels_te_adv.npy'), labels_adver)
+    np.save(os.path.join(save_path, 'data_te_clean.npy'), data_clean)
+    np.save(os.path.join(save_path, 'labels_te_clean.npy'), labels_clean)
+    np.save(os.path.join(save_path, 'norm_perturb.npy'), norm_perturb)
+    # np.save(os.path.join(save_path, 'is_correct_detec.npy'), is_correct)
+    np.save(os.path.join(save_path, 'is_adver.npy'), is_adver)
+
+    return data_adver, labels_adver, data_clean, labels_clean, norm_perturb, is_correct, is_adver
 
 
 def main():
@@ -84,6 +112,9 @@ def main():
                         help='Use this option to skip random sub-sampling of the train data split')
     parser.add_argument('--untargeted', action='store_true', default=False,
                         help='Use this option to create untargeted adversarial samples from this attack')
+    parser.add_argument('--save-batches', action='store_true', default=False,
+                        help='Use this option to save intermediate data batches to numpy files. Cautious approach '
+                             'at the expense of some added time to combine and save the data.')
     '''
     parser.add_argument('--stepsize', type=float, default=0.001, help='stepsize')
     parser.add_argument('--max-iterations', type=int, default=1000, help='max num. of iterations')
@@ -179,6 +210,7 @@ def main():
     else:
         models_detec = [None] * args.num_folds
 
+    global models_detec_propo, models_detec_dknn
     # Detection models for the dknn method. Used for comparison
     fname = os.path.join(ROOT, 'outputs', args.model_type, 'detection', CUSTOM_ATTACK, 'models_dknn.pkl')
     with open(fname, 'rb') as fp:
@@ -263,8 +295,7 @@ def main():
             )
             # Calculate accuracy of the DNN and the detection methods on clean data
             accu_clean_dnn, accu_clean_propo, accu_clean_dknn = helper_accuracy(
-                layer_embeddings_test, labels_pred_dnn_test, labels_te, models_detec_propo[i - 1],
-                models_detec_dknn[i - 1]
+                layer_embeddings_test, labels_pred_dnn_test, labels_te, i - 1
             )
             print("Accuracy on clean data:\nDNN classifier: {:.4f}, proposed: {:.4f}, dknn: {:.4f}".
                   format(accu_clean_dnn, accu_clean_propo, accu_clean_dknn))
@@ -329,22 +360,24 @@ def main():
                 norm_perturb.append(norm_perturb_batch)
                 is_correct.append(is_correct_batch)
                 is_adver.append(is_adver_batch)
+                if args.save_batches:
+                    # combine data from the batches so far and save them to numpy files
+                    _ = combine_and_save(adv_save_path, data_adver, labels_adver, data_clean, labels_clean,
+                                         norm_perturb, is_correct, is_adver, labels_te)
 
-            data_adver = np.concatenate(data_adver, axis=0)
-            labels_adver = np.asarray(np.concatenate(labels_adver), dtype=labels_te.dtype)
-            data_clean = np.concatenate(data_clean, axis=0)
-            labels_clean = np.asarray(np.concatenate(labels_clean), dtype=labels_te.dtype)
-            norm_perturb = np.concatenate(norm_perturb)
-            is_correct = np.concatenate(is_correct)
-            is_adver = np.concatenate(is_adver)
+            # combine data from the batches and save them to numpy files
+            data_adver, labels_adver, data_clean, labels_clean, norm_perturb, is_correct, is_adver = \
+                combine_and_save(adv_save_path, data_adver, labels_adver, data_clean, labels_clean, norm_perturb,
+                                 is_correct, is_adver, labels_te)
 
             # Calculate accuracy of the DNN and the detection methods on adversarial inputs
             data_loader = convert_to_loader(data_adver, labels_clean, batch_size=args.batch_size)
             layer_embeddings, _, labels_pred_dnn, _ = extract_layer_embeddings_numpy(
                 model, device, data_loader, method='proposed'
             )
+            del data_loader
             accu_dnn, accu_propo, accu_dknn = helper_accuracy(
-                layer_embeddings, labels_pred_dnn, labels_clean, models_detec_propo[i - 1], models_detec_dknn[i - 1]
+                layer_embeddings, labels_pred_dnn, labels_clean, i - 1
             )
             n_adver = is_adver[is_adver].shape[0]
             print("\nTest fold {:d}: #samples = {:d}, #adversarial samples = {:d}, avg. perturbation norm = {:.6f}".
@@ -354,17 +387,8 @@ def main():
             print("{}\t{:.4f}\t{:.4f}".format('DNN', accu_clean_dnn, accu_dnn))
             print("{}\t{:.4f}\t{:.4f}".format('proposed', accu_clean_propo, accu_propo))
             print("{}\t{:.4f}\t{:.4f}".format('dknn', accu_clean_dknn, accu_dknn))
-
             t_del = (time.time() - t_init) / 3600.
             print("\nTime taken for fold {:d}: {:.2f} hours".format(i, t_del))
-            # save data to numpy files
-            np.save(os.path.join(adv_save_path, 'data_te_adv.npy'), data_adver)
-            np.save(os.path.join(adv_save_path, 'labels_te_adv.npy'), labels_adver)
-            np.save(os.path.join(adv_save_path, 'data_te_clean.npy'), data_clean)
-            np.save(os.path.join(adv_save_path, 'labels_te_clean.npy'), labels_clean)
-            np.save(os.path.join(adv_save_path, 'norm_perturb.npy'), norm_perturb)
-            # np.save(os.path.join(adv_save_path, 'is_correct_detec.npy'), is_correct)
-            np.save(os.path.join(adv_save_path, 'is_adver.npy'), is_adver)
         else:
             print("generated original data split for fold : ", i)
 
