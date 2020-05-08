@@ -648,8 +648,8 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
         if 'y_up' in d:
             y_vals.extend(d['y_up'])
 
-    x_bounds = get_data_bounds(x_vals, alpha=0.99)
-    y_bounds = get_data_bounds(y_vals, alpha=0.99)
+    x_bounds = get_data_bounds(np.array(x_vals), alpha=0.99)
+    y_bounds = get_data_bounds(np.array(y_vals), alpha=0.99)
     if min_yrange:
         # Ensure that the range of y-axis is not smaller than `min_yrange`
         v = min(y_bounds[1] - min_yrange, y_bounds[0])
