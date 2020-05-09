@@ -315,10 +315,10 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
         d_sub = [os.path.join(d, f) for f in os.listdir(d) if os.path.isdir(os.path.join(d, f))]
         if not d_sub:
             raise ValueError("Directory '{}' does not have any sub-directories.".format(d))
-    else:
-        d_sub = [d]
 
-    return sorted(d_sub)
+        return sorted(d_sub)
+    else:
+        return [d]
 
 
 def calculate_accuracy(model, device, data_loader=None, data=None, labels=None, batch_size=BATCH_SIZE_DEF):

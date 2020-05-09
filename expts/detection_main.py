@@ -143,10 +143,12 @@ def load_checkpoint(output_dir, method_name, save_detec_model):
 
     return scores_folds, labels_folds, models_folds, n_folds
 
-def load_adversarial_samples(i, model_type, adv_attack, max_attack_prop):
-    if adv_attack != 'Custom':
+
+def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
+    # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
+    if adv_attack != CUSTOM_ATTACK:
         # Load the saved adversarial numpy data generated from this training and test fold
-        # numpy_save_path = get_adversarial_data_path(args.model_type, i + 1, args.adv_attack, attack_params_list)
+        # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
         # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
@@ -157,24 +159,33 @@ def load_adversarial_samples(i, model_type, adv_attack, max_attack_prop):
             max_n_test=max_num_adv,
             sampling_type='ranked_by_norm',
             norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
-            )
+        )
     else:
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, False)[0]
+        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
+        # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
-        
+
         # Adversarial inputs from the train and test fold
         data_te = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
-
         # Predicted (mis-classified) labels
-        labels_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
+        labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
+        # Labels of the original inputs from which the adversarial inputs were created
+        labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
 
+        # Mask indicating which samples are adversarial
         mask = np.load(os.path.join(numpy_save_path, "is_adver.npy"))
-        data_te_adv = data_te[mask]
+        data_te_adv = data_te[mask, :]
         labels_te_adv = labels_te[mask]
+        # Check if the original and predicted labels are all different for the adversarial inputs
+        check_label_mismatch(labels_te_adv, labels_pred_te[mask])
+
+        # We don't generate adversarial samples from the train fold for the custom attack. Returning the test
+        # fold data as placeholder arrays for the train fold
         data_tr_adv = data_te_adv
         labels_tr_adv = labels_te_adv
     
     return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
+
 
 def main():
     # Training settings
@@ -236,7 +247,7 @@ def main():
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
-    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW', 'Custom'], default='Custom',
+    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW', CUSTOM_ATTACK], default='PGD',
                         help='type of adversarial attack')
     # parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
     #                     help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
@@ -487,8 +498,10 @@ def main():
         noisy_train_fold_loader = None
         noisy_test_fold_loader = None
 
-        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_samples(i, args.model_type, args.adv_attack, args.max_attack_prop)
-        
+        # Load the saved adversarial numpy data generated from this training and test fold
+        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
+            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
+        )
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
         print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
