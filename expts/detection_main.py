@@ -170,7 +170,7 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # Predicted (mis-classified) labels
         labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
         # Labels of the original inputs from which the adversarial inputs were created
-        labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
+        labels_te = np.load(os.path.join(numpy_save_path, "labels_te_clean.npy"))
 
         # Mask indicating which samples are adversarial
         mask = np.load(os.path.join(numpy_save_path, "is_adver.npy"))
