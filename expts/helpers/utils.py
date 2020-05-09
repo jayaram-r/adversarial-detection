@@ -303,19 +303,22 @@ def get_output_path(model_type):
     return os.path.join(ROOT, 'outputs', model_type)
 
 
-def list_all_adversarial_subdirs(model_type, fold, attack_type):
+def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirectories=True):
     # List all sub-directories corresponding to an adversarial attack
     d = os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type)
     # Temporary hack to use backup data directory
     d = d.replace('varun', 'jayaram', 1)
     if not os.path.isdir(d):
         raise ValueError("Directory '{}' does not exist.".format(d))
+    
+    if check_subdirectories:
+        d_sub = [os.path.join(d, f) for f in os.listdir(d) if os.path.isdir(os.path.join(d, f))]
+        if not d_sub:
+            raise ValueError("Directory '{}' does not have any sub-directories.".format(d))
 
-    d_sub = [os.path.join(d, f) for f in os.listdir(d) if os.path.isdir(os.path.join(d, f))]
-    if not d_sub:
-        raise ValueError("Directory '{}' does not have any sub-directories.".format(d))
-
-    return sorted(d_sub)
+        return sorted(d_sub)
+    else:
+        return [d]
 
 
 def calculate_accuracy(model, device, data_loader=None, data=None, labels=None, batch_size=BATCH_SIZE_DEF):
