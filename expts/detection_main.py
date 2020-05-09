@@ -174,7 +174,7 @@ def load_adversarial_samples(i, model_type, adv_attack, max_attack_prop):
         data_tr_adv = data_te_adv
         labels_tr_adv = labels_te_adv
     
-    return data_tr_adv, labels_tr_Adv, data_te_adv, labels_te_adv
+    return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
 
 def main():
     # Training settings
