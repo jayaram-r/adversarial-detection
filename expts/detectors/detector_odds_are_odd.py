@@ -33,7 +33,7 @@ def return_data(model, test_loader):
     return X, Y, pgd_train
 
 
-def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
+def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes, with_attack=True):
         # to do: pending verification
         ##params from torch_example.py
         batch_size=32
@@ -62,12 +62,18 @@ def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
  
         w_cls = get_wcls(model, model_type)
 
+        X, Y = train_inputs[0], train_inputs[1]
+        pgd_train, _ = train_adv_inputs[0], train_adv_inputs[1]
+        
+        
+        '''
         if type(loader) != tuple: #if loader is actually a torch data loader
             X, Y, pgd_train = return_data(model, loader)
         else:
             X, Y = loader[0], loader[1]
             pgd_train = None
-
+        '''
+        
         loss_fn = th.nn.CrossEntropyLoss(reduce=False)
         loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
         
@@ -111,8 +117,10 @@ def fit_odds_are_odd(loader, model, model_type, num_classes, with_attack=True):
             clip_min=clip_min, 
             clip_max=clip_max,
             p_ratio_cutoff=maxp_cutoff,
-            save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
-            load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(model_type)) if load_alignments else None,
+            #save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
+            save_alignments=None,
+            #load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(model_type)) if load_alignments else None,
+            load_alignments_dir=None,
             clip_alignments=clip_alignments, 
             pgd_train=pgd_train, 
             fit_classifier=fit_classifier,
@@ -134,7 +142,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
 
         #pgd parameters
         load_pgd_test_samples=None
-
+    
 
         mean_eps=.1
 
@@ -199,7 +207,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         #pending modification + verification
         #for eval_batch in tqdm.tqdm(itt.islice(test_loader, eval_batches)):
         for eval_batch in enumerate(zip(test_loader, adv_loader)):
-            print(eval_batch)
+            print(type(eval_batch))
             x, y = eval_batch[0]
             x_pgd, y_pgd = eval_batch[1]
             if cuda:
