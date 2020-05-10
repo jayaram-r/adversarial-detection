@@ -33,7 +33,7 @@ def return_data(model, test_loader):
     return X, Y, pgd_train
 
 
-def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes, with_attack=True):
+def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes):
         # to do: pending verification
         ##params from torch_example.py
         batch_size=32
@@ -118,7 +118,7 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
             clip_max=clip_max,
             p_ratio_cutoff=maxp_cutoff,
             #save_alignments_dir=ROOT+'/logs/stats' if save_alignments else None,
-            save_alignments=None,
+            save_alignments_dir=None,
             #load_alignments_dir=os.path.expanduser(ROOT+'/data/advhyp/{}/stats'.format(model_type)) if load_alignments else None,
             load_alignments_dir=None,
             clip_alignments=clip_alignments, 
@@ -129,7 +129,7 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         return predictor
 
 
-def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
+def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, with_attack=True):
         eval_batches=None
         cuda=True
         optim='sgd'
@@ -187,6 +187,14 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         #all_eval_important_single_pixels = []
         #all_eval_losses_per_pixel = []
 
+
+        loss_fn = th.nn.CrossEntropyLoss(reduce=False)
+        loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
+
+        if cuda:
+            loss_fn.cuda()
+            loss_fn_adv.cuda()
+
         def net_forward(x, layer_by_layer=False):
             if layer_by_layer:
                 return model.layer_wise_odds_are_odd(x)
@@ -206,10 +214,10 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
         
         #pending modification + verification
         #for eval_batch in tqdm.tqdm(itt.islice(test_loader, eval_batches)):
-        for eval_batch in enumerate(zip(test_loader, adv_loader)):
-            print(type(eval_batch))
-            x, y = eval_batch[0]
-            x_pgd, y_pgd = eval_batch[1]
+        
+        for batch_idx, (test_batch, adv_batch) in enumerate(zip(test_loader, adv_loader)):
+            x, y = test_batch[0], test_batch[1]
+            x_pgd, y_pgd = adv_batch[0], adv_batch[1]
             if cuda:
                 x, y = x.cuda(), y.cuda()
                 x_pgd, y_pgd = x.cuda(), y.cuda()
@@ -227,8 +235,8 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                     x_rand = x + th.sign(th.empty_like(x).uniform_(-eps_rand, eps_rand)) * eps_rand
                 else:
                     x_rand = x + th.empty_like(x).uniform_(-eps_rand, eps_rand)
+                
                 loss_rand, preds_rand = get_loss_and_preds(x_rand, y)
-
                 eval_loss_rand.append((loss_rand.data).cpu().numpy()) #loss on random samples
                 eval_acc_rand.append((th.eq(preds_rand, y).float()).cpu().numpy()) #accuracy on random samples
                 eval_preds_rand.extend(preds_rand) #predictions on random samples
@@ -256,7 +264,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model):
                 eval_acc_pgd.append((th.eq(preds_pgd, y).float()).cpu().numpy()) #accuracy of predictions on pgd samples vs. clean labels
                 
                 #from sklearn
-                conf_pgd = confusion_matrix(preds_clean.cpu(), preds_pgd.cpu(), np.arange(nb_classes))
+                conf_pgd = confusion_matrix(preds_clean.cpu(), preds_pgd.cpu(), np.arange(num_classes))
                 conf_pgd -= np.diag(np.diag(conf_pgd))
                 
                 #append statements

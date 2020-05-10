@@ -25,6 +25,14 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
         debug_dict=None, debug=False, clip_alignments=True, pgd_train=None, fit_classifier=False, just_detect=False):
     assert len(x_train) == len(y_train)
     if pgd_train is not None:
+        #added by varun
+        pgd_train_len = len(pgd_train)
+        x_train_len = len(x_train)
+        if pgd_train_len > x_train_len:
+            pgd_train = pgd_train[:x_train_len]
+        else:
+            x_train = x_train[:pgd_train_len]
+        ####
         assert len(pgd_train) == len(x_train)
 
     if x_ph is not None:
@@ -175,7 +183,8 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
     latent_pgd = []
 
     if not load_alignments_dir:
-        for b in tqdm.trange(n_batches, desc='creating adversarial samples'):
+        #for b in tqdm.trange(n_batches, desc='creating adversarial samples'):
+        for b in range(n_batches): #tqdm.trange(n_batches, desc='creating adversarial samples'):
             x_batch = x_train[b*batch_size:(b+1)*batch_size]
             lc, pc = get_latent_and_pred(x_batch)
             x_preds_clean.append(pc)
@@ -335,7 +344,8 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                     wdiff_stats[k] = _compute_stats_from_values(v)
                 logging.info('loading alignments from {} for {}'.format(load_alignments_dir, neps))
             if not loading:
-                for x, lc, pc, pcc in tqdm.tqdm(zip(x_set, latent_set, x_preds_set, x_preds_clean), total=len(x_set), desc='collecting stats for {}'.format(neps)):
+                #for x, lc, pc, pcc in tqdm.tqdm(zip(x_set, latent_set, x_preds_set, x_preds_clean), total=len(x_set), desc='collecting stats for {}'.format(neps)):
+                for enum_idx, (x, lc, pc, pcc) in enumerate(zip(x_set, latent_set, x_preds_set, x_preds_clean)): #, total=len(x_set), desc='collecting stats for {}'.format(neps)):
                     if len(lc.shape) == 2:
                         alignments = []
                         for i, (xi, lci, pci) in enumerate(zip(x, lc, pc)):
@@ -411,7 +421,8 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
 
         if fit_classifier:
             logging.info('fitting classifier')
-            for tc in tqdm.trange(nb_classes):
+            #for tc in tqdm.trange(nb_classes):
+            for tc in range(nb_classes):
                 tc_X = []
                 tc_Y = []
                 idx_wo_tc = [sc for sc in range(nb_classes) if sc != tc]

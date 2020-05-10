@@ -539,17 +539,21 @@ def main():
             # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
             train_adv_inputs = (data_tr_adv, labels_tr_adv)
+            #'''
             predictor = fit_odds_are_odd(train_inputs, 
                                          train_adv_inputs, 
                                          model, 
                                          args.model_type, 
-                                         num_classes, 
-                                         with_attack=True)
+                                         num_classes)
             next(predictor)
+            #'''
+            #predictor=None
             detections_clean, detections_attack = detect_odds_are_odd(predictor, 
                                                                       test_fold_loader,
                                                                       adv_test_fold_loader, 
-                                                                      model)
+                                                                      model,
+                                                                      num_classes,
+                                                                      with_attack=True)
             scores_adv = np.concatenate([detections_clean, detections_attack])
             # Unlike the other methods, these are not continuous valued scores
 
