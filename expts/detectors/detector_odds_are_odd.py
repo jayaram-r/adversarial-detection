@@ -33,7 +33,7 @@ def return_data(model, test_loader):
     return X, Y, pgd_train
 
 
-def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes):
+def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes, min_clip, max_clip):
         # to do: pending verification
         ##params from torch_example.py
         batch_size=32
@@ -54,9 +54,8 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         load_alignments=False
         fit_classifier=False    # setting to False because we don't need the corrected predictions
         just_detect=True    # we only need the adversarial detections and not the corrected predictions
-        # TODO: get the range of the data as input and set `clip_min` and `clip_max`
-        clip_min=0.
-        clip_max=1.
+        clip_min=min_clip
+        clip_max=max_clip
         
         #initializations
         cuda = cuda and th.cuda.is_available()
@@ -219,14 +218,17 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 x, y = x.cuda(), y.cuda()
                 x_pgd, y_pgd = x.cuda(), y.cuda()
 
+            '''
             loss_clean, preds_clean = get_loss_and_preds(x, y)
 
             #append statements
             eval_loss_clean.append(loss_clean.data.cpu().numpy()) #loss on clean samples
             eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy()) #accuracy on clean samples
             eval_preds_clean.extend(preds_clean) #predictions on clean samples
+            '''
 
             if with_attack: #set to True
+                '''
                 #create random samples
                 if clamp_uniform: #set to False
                     x_rand = x + th.sign(th.empty_like(x).uniform_(-eps_rand, eps_rand)) * eps_rand
@@ -239,7 +241,6 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 eval_preds_rand.extend(preds_rand) #predictions on random samples
 
                 #attack samples generated outside
-                '''
                 if attack == 'PGD':
                     if not load_pgd_test_samples: #load_pgd_test_samples set to False
                         x_pgd = attack_pgd(x, preds_clean, eps=eps_eval) #change function
@@ -249,7 +250,6 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                     x_pgd = attack_cw(x, preds_clean)
                 elif attack == 'mean':
                     x_pgd = attack_mean(x, preds_clean, eps=eps_eval)
-                '''
 
                 eval_x_pgd_l0.append(th.max(th.abs((x - x_pgd).view(x.size(0), -1)), -1)[0].detach().cpu().numpy()) #max l0 difference between clean sample and pgd sample
                 eval_x_pgd_l2.append(th.norm((x - x_pgd).view(x.size(0), -1), p=2, dim=-1).detach().cpu().numpy()) #l2 difference between clean sample and pgd sample
@@ -279,17 +279,18 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 eval_loss_pand.append(loss_pand.data.cpu().numpy())
                 eval_acc_pand.append((th.eq(preds_pand, y).float()).cpu().numpy())
                 eval_preds_pand.extend(preds_pand)
-
+                '''
+                
                 #using the predictor
                 preds_clean_after_corr, det_clean = predictor.send(x.cpu().numpy()).T
                 preds_pgd_after_corr, det_pgd = predictor.send(x_pgd.cpu().numpy()).T
 
                 #append statements
-                acc_clean_after_corr.append(preds_clean_after_corr == y.cpu().numpy())
-                acc_pgd_after_corr.append(preds_pgd_after_corr == y.cpu().numpy())
+                #acc_clean_after_corr.append(preds_clean_after_corr == y.cpu().numpy())
+                #acc_pgd_after_corr.append(preds_pgd_after_corr == y.cpu().numpy())
                 eval_det_clean.append(det_clean)
                 eval_det_pgd.append(det_pgd)
-
+        
         # `eval_det_clean` and `eval_det_pgd` should be a list of integer arrays with 1 for adversarial and 0 for not
         eval_det_clean = np.concatenate(eval_det_clean, axis=0)
         eval_det_pgd = np.concatenate(eval_det_pgd, axis=0)

@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 logging.set_verbosity(logging.INFO)
 
+SMALL = 1e-10
 
 def collect_statistics(
         x_train, y_train, x_ph=None, sess=None, latent_and_logits_fn_th=None, latent_x_tensor=None,
@@ -471,12 +472,14 @@ def collect_statistics(
 
             wdsc_det_pb = wdiff_stats_clean_detect[pb]
             if wdsc_det_pb is None:
-                z_hit = False
+                #z_hit = False
+                z_hit = SMALL
             else:
                 wdm_det, wds_det = wdsc_det_pb
                 z_clean = (b_align_det - wdm_det[:, None]) / wds_det[:, None]
                 z_clean_mean = z_clean.mean(1)
-                z_hit = z_clean_mean.mean(0).max(-1) > z_cutoff
+                #z_hit = z_clean_mean.mean(0).max(-1) > z_cutoff
+                z_hit = z_clean_mean.mean(0).max(-1)
                 # TODO: return `z_clean_mean.mean(0).max(-1)` as a score instead of thresholded decision
 
             if not just_detect:
@@ -503,7 +506,7 @@ def collect_statistics(
                             z_pgd_mean = z_pgd.mean(1)
                             z_pgd_mode = scipy.stats.mode(z_pgd_mean.argmax(-1)).mode[0]
 
-            if z_hit:
+            if z_hit > SMALL:
                 if not just_detect:
                     if fit_classifier:
                         print(lr_pred)
@@ -512,10 +515,13 @@ def collect_statistics(
                         if z_pgd_mode is not None:
                             pb = idx_wo_pb_wdp[z_pgd_mode]
 
-                detection.append(True)
+                #detection.append(True)
+                detection.append(z_hit)
             else:
-                detection.append(False)
 
+                #detection.append(False)
+                detection.append(z_hit)
+            
             if debug_dict is not None:
                 debug_dict.setdefault('b_align', []).append(b_align)
                 # debug_dict.setdefault('stats', []).append((wdm_det, wds_det, wdmp, wdsp))
@@ -527,7 +533,8 @@ def collect_statistics(
                 # debug_dict.setdefault('z_pgdm', []).append(z_pgdm)
                 # debug_dict.setdefault('z_pgd', []).append(z_pgd)
 
-            corrected_pred.append(pb)
+            #corrected_pred.append(pb)
+            corrected_pred.append(float(pb))
 
         if debug_dict is not None:
             debug_dict.setdefault('detection', []).append(detection)

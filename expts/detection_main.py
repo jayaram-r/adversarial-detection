@@ -20,6 +20,7 @@ from helpers.utils import (
     save_model_checkpoint,
     convert_to_loader,
     load_numpy_data,
+    get_data_bounds,
     load_adversarial_data,
     load_noisy_data,
     get_path_dr_models,
@@ -457,6 +458,9 @@ def main():
         # Data loader for the test fold
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
+        # Get the range of values in the data array
+        bounds = get_data_bounds(data_tr)
+
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
         layer_embeddings_tr, labels_pred_tr = helper_layer_embeddings(
             model, device, train_fold_loader, args.detection_method, labels_tr
@@ -539,15 +543,14 @@ def main():
             # call functions from detectors/detector_odds_are_odd.py
             train_inputs = (data_tr, labels_tr)
             train_adv_inputs = (data_tr_adv, labels_tr_adv)
-            #'''
             predictor = fit_odds_are_odd(train_inputs, 
-                                         train_adv_inputs, 
+                                         None, 
                                          model, 
                                          args.model_type, 
-                                         num_classes)
+                                         num_classes,
+                                         bounds[0],
+                                         bounds[1])
             next(predictor)
-            #'''
-            #predictor=None
             detections_clean, detections_attack = detect_odds_are_odd(predictor, 
                                                                       test_fold_loader,
                                                                       adv_test_fold_loader, 
