@@ -535,5 +535,6 @@ def collect_statistics(
 
         # `detection` will be a list of booleans.
         # `corrected_pred` will be a list of corrected predictions for the detected adversarial samples.
-        # If `just_detect = True`, the predictions will correspond to that of the original classifier
+        # If `just_detect = True`, the predictions will correspond to that of the original classifier.
+        # NOTE: need to convert `corrected_pred` and the detection score into a float array here
         batch = yield np.stack((corrected_pred, detection), -1)

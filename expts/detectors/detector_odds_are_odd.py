@@ -290,9 +290,8 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 eval_det_clean.append(det_clean)
                 eval_det_pgd.append(det_pgd)
 
-        # `eval_det_clean` and `eval_det_pgd` should be a list of boolean arrays.
-        # concatenating and converting True/False to 1/0
-        eval_det_clean = np.concatenate(eval_det_clean, axis=0).astype(np.int)
-        eval_det_pgd = np.concatenate(eval_det_pgd, axis=0).astype(np.int)
+        # `eval_det_clean` and `eval_det_pgd` should be a list of integer arrays with 1 for adversarial and 0 for not
+        eval_det_clean = np.concatenate(eval_det_clean, axis=0)
+        eval_det_pgd = np.concatenate(eval_det_pgd, axis=0)
 
         return eval_det_clean, eval_det_pgd
