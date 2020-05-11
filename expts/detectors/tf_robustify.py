@@ -4,6 +4,7 @@ Source for this code: https://github.com/yk/icml19_public/tree/master/tf_robusti
 """
 
 import os
+import sys
 import numpy as np
 import tqdm
 import math
@@ -17,7 +18,9 @@ from types import SimpleNamespace
 
 logging.set_verbosity(logging.INFO)
 
-SMALL = 1e-10
+# very small negative values
+MIN_SCORE = -sys.float_info.max
+
 
 def collect_statistics(
         x_train, y_train, x_ph=None, sess=None, latent_and_logits_fn_th=None, latent_x_tensor=None,
@@ -25,19 +28,10 @@ def collect_statistics(
         noise_eps_detect=None, num_noise_samples=256, batch_size=256, pgd_eps=8/255, pgd_lr=1/4, pgd_iters=10, 
         clip_min=-1., clip_max=1., p_ratio_cutoff=0.999, save_alignments_dir=None, load_alignments_dir=None,
         debug_dict=None, debug=False, clip_alignments=True, pgd_train=None,
-        fit_classifier=False, just_detect=False, return_detec_score=True):
+        fit_classifier=False, just_detect=False):
 
     assert len(x_train) == len(y_train)
     if pgd_train is not None:
-        # TODO: block below is not needed if `just_detect = True`
-        #added by varun
-        pgd_train_len = len(pgd_train)
-        x_train_len = len(x_train)
-        if pgd_train_len > x_train_len:
-            pgd_train = pgd_train[:x_train_len]
-        elif x_train_len > pgd_train_len:
-            x_train = x_train[:pgd_train_len]
-        ####
         assert len(pgd_train) == len(x_train)
 
     if x_ph is not None:
@@ -472,15 +466,14 @@ def collect_statistics(
 
             wdsc_det_pb = wdiff_stats_clean_detect[pb]
             if wdsc_det_pb is None:
-                #z_hit = False
-                z_hit = SMALL
+                # z_hit = False
+                z_hit = MIN_SCORE
             else:
                 wdm_det, wds_det = wdsc_det_pb
                 z_clean = (b_align_det - wdm_det[:, None]) / wds_det[:, None]
                 z_clean_mean = z_clean.mean(1)
-                #z_hit = z_clean_mean.mean(0).max(-1) > z_cutoff
+                # z_hit = z_clean_mean.mean(0).max(-1) > z_cutoff
                 z_hit = z_clean_mean.mean(0).max(-1)
-                # TODO: return `z_clean_mean.mean(0).max(-1)` as a score instead of thresholded decision
 
             if not just_detect:
                 if fit_classifier:
@@ -506,7 +499,8 @@ def collect_statistics(
                             z_pgd_mean = z_pgd.mean(1)
                             z_pgd_mode = scipy.stats.mode(z_pgd_mean.argmax(-1)).mode[0]
 
-            if z_hit > SMALL:
+            if z_hit > z_cutoff:
+                # Corrected prediction if the sample scores above a threshold
                 if not just_detect:
                     if fit_classifier:
                         print(lr_pred)
@@ -515,11 +509,10 @@ def collect_statistics(
                         if z_pgd_mode is not None:
                             pb = idx_wo_pb_wdp[z_pgd_mode]
 
-                #detection.append(True)
+                # detection.append(True)
                 detection.append(z_hit)
             else:
-
-                #detection.append(False)
+                # detection.append(False)
                 detection.append(z_hit)
             
             if debug_dict is not None:
@@ -533,15 +526,14 @@ def collect_statistics(
                 # debug_dict.setdefault('z_pgdm', []).append(z_pgdm)
                 # debug_dict.setdefault('z_pgd', []).append(z_pgd)
 
-            #corrected_pred.append(pb)
+            # corrected_pred.append(pb)
             corrected_pred.append(float(pb))
 
         if debug_dict is not None:
             debug_dict.setdefault('detection', []).append(detection)
             debug_dict.setdefault('corrected_pred', []).append(corrected_pred)
 
-        # `detection` will be a list of booleans.
-        # `corrected_pred` will be a list of corrected predictions for the detected adversarial samples.
+        # `detection` will be a list of float values.
+        # `corrected_pred` will be a list of corrected predictions for the detected adversarial samples (cast to float)
         # If `just_detect = True`, the predictions will correspond to that of the original classifier.
-        # NOTE: need to convert `corrected_pred` and the detection score into a float array here
         batch = yield np.stack((corrected_pred, detection), -1)

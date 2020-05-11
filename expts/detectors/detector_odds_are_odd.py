@@ -33,7 +33,7 @@ def return_data(model, test_loader):
     return X, Y, pgd_train
 
 
-def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes, min_clip, max_clip):
+def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_classes, clip_min, clip_max):
         # to do: pending verification
         ##params from torch_example.py
         batch_size=32
@@ -54,8 +54,6 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         load_alignments=False
         fit_classifier=False    # setting to False because we don't need the corrected predictions
         just_detect=True    # we only need the adversarial detections and not the corrected predictions
-        clip_min=min_clip
-        clip_max=max_clip
         
         #initializations
         cuda = cuda and th.cuda.is_available()
@@ -63,7 +61,11 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         w_cls = get_wcls(model, model_type)
 
         X, Y = train_inputs[0], train_inputs[1]
-        pgd_train, _ = train_adv_inputs[0], train_adv_inputs[1]
+        if train_adv_inputs is None:
+            pgd_train = None
+        else:
+            pgd_train = train_adv_inputs[0]
+
         '''
         if type(loader) != tuple: #if loader is actually a torch data loader
             X, Y, pgd_train = return_data(model, loader)
@@ -74,7 +76,6 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         
         loss_fn = th.nn.CrossEntropyLoss(reduce=False)
         loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
-        
         if cuda:
             loss_fn.cuda()
             loss_fn_adv.cuda()
@@ -149,7 +150,8 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         eps_eval = eps_eval or eps
         mean_eps = mean_eps * eps_eval
 
-        #variables required for results; note: all may not be needed
+        #variables required for results; not used
+        '''
         eval_loss_clean = []
         eval_acc_clean = []
         eval_loss_rand = []
@@ -160,7 +162,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         eval_acc_pand = []
         #all_outputs = []
         #diffs_rand, diffs_pgd, diffs_pand = [], [], []
-        eval_preds_clean, eval_preds_rand, eval_preds_pgd, eval_preds_pand = [], [], [], []
+        #eval_preds_clean, eval_preds_rand, eval_preds_pgd, eval_preds_pand = [], [], [], []
         #norms_clean, norms_pgd, norms_rand, norms_pand = [], [], [], []
         #norms_dpgd, norms_drand, norms_dpand = [], [], []
         #eval_important_valid = []
@@ -175,14 +177,15 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
 
         acc_clean_after_corr = []
         acc_pgd_after_corr = []
-        eval_det_clean = []
-        eval_det_pgd = []
         eval_x_pgd_l0 = []
         eval_x_pgd_l2 = []
 
         #all_eval_important_pixels = []
         #all_eval_important_single_pixels = []
         #all_eval_losses_per_pixel = []
+        '''
+        eval_det_clean = []
+        eval_det_pgd = []
 
         loss_fn = th.nn.CrossEntropyLoss(reduce=False)
         loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
@@ -213,7 +216,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         for batch_idx, (test_batch, adv_batch) in enumerate(zip(test_loader, adv_loader)):
             x, y = test_batch[0], test_batch[1]
             x_pgd, y_pgd = adv_batch[0], adv_batch[1]
-            #this could be any adversasrial attack although it is named `x_pgd`
+            #this could be any adversarial attack although it is named `x_pgd`
             if cuda:
                 x, y = x.cuda(), y.cuda()
                 x_pgd, y_pgd = x.cuda(), y.cuda()
@@ -226,7 +229,6 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
             eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy()) #accuracy on clean samples
             eval_preds_clean.extend(preds_clean) #predictions on clean samples
             '''
-
             if with_attack: #set to True
                 '''
                 #create random samples
@@ -291,7 +293,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 eval_det_clean.append(det_clean)
                 eval_det_pgd.append(det_pgd)
         
-        # `eval_det_clean` and `eval_det_pgd` should be a list of integer arrays with 1 for adversarial and 0 for not
+        # `eval_det_clean` and `eval_det_pgd` should be a list of float arrays with the detection scores
         eval_det_clean = np.concatenate(eval_det_clean, axis=0)
         eval_det_pgd = np.concatenate(eval_det_pgd, axis=0)
 
