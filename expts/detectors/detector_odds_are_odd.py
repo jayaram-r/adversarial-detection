@@ -6,7 +6,6 @@ from nets.cifar10 import *
 from nets.mnist import *
 from nets.resnet import *
 import torch as th
-import torchvision
 from detectors.tf_robustify import *
 import itertools as itt
 from sklearn.metrics import confusion_matrix
@@ -26,6 +25,7 @@ def get_wcls(model, model_type):
     return w_cls.detach()
 
 
+# Not used
 def return_data(model, test_loader):
     X, Y = get_samples_as_ndarray(test_loader)
     #pgd_train = foolbox_attack(model, device, test_loader, bounds, p_norm=p_norm, adv_attack='PGD') #verify if all parameters are defined
@@ -48,24 +48,23 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         debug=False
         #mode='eval'
         wdiff_samples=256
-        maxp_cutoff=.999
+        maxp_cutoff=.999    # used to set the threshold for detection using `scipy.stats.norm.ppf(maxp_cutoff)`
         collect_targeted=False
         save_alignments=False
         load_alignments=False
-        fit_classifier=True
-        just_detect=False
+        fit_classifier=False    # setting to False because we don't need the corrected predictions
+        just_detect=True    # we only need the adversarial detections and not the corrected predictions
+        # TODO: get the range of the data as input and set `clip_min` and `clip_max`
         clip_min=0.
         clip_max=1.
         
         #initializations
         cuda = cuda and th.cuda.is_available()
- 
+        #weights connecting the pre-logit (FC) layer to the logit layer
         w_cls = get_wcls(model, model_type)
 
         X, Y = train_inputs[0], train_inputs[1]
         pgd_train, _ = train_adv_inputs[0], train_adv_inputs[1]
-        
-        
         '''
         if type(loader) != tuple: #if loader is actually a torch data loader
             X, Y, pgd_train = return_data(model, loader)
@@ -142,7 +141,6 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
 
         #pgd parameters
         load_pgd_test_samples=None
-    
 
         mean_eps=.1
 
@@ -187,10 +185,8 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         #all_eval_important_single_pixels = []
         #all_eval_losses_per_pixel = []
 
-
         loss_fn = th.nn.CrossEntropyLoss(reduce=False)
         loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
-
         if cuda:
             loss_fn.cuda()
             loss_fn_adv.cuda()
@@ -218,6 +214,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         for batch_idx, (test_batch, adv_batch) in enumerate(zip(test_loader, adv_loader)):
             x, y = test_batch[0], test_batch[1]
             x_pgd, y_pgd = adv_batch[0], adv_batch[1]
+            #this could be any adversasrial attack although it is named `x_pgd`
             if cuda:
                 x, y = x.cuda(), y.cuda()
                 x_pgd, y_pgd = x.cuda(), y.cuda()
@@ -225,7 +222,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
             loss_clean, preds_clean = get_loss_and_preds(x, y)
 
             #append statements
-            eval_loss_clean.append((loss_clean.data).cpu().numpy()) #loss on clean samples
+            eval_loss_clean.append(loss_clean.data.cpu().numpy()) #loss on clean samples
             eval_acc_clean.append((th.eq(preds_clean, y).float()).cpu().numpy()) #accuracy on clean samples
             eval_preds_clean.extend(preds_clean) #predictions on clean samples
 
@@ -237,7 +234,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                     x_rand = x + th.empty_like(x).uniform_(-eps_rand, eps_rand)
                 
                 loss_rand, preds_rand = get_loss_and_preds(x_rand, y)
-                eval_loss_rand.append((loss_rand.data).cpu().numpy()) #loss on random samples
+                eval_loss_rand.append(loss_rand.data.cpu().numpy()) #loss on random samples
                 eval_acc_rand.append((th.eq(preds_rand, y).float()).cpu().numpy()) #accuracy on random samples
                 eval_preds_rand.extend(preds_rand) #predictions on random samples
 
@@ -260,7 +257,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 loss_pgd, preds_pgd = get_loss_and_preds(x_pgd, y) 
 
                 #append statements
-                eval_loss_pgd.append((loss_pgd.data).cpu().numpy()) #loss of pgd samples vs. clean labels
+                eval_loss_pgd.append(loss_pgd.data.cpu().numpy()) #loss of pgd samples vs. clean labels
                 eval_acc_pgd.append((th.eq(preds_pgd, y).float()).cpu().numpy()) #accuracy of predictions on pgd samples vs. clean labels
                 
                 #from sklearn
@@ -279,7 +276,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 x_pand = x_pgd + th.empty_like(x_pgd).uniform_(-eps_rand, eps_rand)
                 loss_pand, preds_pand = get_loss_and_preds(x_pand, y)
 
-                eval_loss_pand.append((loss_pand.data).cpu().numpy())
+                eval_loss_pand.append(loss_pand.data.cpu().numpy())
                 eval_acc_pand.append((th.eq(preds_pand, y).float()).cpu().numpy())
                 eval_preds_pand.extend(preds_pand)
 
@@ -293,8 +290,9 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
                 eval_det_clean.append(det_clean)
                 eval_det_pgd.append(det_pgd)
 
+        # `eval_det_clean` and `eval_det_pgd` should be a list of boolean arrays.
+        # concatenating and converting True/False to 1/0
+        eval_det_clean = np.concatenate(eval_det_clean, axis=0).astype(np.int)
+        eval_det_pgd = np.concatenate(eval_det_pgd, axis=0).astype(np.int)
 
-        eval_det_clean = np.concatenate(eval_det_clean, axis=0)
-        eval_det_pgd = np.concatenate(eval_det_pgd, axis=0)
-        # Are these binary valued arrays?
         return eval_det_clean, eval_det_pgd
