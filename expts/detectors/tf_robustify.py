@@ -18,19 +18,23 @@ from types import SimpleNamespace
 logging.set_verbosity(logging.INFO)
 
 
-def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits_fn_th=None, latent_x_tensor=None, 
+def collect_statistics(
+        x_train, y_train, x_ph=None, sess=None, latent_and_logits_fn_th=None, latent_x_tensor=None,
         logits_tensor=None, nb_classes=None, weights=None, cuda=True, targeted=False, noise_eps=8e-3, 
         noise_eps_detect=None, num_noise_samples=256, batch_size=256, pgd_eps=8/255, pgd_lr=1/4, pgd_iters=10, 
-        clip_min=-1., clip_max=1., p_ratio_cutoff=20., save_alignments_dir=None, load_alignments_dir=None, 
-        debug_dict=None, debug=False, clip_alignments=True, pgd_train=None, fit_classifier=False, just_detect=False):
+        clip_min=-1., clip_max=1., p_ratio_cutoff=0.999, save_alignments_dir=None, load_alignments_dir=None,
+        debug_dict=None, debug=False, clip_alignments=True, pgd_train=None,
+        fit_classifier=False, just_detect=False, return_detec_score=True):
+
     assert len(x_train) == len(y_train)
     if pgd_train is not None:
+        # TODO: block below is not needed if `just_detect = True`
         #added by varun
         pgd_train_len = len(pgd_train)
         x_train_len = len(x_train)
         if pgd_train_len > x_train_len:
             pgd_train = pgd_train[:x_train_len]
-        else:
+        elif x_train_len > pgd_train_len:
             x_train = x_train[:pgd_train_len]
         ####
         assert len(pgd_train) == len(x_train)
@@ -150,6 +154,7 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
             x_noisy = x + noise * eps
             if clip:
                 x_noisy.clamp_(clip_min, clip_max)
+
         return x_noisy
 
     def attack_pgd(x, x_pred, targeted=False):
@@ -307,6 +312,7 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                 # debug_dict.setdefault('lat_noisy', []).append(lat_noisy)
                 # debug_dict['weights'] = weights
                 # debug_dict['wdiffs'] = wdiffs
+
         return alignments, idx_wo_pc
 
     def _collect_wdiff_stats(x_set, latent_set, x_preds_set, clean, save_alignments_dir=None, load_alignments_dir=None):
@@ -382,6 +388,7 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                         wds = wdiff_stats[k]
                         np.save(save_fn, wds)
                     wdiff_stats[k] = _compute_stats_from_values(wdiff_stats[k])
+
         return wdiff_stats
 
     save_alignments_dir_clean = os.path.join(save_alignments_dir, 'clean') if save_alignments_dir else None
@@ -445,12 +452,16 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                     lr.fit(tc_X, tc_Y)
                 wdiff_stats_pgd_classify[tc] = lr
 
-    batch = yield
+    # Percentile-point function of a standard normal density.
+    # For the default value of `p_ratio_cutoff = 0.999`, this will be `3.0902` which is used as the threshold
+    z_cutoff = scipy.stats.norm.ppf(p_ratio_cutoff)
 
+    batch = yield
     while batch is not None:
         batch_latent, batch_pred = get_latent_and_pred(batch)
         if debug_dict is not None:
             debug_dict.setdefault('batch_pred', []).append(batch_pred)
+
         corrected_pred = []
         detection = []
         for b, lb, pb in zip(batch, batch_latent, batch_pred):
@@ -465,8 +476,8 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                 wdm_det, wds_det = wdsc_det_pb
                 z_clean = (b_align_det - wdm_det[:, None]) / wds_det[:, None]
                 z_clean_mean = z_clean.mean(1)
-                z_cutoff = scipy.stats.norm.ppf(p_ratio_cutoff)
                 z_hit = z_clean_mean.mean(0).max(-1) > z_cutoff
+                # TODO: return `z_clean_mean.mean(0).max(-1)` as a score instead of thresholded decision
 
             if not just_detect:
                 if fit_classifier:
@@ -491,6 +502,7 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                             z_pgd = (b_align - wdmp[:, None]) / wdsp[:, None]
                             z_pgd_mean = z_pgd.mean(1)
                             z_pgd_mode = scipy.stats.mode(z_pgd_mean.argmax(-1)).mode[0]
+
             if z_hit:
                 if not just_detect:
                     if fit_classifier:
@@ -499,9 +511,11 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                     else:
                         if z_pgd_mode is not None:
                             pb = idx_wo_pb_wdp[z_pgd_mode]
+
                 detection.append(True)
             else:
                 detection.append(False)
+
             if debug_dict is not None:
                 debug_dict.setdefault('b_align', []).append(b_align)
                 # debug_dict.setdefault('stats', []).append((wdm_det, wds_det, wdmp, wdsp))
@@ -512,8 +526,15 @@ def collect_statistics(x_train, y_train, x_ph=None, sess=None, latent_and_logits
                 # debug_dict.setdefault('z_conf', []).append(z_conf)
                 # debug_dict.setdefault('z_pgdm', []).append(z_pgdm)
                 # debug_dict.setdefault('z_pgd', []).append(z_pgd)
+
             corrected_pred.append(pb)
+
         if debug_dict is not None:
             debug_dict.setdefault('detection', []).append(detection)
             debug_dict.setdefault('corrected_pred', []).append(corrected_pred)
+
+        # `detection` will be a list of booleans.
+        # `corrected_pred` will be a list of corrected predictions for the detected adversarial samples.
+        # If `just_detect = True`, the predictions will correspond to that of the original classifier.
+        # NOTE: need to convert `corrected_pred` and the detection score into a float array here
         batch = yield np.stack((corrected_pred, detection), -1)
