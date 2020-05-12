@@ -553,10 +553,8 @@ def main():
             next(predictor)
             detections_clean, detections_attack = detect_odds_are_odd(predictor, 
                                                                       test_fold_loader,
-                                                                      adv_test_fold_loader, 
-                                                                      model,
-                                                                      num_classes,
-                                                                      with_attack=True)
+                                                                      adv_test_fold_loader,
+                                                                      use_cuda=use_cuda)
             scores_adv = np.concatenate([detections_clean, detections_attack])
 
         elif args.detection_method == 'lid':
