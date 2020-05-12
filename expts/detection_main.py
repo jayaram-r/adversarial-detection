@@ -714,8 +714,10 @@ def main():
 
         # Sanity check
         if scores_adv.shape[0] != labels_detec.shape[0]:
-            raise ValueError("Detection scores and labels do not have the same shape; method = {}, fold = {:d}".
-                             format(args.detection_method, i + 1))
+            raise ValueError(
+                "Detection scores and labels do not have the same length ({:d} != {:d}); method = {}, fold = {:d}".
+                    format(scores_adv.shape[0], labels_detec.shape[0], args.detection_method, i + 1)
+            )
 
         scores_folds.append(scores_adv)
         labels_folds.append(labels_detec)
