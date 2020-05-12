@@ -42,8 +42,10 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
         attack_lr=.25
         eps=8/255
         pgd_iters=10
-        noise_eps='n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
-        noise_eps_detect='n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
+        # noise parameters
+        # prefix 'n' is for Gaussian(0, 1), 'u' is for uniform(-1, 1), 's' is for sign(uniform(-1, 1))
+        noise_eps = 'n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
+        noise_eps_detect = 'n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
         clip_alignments=True
         debug=False
         #mode='eval'
@@ -74,11 +76,12 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
             pgd_train = None
         '''
         
-        loss_fn = th.nn.CrossEntropyLoss(reduce=False)
-        loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
+        loss_fn = th.nn.CrossEntropyLoss(reduction='none')
+        loss_fn_adv = th.nn.CrossEntropyLoss(reduction='none')
         if cuda:
             loss_fn.cuda()
             loss_fn_adv.cuda()
+
 
         def net_forward(x, layer_by_layer=False):
             if layer_by_layer:
@@ -96,7 +99,8 @@ def fit_odds_are_odd(train_inputs, train_adv_inputs, model, model_type, num_clas
             loss = loss_fn(logits, y)
             _, preds = th.max(logits, 1)
             return loss, preds
-        
+
+
         #function below is defined in detectors/tf_robustify.py
         predictor = collect_statistics(
             X, Y, 
@@ -135,17 +139,15 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         eps=8/255
         eps_rand=None
         eps_eval=None
-        noise_eps='n0.01,s0.01,u0.01,n0.02,s0.02,u0.02,s0.03,n0.03,u0.03'
-        noise_eps_detect='n0.003,s0.003,u0.003,n0.005,s0.005,u0.005,s0.008,n0.008,u0.008'
         clamp_uniform=False
 
         #pgd parameters
         load_pgd_test_samples=None
 
-        mean_eps=.1
-
-        #initializations
+        # initializations
         cuda = cuda and th.cuda.is_available()
+
+        mean_eps = .1
         eps_rand = eps_rand or eps
         eps_eval = eps_eval or eps
         mean_eps = mean_eps * eps_eval
@@ -187,8 +189,8 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         eval_det_clean = []
         eval_det_pgd = []
 
-        loss_fn = th.nn.CrossEntropyLoss(reduce=False)
-        loss_fn_adv = th.nn.CrossEntropyLoss(reduce=False)
+        loss_fn = th.nn.CrossEntropyLoss(reduction='none')
+        loss_fn_adv = th.nn.CrossEntropyLoss(reduction='none')
         if cuda:
             loss_fn.cuda()
             loss_fn_adv.cuda()
@@ -213,7 +215,7 @@ def detect_odds_are_odd(predictor, test_loader, adv_loader, model, num_classes, 
         #pending modification + verification
         #for eval_batch in tqdm.tqdm(itt.islice(test_loader, eval_batches)):
         
-        for batch_idx, (test_batch, adv_batch) in enumerate(zip(test_loader, adv_loader)):
+        for test_batch, adv_batch in zip(test_loader, adv_loader):
             x, y = test_batch[0], test_batch[1]
             x_pgd, y_pgd = adv_batch[0], adv_batch[1]
             #this could be any adversarial attack although it is named `x_pgd`

@@ -459,7 +459,7 @@ def main():
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
         # Get the range of values in the data array
-        bounds = get_data_bounds(data_tr)
+        bounds = get_data_bounds(np.concatenate([data_tr, data_te], axis=0))
 
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
         layer_embeddings_tr, labels_pred_tr = helper_layer_embeddings(
@@ -711,6 +711,11 @@ def main():
 
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
+
+        # Sanity check
+        if scores_adv.shape[0] != labels_detec.shape[0]:
+            raise ValueError("Detection scores and labels do not have the same shape; method = {}, fold = {:d}".
+                             format(args.detection_method, i + 1))
 
         scores_folds.append(scores_adv)
         labels_folds.append(labels_detec)

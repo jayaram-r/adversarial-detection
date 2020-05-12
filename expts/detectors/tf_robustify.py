@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 logging.set_verbosity(logging.INFO)
 
-# very small negative values
+# very small negative value
 MIN_SCORE = -sys.float_info.max
 
 
@@ -104,7 +104,7 @@ def collect_statistics(
         pgd_gradients = tf.gradients(loss_tensor, x_ph)[0]
         preds_tensor = tf.arg_max(logits_tensor, -1)
     else:
-        loss_fn = th.nn.CrossEntropyLoss(reduce='sum')
+        loss_fn = th.nn.CrossEntropyLoss(reduction='sum')
         if cuda:
             loss_fn = loss_fn.cuda()
 
@@ -240,8 +240,9 @@ def collect_statistics(
         weights_np = sess.run(weights)
     else:
         weights_np = weights.cpu().numpy()
+
     big_memory = weights.shape[0] > 20
-    logging.info('BIG MEMORY: {}'.format(big_memory))
+    # logging.info('BIG MEMORY: {}'.format(big_memory))
     if not big_memory:
         wdiffs = weights[None, :, :] - weights[:, None, :]
         wdiffs_np = weights_np[None, :, :] - weights_np[:, None, :]
