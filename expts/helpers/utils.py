@@ -303,18 +303,6 @@ def get_output_path(model_type):
     return os.path.join(ROOT, 'outputs', model_type)
 
 
-def preprocess(directories_list, attack_type):
-    temp = []
-    if attack_type == 'CW':
-        for element in directories_list:
-            if '750' in element: #max_iterations = 750
-                if 'confidence_0' or 'confidence_16' or 'confidence_14' or 'confidence_22' in element: # the four confidence values we care about
-                    temp.append(element)
-        return temp
-    else:
-        return directories_out
-
-
 def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirectories=True):
     # List all sub-directories corresponding to an adversarial attack
     d = os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type)
@@ -327,12 +315,10 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
         d_sub = [os.path.join(d, f) for f in os.listdir(d) if os.path.isdir(os.path.join(d, f))]
         if not d_sub:
             raise ValueError("Directory '{}' does not have any sub-directories.".format(d))
-        if attack_type == 'CW':
-            out = preprocess(d_sub, attack_type)
-            return sorted(out)
-        else:
-            return sorted(d_sub)
+
+        return sorted(d_sub)
     else:
+        # This handles the custom attack which does not have any parameter-specific subdirectories
         return [d]
 
 
