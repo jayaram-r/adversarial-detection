@@ -68,6 +68,9 @@ MIXED_ATTACK_PROPORTIONS = {
     'CW': 0.5
 }
 
+# Set to False before releasing the code
+PATH_HACK = True
+
 
 def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
     layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings(
@@ -151,8 +154,10 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # Load the saved adversarial numpy data generated from this training and test fold
         # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        if PATH_HACK:
+            # Temporary hack to use backup data directory
+            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+
         # Maximum number of adversarial samples in the test fold
         max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
@@ -162,9 +167,11 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
             norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
         )
     else:
+        # Custom attack
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
+        if PATH_HACK:
+            # Temporary hack to use backup data directory
+            numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
 
         # Adversarial inputs from the train and test fold
         data_te = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
@@ -172,18 +179,27 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
         # Labels of the original inputs from which the adversarial inputs were created
         labels_te = np.load(os.path.join(numpy_save_path, "labels_te_clean.npy"))
-
+        # Norm of perturbations
+        norm_perturb = np.load(os.path.join(numpy_save_path, 'norm_perturb.npy'))
         # Mask indicating which samples are adversarial
         mask = np.load(os.path.join(numpy_save_path, "is_adver.npy"))
-        data_te_adv = data_te[mask, :]
-        labels_te_adv = labels_te[mask]
-        # Check if the original and predicted labels are all different for the adversarial inputs
-        check_label_mismatch(labels_te_adv, labels_pred_te[mask])
+        # Adversarial samples with very large perturbation are excluded
+        mask_norm = norm_perturb <= np.percentile(norm_perturb[mask], 95.)
+        mask_incl = np.logical_and(mask, mask_norm)
 
-        # We don't generate adversarial samples from the train fold for the custom attack. Returning the test
-        # fold data as placeholder arrays for the train fold
-        data_tr_adv = data_te_adv
-        labels_tr_adv = labels_te_adv
+        data_te_adv = data_te[mask_incl, :]
+        labels_te_adv = labels_te[mask_incl]
+        # Check if the original and predicted labels are all different for the adversarial inputs
+        check_label_mismatch(labels_te_adv, labels_pred_te[mask_incl])
+
+        # We don't generate adversarial samples from the train fold for the custom attack.
+        # Returning the train fold data from Carlini-Wagner attack instead. This is used only by the supervised
+        # detection methods
+        data_tr_adv, labels_tr_adv, _, _ = load_adversarial_wrapper(
+            i, model_type, 'CW', max_attack_prop, num_clean_te
+        )
+        # data_tr_adv = data_te_adv
+        # labels_tr_adv = labels_te_adv
     
     return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
 
@@ -447,10 +463,11 @@ def main():
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
-        data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
+        if PATH_HACK:
+            # Temporary hack to use backup data directory
+            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
+        data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         num_clean_tr = labels_tr.shape[0]
         num_clean_te = labels_te.shape[0]
         # Data loader for the train fold
@@ -475,8 +492,10 @@ def main():
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        if PATH_HACK:
+            # Temporary hack to use backup data directory
+            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+
         data_tr_noisy, data_te_noisy = load_noisy_data(numpy_save_path)
         # Noisy data have the same labels as the clean data
         labels_tr_noisy = labels_tr
