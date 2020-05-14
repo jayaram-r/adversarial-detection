@@ -741,8 +741,8 @@ def main():
 
         elif args.detection_method == 'mahalanobis':
             # Range of noise standard deviation values
-            stdev_low = NOISE_STDEV_MAX[args.model_type]
-            stdev_high = NOISE_STDEV_MIN[args.model_type]
+            stdev_low = NOISE_STDEV_MIN[args.model_type]
+            stdev_high = NOISE_STDEV_MAX[args.model_type]
             stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
             data_te_noisy = add_gaussian_noise(data_te, stdev_values, seed=args.seed)
             
