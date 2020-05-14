@@ -39,6 +39,7 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
+from detectors.detector_deep_mahalanobis import get_mahalanobis_scores
 from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, DetectorLIDBatch
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
@@ -429,6 +430,7 @@ def main():
     # Set model in evaluation mode
     model.eval()
 
+
     # Check if the numpy data directory exists
     d = os.path.join(NUMPY_DATA_PATH, args.model_type)
     if not os.path.isdir(d):
@@ -486,7 +488,9 @@ def main():
         layer_embeddings_te, labels_pred_te = helper_layer_embeddings(
             model, device, test_fold_loader, args.detection_method, labels_te
         )
-        train_fold_loader = None
+        
+        if args.detection_method != 'mahalanobis':
+            train_fold_loader = None
         if args.detection_method != 'odds':
             test_fold_loader = None
 
@@ -726,6 +730,12 @@ def main():
             if args.save_detec_model:
                 models_folds.append(det_model)
 
+        elif args.detection_method == 'mahalanobis':
+            outf = args.output_dir
+            scores = get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, outf,
+                                train_fold_loader, data_te, data_te_adv, data_te_noisy, labels_te)
+            exit()
+        
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 

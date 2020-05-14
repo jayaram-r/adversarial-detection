@@ -53,7 +53,7 @@ NOISE_PROPORTION = 0.05
 NUM_TOP_RANKED = 3
 
 # List of detection methods
-DETECTION_METHODS = ['proposed', 'lid', 'lid_class_cond', 'odds', 'dknn', 'trust']
+DETECTION_METHODS = ['mahalanobis', 'proposed', 'lid', 'lid_class_cond', 'odds', 'dknn', 'trust']
 
 # Method names to use for plots and results
 METHOD_NAME_MAP = {
@@ -62,7 +62,8 @@ METHOD_NAME_MAP = {
     'lid_class_cond': 'LID_ICLR_class',
     'odds': 'odds_are_odd',
     'dknn': 'deep_KNN',
-    'trust': 'trust_score'
+    'trust': 'trust_score',
+    'mahalanobis': 'deep_mahalanobis'
 }
 
 # List of layerwise test statistics supported by the proposed method

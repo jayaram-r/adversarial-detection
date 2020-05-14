@@ -119,6 +119,29 @@ class ResNet(nn.Module):
 
         return output
 
+    def layer_wise_deep_mahalanobis(self, x):
+        # Method to get the layer-wise embeddings for the proposed method
+        # Input is included as the first layer
+        output = [x] #1
+        out = F.relu(self.bn1(self.conv1(x)))
+        output.append(out) #2
+        out = self.layer1(out)
+        output.append(out) #3
+        out = self.layer2(out)
+        output.append(out) #4
+        out = self.layer3(out)
+        output.append(out) #5
+        out = self.layer4(out)
+        output.append(out) #6
+        out = F.avg_pool2d(out, 4)
+        output.append(out) #7
+        out = out.view(out.size(0), -1)
+        # output.append(out)
+        out = self.linear(out)
+        output.append(out) #8 (logits)
+
+        return out, output
+
     def layer_wise_odds_are_odd(self, x):
         # Method to get the latent layer and logit layer outputs for the "odds-are-odd" method
         output = []
