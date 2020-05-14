@@ -30,11 +30,8 @@ from helpers.utils import (
     get_output_path,
     list_all_adversarial_subdirs,
     check_label_mismatch,
-    metrics_varying_positive_class_proportion
-)
-from generate_noisy_data import generate_noisy_samples
-from helpers.constants import (
-    NUM_NOISE_VALUES
+    metrics_varying_positive_class_proportion,
+    add_gaussian_noise
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
@@ -743,16 +740,13 @@ def main():
                 models_folds.append(det_model)
 
         elif args.detection_method == 'mahalanobis':
-            outf = args.output_dir
-            seed = args.seed 
-            stdev_high = NOISE_STDEV[args.model_type]
-            stdev_low = stdev_high / 16.
-            search_noise_stdev = True
-            data_te_noisy = generate_noisy_samples(model, device, stdev_high, stdev_low, search_noise_stdev,
-                                                   input_data=data_te, input_labels=labels_te, 
-                                                   test_loader=None, test_batch_size=None, num_folds=None, seed=seed, output_dir=None, load_data=False)
+            # Range of noise standard deviation values
+            stdev_low = NOISE_STDEV_MAX[args.model_type]
+            stdev_high = NOISE_STDEV_MIN[args.model_type]
+            stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
+            data_te_noisy = add_gaussian_noise(data_te, stdev_values, seed=args.seed)
             
-            scores = get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, outf,
+            scores = get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir,
                                             train_fold_loader, data_te, data_te_adv, data_te_noisy, labels_te)
             exit()
         

@@ -30,6 +30,15 @@ BATCH_SIZE_DEF = 128
 # Default number of folds to use for cross-validation
 CROSS_VAL_SIZE = 5
 
+# Maximum Gaussian noise standard deviation. Found using the script `generate_noisy_data.py`
+NOISE_STDEV_MAX = {
+    'mnist': 0.209405,
+    'cifar10': 0.034199,
+    'svhn': 0.038040
+}
+# Minimum noise standard deviation values. Used to generate a range of noise standard deviations
+NOISE_STDEV_MIN = {k: NOISE_STDEV_MAX[k] / 16. for k in NOISE_STDEV_MAX.keys()}
+
 # Number of Gaussian noise standard deviation values to use
 NUM_NOISE_VALUES = 10
 
