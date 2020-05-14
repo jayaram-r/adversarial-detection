@@ -42,133 +42,6 @@ from helpers.noisy import (
     create_noisy_samples
 )
 
-def generate_noisy_samples(model, device, stdev_high, stdev_low, search_noise_stdev, 
-        input_data=None, input_labels=None, test_loader=None, test_batch_size=None, num_folds=None, seed=None, output_dir=None, load_data=True):
-
-    if load_data:
-        # convert the test data loader to 2 ndarrays
-        data, labels = get_samples_as_ndarray(test_loader)
-
-        # verify if the data loader is the same as the ndarrays it generates
-        if not verify_data_loader(test_loader, batch_size=test_batch_size):
-            raise ValueError("Data loader verification failed")
-    
-    else:
-        data = input_data
-        labels = input_labels
-
-    stdev_high = stdev_high
-    if search_noise_stdev or (stdev_high < 0.):
-        # Search for a suitable noise standard deviation
-        stdev_high = get_noise_stdev(model, device, data, labels, seed=seed)
-        if stdev_high is None:
-            print("\nERROR: no good noise standard deviation found. Try searching over a larger range of values.")
-            return
-
-    # Noise standard deviation values
-    stdev_low = args.stdev_low
-    if (stdev_low < 0.) or (stdev_low >= stdev_high):
-        stdev_low = stdev_high / 16.
-
-    stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
-
-    if load_data:
-        # repeat for each fold in the cross-validation split
-        skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=seed)
-    
-        # Indicates whether the train and test data from a fold was loaded from file
-        loaded_from_file = np.zeros(num_folds, dtype=np.bool)
-    
-        # convert the test data loader to 2 ndarrays
-        data, labels = get_samples_as_ndarray(test_loader)
-    
-        i = 1
-        for ind_tr, ind_te in skf.split(data, labels):
-            data_tr = data[ind_tr, :]
-            labels_tr = labels[ind_tr]
-            data_te = data[ind_te, :]
-            labels_te = labels[ind_te]
-
-            numpy_save_path = os.path.join(output_dir, "fold_{}".format(i))
-            if not os.path.isdir(numpy_save_path):
-                # Create directory for this fold and save the data to numpy files
-                os.makedirs(numpy_save_path)
-                np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
-                np.save(os.path.join(numpy_save_path, 'labels_tr.npy'), labels_tr)
-                np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
-                np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
-                loaded_from_file[i - 1] = False
-            else:
-                # load existing data files
-                data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
-                loaded_from_file[i - 1] = True
-
-            # Directory for noisy train and test data from this fold
-            noise_base_path = os.path.join(output_dir, 'fold_{}'.format(i), 'noise_gaussian')
-            if os.path.isdir(noise_base_path):
-                # Clear out any old data files
-                shutil.rmtree(noise_base_path)
-
-            os.makedirs(noise_base_path)
-            # Generate noisy data from the train and test fold for different standard deviation values and save them
-            # to numpy files
-            filenames_train = []
-            filenames_test = []
-            for sig in stdev_values:
-                noise = np.random.normal(loc=0., scale=sig, size=data_tr.shape)
-                data_tr_noisy = data_tr + noise
-                noise = np.random.normal(loc=0., scale=sig, size=data_te.shape)
-                data_te_noisy = data_te + noise
-
-                fname = os.path.join(noise_base_path, 'data_tr_noisy_stdev_{:.6f}.npy'.format(sig))
-                np.save(fname, data_tr_noisy)
-                filenames_train.append(fname + '\n')
-
-                fname = os.path.join(noise_base_path, 'data_te_noisy_stdev_{:.6f}.npy'.format(sig))
-                np.save(fname, data_te_noisy)
-                filenames_test.append(fname + '\n')
-
-            print("Saved noisy data files from fold {:d}.".format(i))
-            fname = os.path.join(noise_base_path, 'filenames_train.txt')
-            with open(fname, 'w') as fp:
-                fp.writelines(filenames_train)
-
-            print("List of filenames for noisy train data from this fold can be found in the file: {}".format(fname))
-
-            fname = os.path.join(noise_base_path, 'filenames_test.txt')
-            with open(fname, 'w') as fp:
-                fp.writelines(filenames_test)
-
-            print("List of filenames for noisy test data from this fold can be found in the file: {}".format(fname))
-            print('\n')
-            i = i + 1
-
-        if not (np.all(loaded_from_file) or np.all(np.logical_not(loaded_from_file))):
-            raise ValueError("Unexpected error: some of the data files from the train and test folds may not "
-                         "be consistent.")
-    
-        return None
-    
-    else:
-        data = input_data
-        data_shape = data.shape
-        data_shape[0] = 1
-        n = data.shape[0]
-        N = len(stdev_values)
-        for i in range(0, n):
-            index = random.randint(0, N+1)
-            sig = stddev_values[index]
-            noise = np.random(normal(loc=0., sale=sig, size=data_shape))
-            if i == 0:
-                final = noise
-            else:
-                final = np.stack((final, noise), axis=0)
-
-        assert final.shape == data.shape
-        return final + data
-
-
-
 
 def main():
     # Training settings
@@ -245,20 +118,96 @@ def main():
     else:
         raise ValueError("'{}' is not a valid model type".format(args.model_type))
 
+    # convert the test data loader to 2 ndarrays
+    data, labels = get_samples_as_ndarray(test_loader)
 
-    _ = generate_noisy_samples(model=model, 
-            device=device, 
-            stdev_high=args.stdev_high, 
-            stdev_low=args.stdev_low, 
-            search_noise_stdev=args.search_noise_stdev, 
-            input_data=None,
-            input_labels=None,
-            test_loader=test_loader, 
-            test_batch_size=args.test_batch_size, 
-            num_folds=args.num_folds, 
-            seed=args.seed, 
-            output_dir=output_dir,
-            load_data=True)
+    # verify if the data loader is the same as the ndarrays it generates
+    if not verify_data_loader(test_loader, batch_size=args.test_batch_size):
+        raise ValueError("Data loader verification failed")
+
+    stdev_high = args.stdev_high
+    if args.search_noise_stdev or (stdev_high < 0.):
+        # Search for a suitable noise standard deviation
+        stdev_high = get_noise_stdev(model, device, data, labels, seed=args.seed)
+        if stdev_high is None:
+            print("\nERROR: no good noise standard deviation found. Try searching over a larger range of values.")
+            return
+
+    # Noise standard deviation values
+    stdev_low = args.stdev_low
+    if (stdev_low < 0.) or (stdev_low >= stdev_high):
+        stdev_low = stdev_high / 16.
+
+    stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
+
+    # repeat for each fold in the cross-validation split
+    skf = StratifiedKFold(n_splits=args.num_folds, shuffle=True, random_state=args.seed)
+    # Indicates whether the train and test data from a fold was loaded from file
+    loaded_from_file = np.zeros(args.num_folds, dtype=np.bool)
+    i = 1
+    for ind_tr, ind_te in skf.split(data, labels):
+        data_tr = data[ind_tr, :]
+        labels_tr = labels[ind_tr]
+        data_te = data[ind_te, :]
+        labels_te = labels[ind_te]
+
+        numpy_save_path = os.path.join(output_dir, "fold_{}".format(i))
+        if not os.path.isdir(numpy_save_path):
+            # Create directory for this fold and save the data to numpy files
+            os.makedirs(numpy_save_path)
+            np.save(os.path.join(numpy_save_path, 'data_tr.npy'), data_tr)
+            np.save(os.path.join(numpy_save_path, 'labels_tr.npy'), labels_tr)
+            np.save(os.path.join(numpy_save_path, 'data_te.npy'), data_te)
+            np.save(os.path.join(numpy_save_path, 'labels_te.npy'), labels_te)
+            loaded_from_file[i - 1] = False
+        else:
+            # load existing data files
+            data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
+            loaded_from_file[i - 1] = True
+
+        # Directory for noisy train and test data from this fold
+        noise_base_path = os.path.join(output_dir, 'fold_{}'.format(i), 'noise_gaussian')
+        if os.path.isdir(noise_base_path):
+            # Clear out any old data files
+            shutil.rmtree(noise_base_path)
+
+        os.makedirs(noise_base_path)
+        # Generate noisy data from the train and test fold for different standard deviation values and save them
+        # to numpy files
+        filenames_train = []
+        filenames_test = []
+        for sig in stdev_values:
+            noise = np.random.normal(loc=0., scale=sig, size=data_tr.shape)
+            data_tr_noisy = data_tr + noise
+            noise = np.random.normal(loc=0., scale=sig, size=data_te.shape)
+            data_te_noisy = data_te + noise
+
+            fname = os.path.join(noise_base_path, 'data_tr_noisy_stdev_{:.6f}.npy'.format(sig))
+            np.save(fname, data_tr_noisy)
+            filenames_train.append(fname + '\n')
+
+            fname = os.path.join(noise_base_path, 'data_te_noisy_stdev_{:.6f}.npy'.format(sig))
+            np.save(fname, data_te_noisy)
+            filenames_test.append(fname + '\n')
+
+        print("Saved noisy data files from fold {:d}.".format(i))
+        fname = os.path.join(noise_base_path, 'filenames_train.txt')
+        with open(fname, 'w') as fp:
+            fp.writelines(filenames_train)
+
+        print("List of filenames for noisy train data from this fold can be found in the file: {}".format(fname))
+
+        fname = os.path.join(noise_base_path, 'filenames_test.txt')
+        with open(fname, 'w') as fp:
+            fp.writelines(filenames_test)
+
+        print("List of filenames for noisy test data from this fold can be found in the file: {}".format(fname))
+        print('\n')
+        i = i + 1
+
+    if not (np.all(loaded_from_file) or np.all(np.logical_not(loaded_from_file))):
+        raise ValueError("Unexpected error: some of the data files from the train and test folds may not "
+                         "be consistent.")
 
 
 if __name__ == '__main__':

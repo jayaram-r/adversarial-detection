@@ -393,6 +393,26 @@ def get_predicted_classes(model, device, data_loader=None, data=None, labels=Non
     return np.array(labels_pred, dtype=np.int)
 
 
+def add_gaussian_noise(data_in, stdev_values, seed=SEED_DEFAULT):
+    # Add random Gaussian noise from a given list of standard deviation values to the input data
+    np.random.seed(seed)
+    shape_data = data_in.shape
+    n_samp = shape_data[0]
+    n_vals = len(stdev_values)
+
+    # Generate a noisy version of the input data for each standard deviation value
+    data_noisy_list = []
+    for sig in stdev_values:
+        noise = np.random.normal(loc=0., scale=sig, size=shape_data)
+        data_noisy_list.append(data_in + noise)
+
+    # Each noisy sample is selected randomly from one of the noise standard deviation values
+    ind_cols = np.random.choice(np.arange(n_vals), size=n_samp, replace=True)
+    data_out = np.array([data_noisy_list[ind_cols[i]][i, :] for i in range(n_samp)])
+
+    return data_out
+
+
 def log_sum_exp(x):
     # Numerically stable computation of the log-sum-exponential function
     # `x` is a 2d numpy array
@@ -453,6 +473,7 @@ def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose
 
     return au_roc, au_roc_partial, avg_prec, tpr, fpr
 
+
 def metrics_for_accuracy(labels, clean_labels, output_file=None):
     
     # Save the results to a pickle file if required
@@ -461,6 +482,7 @@ def metrics_for_accuracy(labels, clean_labels, output_file=None):
             pickle.dump(results, fp)
 
     return results
+
 
 # TODO: Can we stratify by attack labels in order to subsample while preserving the same proportion of different
 #  attack methods as in the full sample?
