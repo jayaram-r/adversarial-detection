@@ -32,6 +32,10 @@ from helpers.utils import (
     check_label_mismatch,
     metrics_varying_positive_class_proportion
 )
+from generate_noisy_data import generate_noisy_samples
+from helpers.constants import (
+    NUM_NOISE_VALUES
+)
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
     get_wcls,
@@ -740,6 +744,14 @@ def main():
 
         elif args.detection_method == 'mahalanobis':
             outf = args.output_dir
+            seed = args.seed 
+            stdev_high = NOISE_STDEV[args.model_type]
+            stdev_low = stdev_high / 16.
+            search_noise_stdev = True
+            data_te_noisy = generate_noisy_samples(model, device, stdev_high, stdev_low, search_noise_stdev,
+                                                   input_data=data_te, input_labels=labels_te, 
+                                                   test_loader=None, test_batch_size=None, num_folds=None, seed=seed, output_dir=None, load_data=False)
+            
             scores = get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, outf,
                                             train_fold_loader, data_te, data_te_adv, data_te_noisy, labels_te)
             exit()
