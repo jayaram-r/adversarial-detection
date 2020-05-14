@@ -361,6 +361,12 @@ def main():
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
+    elif args.detection_method == 'mahalanobis':
+        # Should we apply dimensionality reduction or pre-processing to the layer embeddings?
+        # According to the paper, they transform a `C x H x W` layer embedding to a `C x 1` vector through
+        # average pooling
+        apply_dim_reduc = False
+
     # Model file for dimension reduction, if required
     model_dim_reduc = None
     if apply_dim_reduc:
@@ -488,11 +494,11 @@ def main():
         layer_embeddings_te, labels_pred_te = helper_layer_embeddings(
             model, device, test_fold_loader, args.detection_method, labels_te
         )
-        
+        # Delete the data loaders in case they are not used further
         if args.detection_method != 'mahalanobis':
-            train_fold_loader = None
+            del train_fold_loader
         if args.detection_method != 'odds':
-            test_fold_loader = None
+            del test_fold_loader
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
@@ -522,8 +528,9 @@ def main():
         layer_embeddings_te_noisy, labels_pred_te_noisy = helper_layer_embeddings(
             model, device, noisy_test_fold_loader, args.detection_method, labels_te_noisy
         )
-        noisy_train_fold_loader = None
-        noisy_test_fold_loader = None
+        # Delete the data loaders in case they are not used further
+        del noisy_train_fold_loader
+        del noisy_test_fold_loader
 
         # Load the saved adversarial numpy data generated from this training and test fold
         data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
@@ -555,9 +562,10 @@ def main():
             model, device, adv_test_fold_loader, args.detection_method, labels_te_adv
         )
         check_label_mismatch(labels_te_adv, labels_pred_te_adv)
-        adv_train_fold_loader = None
+        # Delete the data loaders in case they are not used further
+        del adv_train_fold_loader
         if args.detection_method != 'odds':
-            adv_test_fold_loader = None
+            del adv_test_fold_loader
 
         # Detection labels (0 denoting clean and 1 adversarial)
         labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
@@ -733,7 +741,7 @@ def main():
         elif args.detection_method == 'mahalanobis':
             outf = args.output_dir
             scores = get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, outf,
-                                train_fold_loader, data_te, data_te_adv, data_te_noisy, labels_te)
+                                            train_fold_loader, data_te, data_te_adv, data_te_noisy, labels_te)
             exit()
         
         else:

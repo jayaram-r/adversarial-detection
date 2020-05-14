@@ -118,7 +118,6 @@ def main():
     # Set model to evaluation mode
     model.eval()
 
-
     # convert the test data loader to 2 ndarrays
     data, labels = get_samples_as_ndarray(test_loader)
 
