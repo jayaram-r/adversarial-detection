@@ -63,17 +63,19 @@ def sample_estimator(model, num_classes, layer_wise_deep_mahalanobis, train_load
             temp_list.append(0)
         list_features.append(temp_list)
     
+
     for data, target in train_loader:
         total += data.size(0)
         data = data.cuda()
-        data = Variable(data, volatile=True)
+        #data = Variable(data, volatile=True)
         output, out_features = model.layer_wise_deep_mahalanobis(data)
         
         # get hidden features
         for i in range(num_output):
             out_features[i] = out_features[i].view(out_features[i].size(0), out_features[i].size(1), -1)
             out_features[i] = torch.mean(out_features[i].data, 2)
-            
+            #print("la:",out_features[i].shape)
+
         # compute the accuracy
         pred = output.data.max(1)[1]
         equal_flag = pred.eq(target.cuda()).cpu()
@@ -94,16 +96,37 @@ def sample_estimator(model, num_classes, layer_wise_deep_mahalanobis, train_load
                     = torch.cat((list_features[out_count][label], out[i].view(1, -1)), 0)
                     out_count += 1                
             num_sample_per_class[label] += 1
-            
+    '''    
+    N = len(out_features)
+    for i in range(N):
+        for j in range(num_classes):
+            print(i, j, list_features[i][j].shape)
+
+    
+    #exit()
+    '''
+
     sample_class_mean = []
     out_count = 0
     for num_feature in layer_wise_deep_mahalanobis:
+        #print(num_feature)
         temp_list = torch.Tensor(num_classes, int(num_feature)).cuda()
         for j in range(num_classes):
-            temp_list[j] = torch.mean(list_features[out_count][j], 0)
+            temp = torch.mean(list_features[out_count][j], 0)
+            #print("temp shape:", temp.shape, list_features[out_count][j].shape)
+            temp_list[j] = temp #torch.mean(list_features[out_count][j], 0)
         sample_class_mean.append(temp_list)
         out_count += 1
-        
+    
+
+    '''
+    print("sample_class_mean")
+    N = len(out_features)
+    for i in range(N):
+        for j in range(num_classes):
+            print(i, j, sample_class_mean[i][j].shape)
+    '''
+
     precision = []
     for k in range(num_output):
         X = 0
@@ -118,7 +141,14 @@ def sample_estimator(model, num_classes, layer_wise_deep_mahalanobis, train_load
         temp_precision = group_lasso.precision_
         temp_precision = torch.from_numpy(temp_precision).float().cuda()
         precision.append(temp_precision)
-        
+    
+    '''
+    print("precision")
+    N = num_output
+    for i in range(N):
+        print(i, precision[i].shape)
+    '''
+
     print('\n Training Accuracy:({:.2f}%)\n'.format(100. * correct / total))
 
     return sample_class_mean, precision
@@ -143,7 +173,7 @@ def get_Mahalanobis_score(model, test_loader, num_classes, outf, out_flag, net_t
         data, target = data.cuda(), target.cuda()
         data, target = Variable(data, requires_grad = True), Variable(target)
         
-        out_features = model.intermediate_forward(data, layer_index)
+        out_features = model.intermediate_forward(data.float(), layer_index)
         out_features = out_features.view(out_features.size(0), out_features.size(1), -1)
         out_features = torch.mean(out_features, 2)
         
@@ -152,6 +182,7 @@ def get_Mahalanobis_score(model, test_loader, num_classes, outf, out_flag, net_t
         for i in range(num_classes):
             batch_sample_mean = sample_mean[layer_index][i]
             zero_f = out_features.data - batch_sample_mean
+            #check if both parameters to multiplication are the same type
             term_gau = -0.5*torch.mm(torch.mm(zero_f, precision[layer_index]), zero_f.t()).diag()
             if i == 0:
                 gaussian_score = term_gau.view(-1,1)
@@ -295,14 +326,20 @@ def get_Mahalanobis_score_adv(model, test_data, test_label, num_classes, outf, n
     Mahalanobis = []
     batch_size = 100
     total = 0
+   
+    #print("in this function")
     
-    for data_index in range(int(np.floor(test_data.size(0)/batch_size))):
+    range_val = int(np.floor(test_data.size(0)/batch_size))
+    if range_val == 0:
+        range_val = 1
+    for data_index in range(range_val):
         target = test_label[total : total + batch_size].cuda()
         data = test_data[total : total + batch_size].cuda()
         total += batch_size
         data, target = Variable(data, requires_grad = True), Variable(target)
-        
-        out_features = model.intermediate_forward(data, layer_index)
+       
+        #varun: fix the intermediate_forward method for other networks
+        out_features = model.intermediate_forward(data.float(), layer_index)
         out_features = out_features.view(out_features.size(0), out_features.size(1), -1)
         out_features = torch.mean(out_features, 2)
         
@@ -310,7 +347,7 @@ def get_Mahalanobis_score_adv(model, test_data, test_label, num_classes, outf, n
         for i in range(num_classes):
             batch_sample_mean = sample_mean[layer_index][i]
             zero_f = out_features.data - batch_sample_mean
-            term_gau = -0.5*torch.mm(torch.mm(zero_f, precision[layer_index]), zero_f.t()).diag()
+            term_gau = -0.5*torch.mm(torch.mm(zero_f.float(), precision[layer_index].float()), zero_f.t().float()).diag()
             if i == 0:
                 gaussian_score = term_gau.view(-1,1)
             else:
@@ -320,7 +357,7 @@ def get_Mahalanobis_score_adv(model, test_data, test_label, num_classes, outf, n
         sample_pred = gaussian_score.max(1)[1]
         batch_sample_mean = sample_mean[layer_index].index_select(0, sample_pred)
         zero_f = out_features - Variable(batch_sample_mean)
-        pure_gau = -0.5*torch.mm(torch.mm(zero_f, Variable(precision[layer_index])), zero_f.t()).diag()
+        pure_gau = -0.5*torch.mm(torch.mm(zero_f.float(), Variable(precision[layer_index].float())), zero_f.t().float()).diag()
         loss = torch.mean(-pure_gau)
         loss.backward()
          
@@ -350,14 +387,14 @@ def get_Mahalanobis_score_adv(model, test_data, test_label, num_classes, outf, n
         
         tempInputs = torch.add(data.data, -magnitude, gradient)
  
-        noise_out_features = model.intermediate_forward(Variable(tempInputs, volatile=True), layer_index)
+        noise_out_features = model.intermediate_forward(Variable(tempInputs, volatile=True).float(), layer_index)
         noise_out_features = noise_out_features.view(noise_out_features.size(0), noise_out_features.size(1), -1)
         noise_out_features = torch.mean(noise_out_features, 2)
         noise_gaussian_score = 0
         for i in range(num_classes):
             batch_sample_mean = sample_mean[layer_index][i]
             zero_f = noise_out_features.data - batch_sample_mean
-            term_gau = -0.5*torch.mm(torch.mm(zero_f, precision[layer_index]), zero_f.t()).diag()
+            term_gau = -0.5*torch.mm(torch.mm(zero_f.float(), precision[layer_index].float()), zero_f.t().float()).diag()
             if i == 0:
                 noise_gaussian_score = term_gau.view(-1,1)
             else:
@@ -377,23 +414,24 @@ def get_LID(model, test_clean_data, test_adv_data, test_noisy_data, test_label, 
     model.eval()  
     total = 0
     batch_size = 100
-    
+   
+
     LID, LID_adv, LID_noisy = [], [], []    
     overlap_list = [10, 20, 30, 40, 50, 60, 70, 80, 90]
     for i in overlap_list:
         LID.append([])
         LID_adv.append([])
         LID_noisy.append([])
-       
-    print(test_clean_data.shape, test_adv_data.shape)
-    exit()
-    for data_index in range(int(np.floor(test_clean_data.size(0)/batch_size))):
+    
+    range_val = int(np.floor(test_clean_data.size(0)/batch_size))
+    if range_val == 0:
+        range_val = 1
+    
+    for data_index in range(range_val):
         data = test_clean_data[total : total + batch_size].cuda()
         adv_data = test_adv_data[total : total + batch_size].type(torch.FloatTensor).cuda()
         noisy_data = test_noisy_data[total : total + batch_size].type(torch.FloatTensor).cuda()
         target = test_label[total : total + batch_size].cuda()
-
-        print(type(adv_data), adv_data.shape)
 
         total += batch_size
         #data, target = Variable(data, volatile=True).type(torch.FloatTensor), Variable(target)
@@ -456,5 +494,5 @@ def get_LID(model, test_clean_data, test_adv_data, test_noisy_data, test_label, 
             LID_adv[list_counter].extend(LID_adv_concat)
             LID_noisy[list_counter].extend(LID_noisy_concat)
             list_counter += 1
-            
+    
     return LID, LID_adv, LID_noisy

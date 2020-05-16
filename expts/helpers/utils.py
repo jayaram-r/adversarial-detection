@@ -111,7 +111,7 @@ def load_numpy_data(path):
 
 
 def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm', norm_type='inf',
-                          seed=SEED_DEFAULT):
+                          seed=SEED_DEFAULT, load_clean=False):
     """
     Utility to load adversarial data and labels from saved numpy files. Allows the number of samples from the test
     fold to be specified and has a few sampling options.
@@ -132,6 +132,7 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
     # Predicted (mis-classified) labels
     labels_pred_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
     labels_pred_te = np.load(os.path.join(path, "labels_te_adv.npy"))
+    
     # Labels of the original inputs from which the adversarial inputs were created
     labels_tr = np.load(os.path.join(path, "labels_tr_clean.npy"))
     labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
@@ -140,6 +141,13 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
     check_label_mismatch(labels_tr, labels_pred_tr)
     check_label_mismatch(labels_te, labels_pred_te)
 
+    # if we want to return the clean samples that correspond to the generated adv. samples
+    if load_clean:
+        data_tr_clean = np.load(os.path.join(path, "data_tr_clean.npy"))
+        labels_tr_clean = np.load(os.path.join(path, "labels_tr_adv.npy"))
+        data_te_clean = np.load(os.path.join(path, "data_te_clean.npy"))
+        labels_te_clean = np.load(os.path.join(path, "labels_te_clean.npy"))
+
     n_test = labels_te.shape[0]
     all_test = True
     if max_n_test:
@@ -147,7 +155,10 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
             all_test = False
 
     if all_test:
-        return data_tr, labels_tr, data_te, labels_te
+        if not load_clean:
+            return data_tr, labels_tr, data_te, labels_te
+        else:
+            return data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr, labels_tr, data_te, labels_te
     else:
         np.random.seed(seed)
         ind_test = None
@@ -184,7 +195,10 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
             else:
                 raise ValueError("Invalid value '{}' specified for the input 'sampling_type'".format(sampling_type))
 
-        return data_tr, labels_tr, data_te[ind_test, :], labels_te[ind_test]
+        if not load_clean:
+            return data_tr, labels_tr, data_te[ind_test, :], labels_te[ind_test]
+        else:
+            return data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr, labels_tr, data_te[ind_test, :], labels_te[ind_test]
 
 
 def load_noisy_data(path):

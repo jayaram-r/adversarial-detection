@@ -40,7 +40,10 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.detector_deep_mahalanobis import get_mahalanobis_scores
+from detectors.detector_deep_mahalanobis import (
+        get_mahalanobis_scores,
+        fit_mahalanobis_scores
+)
 from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, DetectorLIDBatch
 from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
 from detectors.detector_deep_knn import DeepKNN
@@ -112,6 +115,45 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
 
     return config_trust_score
 
+def obtain_mahalanobis_labels(model, device, test_loader, adv_data_loader, noisy_data_loader):
+
+    total = 0
+    selected_list = []
+    selected_index = 0
+
+    for idx, elements in enumerate(zip(adv_data_loader, noisy_data_loader, test_loader)):
+        adv_data = elements[0][0]
+        noisy_data = elements[1][0]
+        data = elements[2][0]
+        target = elements[2][1]
+
+        output_adv = model(adv_data.type(torch.FloatTensor).cuda())
+        pred_adv = output_adv.data.max(1)[1]
+        equal_flag_adv = pred_adv.eq(target.cuda()).cpu()
+        
+        output_noisy = model(noisy_data.type(torch.FloatTensor).cuda())
+        pred_noise = output_noisy.data.max(1)[1]
+        equal_flag_noise = pred_noise.eq(target.cuda()).cpu()
+
+        output = model(data.type(torch.FloatTensor).cuda())
+        pred = output.data.max(1)[1]
+        equal_flag = pred.eq(target.cuda()).cpu()
+
+        if total == 0:
+            label_tot = target.clone().data.cpu()
+        else:
+            label_tot = torch.cat((label_tot, target.clone().data.cpu()), 0)
+
+        for i in range(data.size(0)):
+            if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
+                selected_list.append(selected_index)
+            selected_index += 1
+        total += data.size(0)
+
+    selected_list = torch.LongTensor(selected_list)
+    label_tot = torch.index_select(label_tot, 0, selected_list)
+    return label_tot.cpu().detach().numpy()
+
 
 def save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, save_detec_model):
     # Save the scores and detection labels from the cross-validation folds to a pickle file
@@ -150,7 +192,7 @@ def load_checkpoint(output_dir, method_name, save_detec_model):
     return scores_folds, labels_folds, models_folds, n_folds
 
 
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
+def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te, load_clean=False):
     # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
     if adv_attack != CUSTOM_ATTACK:
         # Load the saved adversarial numpy data generated from this training and test fold
@@ -162,12 +204,24 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
 
         # Maximum number of adversarial samples in the test fold
         max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
-        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-            numpy_save_path,
-            max_n_test=max_num_adv,
-            sampling_type='ranked_by_norm',
-            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
-        )
+        if not load_clean:
+            data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
+                numpy_save_path,
+                max_n_test=max_num_adv,
+                sampling_type='ranked_by_norm',
+                norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
+                load_clean=load_clean
+            )
+            return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
+        else:
+            data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
+                numpy_save_path,
+                max_n_test=max_num_adv,
+                sampling_type='ranked_by_norm',
+                norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
+                load_clean=load_clean
+            )
+            return data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
     else:
         # Custom attack
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
@@ -203,8 +257,8 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # data_tr_adv = data_te_adv
         # labels_tr_adv = labels_te_adv
     
-    return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
 
+        return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
 
 def main():
     # Training settings
@@ -534,9 +588,14 @@ def main():
         del noisy_test_fold_loader
 
         # Load the saved adversarial numpy data generated from this training and test fold
-        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
-        )
+        if args.detection_method != 'mahalanobis':
+            data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
+                i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
+            )
+        else:
+            _, _, data_te_clean, labels_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
+                i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te, load_clean=True
+            )
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
         print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
@@ -744,11 +803,15 @@ def main():
             stdev_low = NOISE_STDEV_MIN[args.model_type]
             stdev_high = NOISE_STDEV_MAX[args.model_type]
             stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
-            data_te_noisy = add_gaussian_noise(data_te, stdev_values, seed=args.seed)
-            
-            scores = get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir,
-                                            train_fold_loader, data_te, data_te_adv, data_te_noisy, labels_te)
-            exit()
+            data_te_noisy = add_gaussian_noise(data_te_clean, stdev_values, seed=args.seed)
+
+            test_loader = convert_to_loader(data_te_clean, labels_te_clean)
+            noisy_loader = convert_to_loader(data_te_noisy, labels_te_clean)
+            adv_loader = convert_to_loader(data_te_adv, labels_te_clean)
+            labels_te = obtain_mahalanobis_labels(model, device, test_loader, adv_loader, noisy_loader)
+
+            fit_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir, train_fold_loader, data_te_clean, data_te_adv, data_te_noisy, labels_te)
+            get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir)
         
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))

@@ -95,6 +95,56 @@ class ResNet(nn.Module):
         out = out.view(out.size(0), -1)
         out = self.linear(out)  # logit values that go into the softmax or log-softmax
         return out
+    
+    def penultimate_forward(self, x):
+        out = F.relu(self.bn1(self.conv1(x)))
+        out = self.layer1(out)
+        out = self.layer2(out)
+        out = self.layer3(out)
+        pen = self.layer4(out)
+        out = F.avg_pool2d(pen, 4)
+        out = out.view(out.size(0), -1)
+        out = self.linear(pen)  # logit values that go into the softmax or log-softmax
+        return out, pen
+
+    def intermediate_forward(self, x, layer_index):
+        if layer_index == 1:
+            x = F.relu(self.bn1(self.conv1(x)))
+        if layer_index == 2:
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = self.layer1(x)
+        if layer_index == 3:
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = self.layer1(x)
+            x = self.layer2(x)
+        if layer_index == 4:
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+        if layer_index == 5:
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+        if layer_index == 6:
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+            x = F.avg_pool2d(x, 4)
+        if layer_index == 7:
+            x = F.relu(self.bn1(self.conv1(x)))
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+            x = F.avg_pool2d(x, 4)
+            x = out.view(x.size(0), -1)
+            x = self.linear(x)
+        return x
 
     def layer_wise(self, x):
         # Method to get the layer-wise embeddings for the proposed method
