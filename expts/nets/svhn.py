@@ -58,26 +58,57 @@ class SVHN(nn.Module):
 
 
     def intermediate_forward(self, x, layer_index):
-        x = self.conv1(x)
-        x = F.relu(x)
         if layer_index == 1:
+            x = self.conv1(x)
+            x = F.relu(x)
+        if layer_index == 2:
+            x = self.conv1(x)
+            x = F.relu(x)
+            x = self.conv2(x)
+            x = F.relu(x)
+            x = F.max_pool2d(x, 2)
+            x = self.dropout1(x)
+        if layer_index == 3:
+            x = self.conv1(x)
+            x = F.relu(x)
             x = self.conv2(x)
             x = F.relu(x)
             x = F.max_pool2d(x, 2)
             x = self.dropout1(x)
             x = torch.flatten(x, 1)
-        if layer_index == 2:
             x = self.fc1(x)
             x = F.relu(x)
             x = self.dropout2(x)
-        if layer_index == 3:
+        if layer_index == 4:
+            x = self.conv1(x)
+            x = F.relu(x)
+            x = self.conv2(x)
+            x = F.relu(x)
+            x = F.max_pool2d(x, 2)
+            x = self.dropout1(x)
+            x = torch.flatten(x, 1)
+            x = self.fc1(x)
+            x = F.relu(x)
+            x = self.dropout2(x)
             x = self.fc2(x)
             x = F.relu(x)
             x = self.dropout3(x)
-        if layer_index == 4:
+        if layer_index == 5:
+            x = self.conv1(x)
+            x = F.relu(x)
+            x = self.conv2(x)
+            x = F.relu(x)
+            x = F.max_pool2d(x, 2)
+            x = self.dropout1(x)
+            x = torch.flatten(x, 1)
+            x = self.fc1(x)
+            x = F.relu(x)
+            x = self.dropout2(x)
+            x = self.fc2(x)
+            x = F.relu(x)
+            x = self.dropout3(x)
             x = self.fc3(x)
-            x = F.log_softmax(x, dim=1)
-        return output
+        return x
 
     def layer_wise(self, x):
         # Method to get the layer-wise embeddings for the proposed method
