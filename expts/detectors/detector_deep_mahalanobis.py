@@ -1,15 +1,8 @@
-"""
-Repurposed code from the Github repo associated with the paper:
-Roth, Kevin, Yannic Kilcher, and Thomas Hofmann. "The odds are odd: A statistical test for detecting adversarial
-examples." arXiv preprint arXiv:1902.04818 (2019).
-
-Repo: https://github.com/yk/icml19_public
-"""
 from nets.svhn import *
 from nets.cifar10 import *
 from nets.mnist import *
 from nets.resnet import *
-from detectors.tf_robustify import *
+#from detectors.tf_robustify import *
 import itertools as itt
 from sklearn.metrics import confusion_matrix
 from helpers.utils import get_samples_as_ndarray
