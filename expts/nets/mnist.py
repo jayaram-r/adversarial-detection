@@ -47,37 +47,30 @@ class MNIST(nn.Module):
         return output, pen
 
     def intermediate_forward(self, x, layer_index):
+        if layer_index == 0:
+            return x
+
+        x = self.conv1(x)
+        x = F.relu(x)
         if layer_index == 1:
-            x = self.conv1(x)
-            x = F.relu(x)
+            return x
+
+        x = self.conv2(x)
+        x = F.max_pool2d(x, 2)
+        x = self.dropout1(x)
         if layer_index == 2:
-            x = self.conv1(x)
-            x = F.relu(x)
-            x = self.conv2(x)
-            x = F.max_pool2d(x, 2)
-            x = self.dropout1(x)
+            return x
+
+        x = torch.flatten(x, 1)
+        x = self.fc1(x)
+        x = F.relu(x)
+        x = self.dropout2(x)
         if layer_index == 3:
-            x = self.conv1(x)
-            x = F.relu(x)
-            x = self.conv2(x)
-            x = F.max_pool2d(x, 2)
-            x = self.dropout1(x)
-            x = torch.flatten(x, 1)
-            x = self.fc1(x)
-            x = F.relu(x)
-            x = self.dropout2(x)
+            return x
+
+        x = self.fc2(x)
         if layer_index == 4:
-            x = self.conv1(x)
-            x = F.relu(x)
-            x = self.conv2(x)
-            x = F.max_pool2d(x, 2)
-            x = self.dropout1(x)
-            x = torch.flatten(x, 1)
-            x = self.fc1(x)
-            x = F.relu(x)
-            x = self.dropout2(x)
-            x = self.fc2(x)
-        return x
+            return x
 
     def layer_wise(self, x):
         # Method to get the layer-wise embeddings for the proposed method
@@ -113,7 +106,7 @@ class MNIST(nn.Module):
         return output
 
     def layer_wise_deep_mahalanobis(self, x):
-        # Method to get the layer-wise embeddings for the proposed method
+        # Method to get the layer-wise embeddings for the deep mahalanobis detection method
         # Input is included as the first layer
         output = [x]    # 1
 
