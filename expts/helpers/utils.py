@@ -110,8 +110,7 @@ def load_numpy_data(path):
     return data_tr, labels_tr, data_te, labels_te
 
 
-def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm', norm_type='inf',
-                          seed=SEED_DEFAULT, load_clean=False):
+def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm', norm_type='inf', seed=SEED_DEFAULT):
     """
     Utility to load adversarial data and labels from saved numpy files. Allows the number of samples from the test
     fold to be specified and has a few sampling options.
@@ -126,27 +125,24 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
     :return:
     """
     # Adversarial inputs from the train and test fold
-    data_tr = np.load(os.path.join(path, "data_tr_adv.npy"))
-    data_te = np.load(os.path.join(path, "data_te_adv.npy"))
+    data_tr_adv = np.load(os.path.join(path, "data_tr_adv.npy"))
+    data_te_adv = np.load(os.path.join(path, "data_te_adv.npy"))
+
+    # Clean inputs corresponding to the adversarial inputs from the train and test fold
+    data_tr_clean = np.load(os.path.join(path, "data_tr_clean.npy"))
+    data_te_clean = np.load(os.path.join(path, "data_te_clean.npy"))
 
     # Predicted (mis-classified) labels
     labels_pred_tr = np.load(os.path.join(path, "labels_tr_adv.npy"))
     labels_pred_te = np.load(os.path.join(path, "labels_te_adv.npy"))
     
-    # Labels of the original inputs from which the adversarial inputs were created
+    # Labels of the original clean inputs from which the adversarial inputs were created
     labels_tr = np.load(os.path.join(path, "labels_tr_clean.npy"))
     labels_te = np.load(os.path.join(path, "labels_te_clean.npy"))
 
     # Check if the original and adversarial labels are all different
     check_label_mismatch(labels_tr, labels_pred_tr)
     check_label_mismatch(labels_te, labels_pred_te)
-
-    # if we want to return the clean samples that correspond to the generated adv. samples
-    if load_clean:
-        data_tr_clean = np.load(os.path.join(path, "data_tr_clean.npy"))
-        labels_tr_clean = np.load(os.path.join(path, "labels_tr_adv.npy"))
-        data_te_clean = np.load(os.path.join(path, "data_te_clean.npy"))
-        labels_te_clean = np.load(os.path.join(path, "labels_te_clean.npy"))
 
     n_test = labels_te.shape[0]
     all_test = True
@@ -155,11 +151,11 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
             all_test = False
 
     if all_test:
-        if not load_clean:
-            return data_tr, labels_tr, data_te, labels_te
-        else:
-            return data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr, labels_tr, data_te, labels_te
+        # First two returned values are the clean data arrays from the train and test fold.
+        # The rest are adversarial data and label arrays from the train and test fold
+        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr, data_te_adv, labels_te
     else:
+        # Test fold data is sub-sampled to the required size using one of the sampling methods
         np.random.seed(seed)
         ind_test = None
         if sampling_type == 'uniform':
@@ -168,8 +164,7 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
             ind_test = np.random.permutation(n_test)[:max_n_test]
         else:
             # Calculate the norm of the perturbation for adversarial inputs from the test fold
-            data_te_clean = np.load(os.path.join(path, "data_te_clean.npy"))
-            diff = data_te.reshape(n_test, -1) - data_te_clean.reshape(n_test, -1)
+            diff = data_te_adv.reshape(n_test, -1) - data_te_clean.reshape(n_test, -1)
             if norm_type == 'inf':
                 norm_diff = np.linalg.norm(diff, ord=np.inf, axis=1)
             else:
@@ -195,10 +190,8 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
             else:
                 raise ValueError("Invalid value '{}' specified for the input 'sampling_type'".format(sampling_type))
 
-        if not load_clean:
-            return data_tr, labels_tr, data_te[ind_test, :], labels_te[ind_test]
-        else:
-            return data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr, labels_tr, data_te[ind_test, :], labels_te[ind_test]
+        return (data_tr_clean, data_te_clean[ind_test, :], data_tr_adv, labels_tr, data_te_adv[ind_test, :],
+                labels_te[ind_test])
 
 
 def load_noisy_data(path):
@@ -334,6 +327,43 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
     else:
         # This handles the custom attack which does not have any parameter-specific subdirectories
         return [d]
+
+
+def save_detector_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, save_detec_model):
+    # Save the scores and detection labels from the cross-validation folds to a pickle file
+    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
+    tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
+    with open(fname, 'wb') as fp:
+        pickle.dump(tmp, fp)
+
+    if save_detec_model and models_folds:
+        # Save the detection models from the cross-validation folds to a pickle file
+        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
+        with open(fname, 'wb') as fp:
+            pickle.dump(models_folds, fp)
+
+
+def load_detector_checkpoint(output_dir, method_name, save_detec_model):
+    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
+    with open(fname, 'rb') as fp:
+        tmp = pickle.load(fp)
+
+    scores_folds = tmp['scores_folds']
+    labels_folds = tmp['labels_folds']
+    # Load the models if required
+    if save_detec_model:
+        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
+        with open(fname, 'rb') as fp:
+            models_folds = pickle.load(fp)
+    else:
+        models_folds = []
+
+    n_folds = len(scores_folds)
+    assert len(labels_folds) == n_folds, "'scores_folds' and 'labels_folds' do not have the same length"
+    if models_folds:
+        assert len(models_folds) == n_folds, "'models_folds' and 'scores_folds' do not have the same length"
+
+    return scores_folds, labels_folds, models_folds, n_folds
 
 
 def calculate_accuracy(model, device, data_loader=None, data=None, labels=None, batch_size=BATCH_SIZE_DEF):

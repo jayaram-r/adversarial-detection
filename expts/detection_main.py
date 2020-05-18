@@ -31,7 +31,9 @@ from helpers.utils import (
     list_all_adversarial_subdirs,
     check_label_mismatch,
     metrics_varying_positive_class_proportion,
-    add_gaussian_noise
+    add_gaussian_noise,
+    save_detector_checkpoint,
+    load_detector_checkpoint
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
@@ -73,9 +75,6 @@ MIXED_ATTACK_PROPORTIONS = {
     'CW': 0.5
 }
 
-# Set to False before releasing the code
-PATH_HACK = True
-
 
 def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
     layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings(
@@ -115,12 +114,12 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
 
     return config_trust_score
 
+
 def obtain_mahalanobis_labels(model, device, test_loader, adv_data_loader, noisy_data_loader):
 
     total = 0
     selected_list = []
     selected_index = 0
-
     for idx, elements in enumerate(zip(adv_data_loader, noisy_data_loader, test_loader)):
         adv_data = elements[0][0]
         noisy_data = elements[1][0]
@@ -138,7 +137,6 @@ def obtain_mahalanobis_labels(model, device, test_loader, adv_data_loader, noisy
         output = model(data.type(torch.FloatTensor).cuda())
         pred = output.data.max(1)[1]
         equal_flag = pred.eq(target.cuda()).cpu()
-
         if total == 0:
             label_tot = target.clone().data.cpu()
         else:
@@ -147,94 +145,52 @@ def obtain_mahalanobis_labels(model, device, test_loader, adv_data_loader, noisy
         for i in range(data.size(0)):
             if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
                 selected_list.append(selected_index)
+
             selected_index += 1
+
         total += data.size(0)
 
     selected_list = torch.LongTensor(selected_list)
     label_tot = torch.index_select(label_tot, 0, selected_list)
+
     return label_tot.cpu().detach().numpy()
 
 
-def save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, save_detec_model):
-    # Save the scores and detection labels from the cross-validation folds to a pickle file
-    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
-    tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
-    with open(fname, 'wb') as fp:
-        pickle.dump(tmp, fp)
-
-    if save_detec_model and models_folds:
-        # Save the detection models from the cross-validation folds to a pickle file
-        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
-        with open(fname, 'wb') as fp:
-            pickle.dump(models_folds, fp)
-
-
-def load_checkpoint(output_dir, method_name, save_detec_model):
-    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
-    with open(fname, 'rb') as fp:
-        tmp = pickle.load(fp)
-
-    scores_folds = tmp['scores_folds']
-    labels_folds = tmp['labels_folds']
-    # Load the models if required
-    if save_detec_model:
-        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
-        with open(fname, 'rb') as fp:
-            models_folds = pickle.load(fp)
-    else:
-        models_folds = []
-
-    n_folds = len(scores_folds)
-    assert len(labels_folds) == n_folds, "'scores_folds' and 'labels_folds' do not have the same length"
-    if models_folds:
-        assert len(models_folds) == n_folds, "'models_folds' and 'scores_folds' do not have the same length"
-
-    return scores_folds, labels_folds, models_folds, n_folds
-
-
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te, load_clean=False):
+def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
     # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
     if adv_attack != CUSTOM_ATTACK:
         # Load the saved adversarial numpy data generated from this training and test fold
         # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
-        # Maximum number of adversarial samples in the test fold
+        # Maximum number of adversarial samples to include in the test fold
         max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
-        if not load_clean:
-            data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-                numpy_save_path,
-                max_n_test=max_num_adv,
-                sampling_type='ranked_by_norm',
-                norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
-                load_clean=load_clean
-            )
-            return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
-        else:
-            data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-                numpy_save_path,
-                max_n_test=max_num_adv,
-                sampling_type='ranked_by_norm',
-                norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
-                load_clean=load_clean
-            )
-            return data_tr_clean, labels_tr_clean, data_te_clean, labels_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
-    else:
-        # Custom attack
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
+        data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
+            numpy_save_path,
+            max_n_test=max_num_adv,
+            sampling_type='ranked_by_norm',
+            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
+        )
 
-        # Adversarial inputs from the train and test fold
-        data_te = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
+        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
+    else:
+        # Custom attack data generation was different. Only test fold data was generated
+        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
+
+        # Adversarial inputs from the test fold
+        data_te_adv = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
+        # Clean inputs corresponding to the adversarial inputs from the test fold
+        data_te_clean = np.load(os.path.join(numpy_save_path, "data_te_clean.npy"))
+
         # Predicted (mis-classified) labels
         labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
         # Labels of the original inputs from which the adversarial inputs were created
         labels_te = np.load(os.path.join(numpy_save_path, "labels_te_clean.npy"))
+
         # Norm of perturbations
         norm_perturb = np.load(os.path.join(numpy_save_path, 'norm_perturb.npy'))
         # Mask indicating which samples are adversarial
@@ -243,7 +199,8 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         mask_norm = norm_perturb <= np.percentile(norm_perturb[mask], 95.)
         mask_incl = np.logical_and(mask, mask_norm)
 
-        data_te_adv = data_te[mask_incl, :]
+        data_te_adv = data_te_adv[mask_incl, :]
+        data_te_clean = data_te_clean[mask_incl, :]
         labels_te_adv = labels_te[mask_incl]
         # Check if the original and predicted labels are all different for the adversarial inputs
         check_label_mismatch(labels_te_adv, labels_pred_te[mask_incl])
@@ -251,14 +208,16 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # We don't generate adversarial samples from the train fold for the custom attack.
         # Returning the train fold data from Carlini-Wagner attack instead. This is used only by the supervised
         # detection methods
-        data_tr_adv, labels_tr_adv, _, _ = load_adversarial_wrapper(
+        data_tr_clean, _, data_tr_adv, labels_tr_adv, _, _ = load_adversarial_wrapper(
             i, model_type, 'CW', max_attack_prop, num_clean_te
         )
+        # Alternative: return the test fold data in place of the train fold data
         # data_tr_adv = data_te_adv
+        # data_tr_clean = data_te_clean
         # labels_tr_adv = labels_te_adv
-    
 
-        return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
+        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
+
 
 def main():
     # Training settings
@@ -491,7 +450,6 @@ def main():
     # Set model in evaluation mode
     model.eval()
 
-
     # Check if the numpy data directory exists
     d = os.path.join(NUMPY_DATA_PATH, args.model_type)
     if not os.path.isdir(d):
@@ -510,8 +468,8 @@ def main():
 
     # Initialization
     if args.resume_from_ckpt:
-        scores_folds, labels_folds, models_folds, init_fold = load_checkpoint(output_dir, method_name,
-                                                                              args.save_detec_model)
+        scores_folds, labels_folds, models_folds, init_fold = load_detector_checkpoint(output_dir, method_name,
+                                                                                       args.save_detec_model)
         print("Loading saved results from a previous run. Completed {:d} fold(s). Resuming from fold {:d}.".
               format(init_fold, init_fold + 1))
     else:
@@ -526,9 +484,8 @@ def main():
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         num_clean_tr = labels_tr.shape[0]
@@ -557,9 +514,8 @@ def main():
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr_noisy, data_te_noisy = load_noisy_data(numpy_save_path)
         # Noisy data have the same labels as the clean data
@@ -588,14 +544,12 @@ def main():
         del noisy_test_fold_loader
 
         # Load the saved adversarial numpy data generated from this training and test fold
-        if args.detection_method != 'mahalanobis':
-            data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-                i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
-            )
-        else:
-            _, _, data_te_clean, labels_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-                i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te, load_clean=True
-            )
+        _, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
+            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
+        )
+        # `labels_te_adv` corresponds to the class labels of the clean samples, not that predicted by the DNN
+        labels_te_clean = labels_te_adv
+
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
         print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
@@ -808,9 +762,10 @@ def main():
             test_loader = convert_to_loader(data_te_clean, labels_te_clean)
             noisy_loader = convert_to_loader(data_te_noisy, labels_te_clean)
             adv_loader = convert_to_loader(data_te_adv, labels_te_clean)
-            labels_te = obtain_mahalanobis_labels(model, device, test_loader, adv_loader, noisy_loader)
+            labels_te_mahal = obtain_mahalanobis_labels(model, device, test_loader, adv_loader, noisy_loader)
 
-            fit_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir, train_fold_loader, data_te_clean, data_te_adv, data_te_noisy, labels_te)
+            fit_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir,
+                                   train_fold_loader, data_te_clean, data_te_adv, data_te_noisy, labels_te_mahal)
             get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir)
         
         else:
@@ -825,7 +780,8 @@ def main():
 
         scores_folds.append(scores_adv)
         labels_folds.append(labels_detec)
-        save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, args.save_detec_model)
+        save_detector_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name,
+                                 args.save_detec_model)
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
