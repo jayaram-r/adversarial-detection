@@ -115,45 +115,60 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
     return config_trust_score
 
 
-def obtain_mahalanobis_labels(model, device, test_loader, adv_data_loader, noisy_data_loader):
+def get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv, labels_te_clean):
+    # Convert numpy arrays to torch data loaders with appropriate dtype and device
+    data_loader = convert_to_loader(data_te_clean, labels_te_clean, dtype_x=torch.float, device=device)
+    noisy_data_loader = convert_to_loader(data_te_noisy, labels_te_clean, dtype_x=torch.float, device=device)
+    adv_data_loader = convert_to_loader(data_te_adv, labels_te_clean, dtype_x=torch.float, device=device)
 
     total = 0
     selected_list = []
     selected_index = 0
-    for idx, elements in enumerate(zip(adv_data_loader, noisy_data_loader, test_loader)):
-        adv_data = elements[0][0]
-        noisy_data = elements[1][0]
-        data = elements[2][0]
-        target = elements[2][1]
+    with torch.no_grad():
+        for elements in zip(adv_data_loader, noisy_data_loader, data_loader):
+            adv_data, _ = elements[0]
+            # adv_data = adv_data.to(device=device, dtype=torch.float)
+            noisy_data, _ = elements[1]
+            # noisy_data = noisy_data.to(device=device, dtype=torch.float)
+            data, target = elements[2]
+            # data = data.to(device=device, dtype=torch.float)
+            # target = target.to(device=device)
+            n_batch = data.size(0)
 
-        output_adv = model(adv_data.type(torch.FloatTensor).cuda())
-        pred_adv = output_adv.data.max(1)[1]
-        equal_flag_adv = pred_adv.eq(target.cuda()).cpu()
-        
-        output_noisy = model(noisy_data.type(torch.FloatTensor).cuda())
-        pred_noise = output_noisy.data.max(1)[1]
-        equal_flag_noise = pred_noise.eq(target.cuda()).cpu()
+            # predictions on adversarial data
+            output_adv = model(adv_data)
+            pred_adv = output_adv.max(1)[1]
+            equal_flag_adv = pred_adv.eq(target).cpu()
 
-        output = model(data.type(torch.FloatTensor).cuda())
-        pred = output.data.max(1)[1]
-        equal_flag = pred.eq(target.cuda()).cpu()
-        if total == 0:
-            label_tot = target.clone().data.cpu()
-        else:
-            label_tot = torch.cat((label_tot, target.clone().data.cpu()), 0)
+            # predictions on noisy data
+            output_noisy = model(noisy_data)
+            pred_noise = output_noisy.max(1)[1]
+            equal_flag_noise = pred_noise.eq(target).cpu()
 
-        for i in range(data.size(0)):
-            if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
-                selected_list.append(selected_index)
+            # predictions on clean data
+            output = model(data)
+            pred = output.max(1)[1]
+            equal_flag = pred.eq(target).cpu()
 
-            selected_index += 1
+            if total == 0:
+                label_tot = target.clone().cpu()
+            else:
+                label_tot = torch.cat((label_tot, target.clone().cpu()), 0)
 
-        total += data.size(0)
+            for i in range(n_batch):
+                if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
+                    # Correct prediction on the clean and noisy sample, but incorrect prediction on the
+                    # adversarial sample
+                    selected_list.append(selected_index)
 
+                selected_index += 1
+
+            total += n_batch
+
+    # return labels of the selected indices as a numpy array
     selected_list = torch.LongTensor(selected_list)
     label_tot = torch.index_select(label_tot, 0, selected_list)
-
-    return label_tot.cpu().detach().numpy()
+    return label_tot.detach().cpu().numpy()
 
 
 def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
@@ -753,17 +768,14 @@ def main():
                 models_folds.append(det_model)
 
         elif args.detection_method == 'mahalanobis':
-            # Range of noise standard deviation values
+            # Generate noisy data from a range of noise standard deviation values
             stdev_low = NOISE_STDEV_MIN[args.model_type]
             stdev_high = NOISE_STDEV_MAX[args.model_type]
             stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
             data_te_noisy = add_gaussian_noise(data_te_clean, stdev_values, seed=args.seed)
 
-            test_loader = convert_to_loader(data_te_clean, labels_te_clean)
-            noisy_loader = convert_to_loader(data_te_noisy, labels_te_clean)
-            adv_loader = convert_to_loader(data_te_adv, labels_te_clean)
-            labels_te_mahal = obtain_mahalanobis_labels(model, device, test_loader, adv_loader, noisy_loader)
-
+            labels_te_mahal = get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv,
+                                                     labels_te_clean)
             fit_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir,
                                    train_fold_loader, data_te_clean, data_te_adv, data_te_noisy, labels_te_mahal)
             get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir)
