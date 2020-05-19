@@ -42,7 +42,7 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.deep_mahalanobis.detector_deep_mahalanobis import (
+from detectors.deep_mahalanobis import (
     get_mahalanobis_scores,
     fit_mahalanobis_scores,
     get_mahalanobis_labels
