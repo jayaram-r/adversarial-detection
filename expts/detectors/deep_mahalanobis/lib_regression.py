@@ -1,9 +1,14 @@
-# several functions are from https://github.com/xingjunm/lid_adversarial_subspace_detection
+"""
+Deep Mahalanobis detection method repurposed from the author's implementation:
+https://github.com/pokaxpoka/deep_Mahalanobis_detector
+
+Several functions are taken from:
+https://github.com/xingjunm/lid_adversarial_subspace_detection
+"""
 from __future__ import print_function
 import numpy as np
 import os
-import detectors.calculate_log as callog #VC: needs to be installed
-
+import detectors.deep_mahalanobis.calculate_log as callog
 from scipy.spatial.distance import pdist, cdist, squareform
 
 
@@ -49,6 +54,7 @@ def block_split_adv(X, Y):
 
     return X_train, Y_train, X_test, Y_test
 
+
 def detection_performance(regressor, X, Y, outf):
     """
     Measure the detection performance
@@ -68,7 +74,8 @@ def detection_performance(regressor, X, Y, outf):
     l2.close()
     results = callog.metric(outf, ['TMP'])
     return results
-    
+
+
 def load_characteristics(score, dataset, out, outf):
     """
     Load the calculated scores

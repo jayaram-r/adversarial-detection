@@ -1,11 +1,16 @@
+"""
+Deep Mahalanobis detection method repurposed from the author's implementation:
+https://github.com/pokaxpoka/deep_Mahalanobis_detector
+
+"""
 from __future__ import print_function
 import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.autograd import Variable
 from scipy.spatial.distance import pdist, cdist, squareform
+
 
 # lid of a batch of query points X
 def mle_batch(data, batch, k):
@@ -22,6 +27,7 @@ def mle_batch(data, batch, k):
     a = np.apply_along_axis(np.sort, axis=1, arr=a)[:,1:k+1]
     a = np.apply_along_axis(f, axis=1, arr=a)
     return a
+
 
 # this function is from https://github.com/xingjunm/lid_adversarial_subspace_detection
 def merge_and_generate_labels(X_pos, X_neg):
@@ -41,6 +47,7 @@ def merge_and_generate_labels(X_pos, X_neg):
     y = y.reshape((X.shape[0], 1))
 
     return X, y
+
 
 def sample_estimator(model, num_classes, layer_wise_deep_mahalanobis, train_loader):
     """
@@ -153,6 +160,7 @@ def sample_estimator(model, num_classes, layer_wise_deep_mahalanobis, train_load
 
     return sample_class_mean, precision
 
+
 def get_Mahalanobis_score(model, test_loader, num_classes, outf, out_flag, net_type, sample_mean, precision, layer_index, magnitude):
     '''
     Compute the proposed Mahalanobis confidence score on input dataset
@@ -245,6 +253,7 @@ def get_Mahalanobis_score(model, test_loader, num_classes, outf, out_flag, net_t
 
     return Mahalanobis
 
+
 def get_posterior(model, net_type, test_loader, magnitude, temperature, outf, out_flag):
     '''
     Compute the maximum value of (processed) posterior distribution - ODIN
@@ -316,7 +325,8 @@ def get_posterior(model, net_type, test_loader, magnitude, temperature, outf, ou
                 
     f.close()
     g.close()
-    
+
+
 def get_Mahalanobis_score_adv(model, test_data, test_label, num_classes, outf, net_type, sample_mean, precision, layer_index, magnitude):
     '''
     Compute the proposed Mahalanobis confidence score on adversarial samples

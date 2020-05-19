@@ -42,12 +42,19 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.detector_deep_mahalanobis import (
-        get_mahalanobis_scores,
-        fit_mahalanobis_scores
+from detectors.deep_mahalanobis.detector_deep_mahalanobis import (
+    get_mahalanobis_scores,
+    fit_mahalanobis_scores
 )
-from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, DetectorLIDBatch
-from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
+from detectors.detector_lid_paper import (
+    DetectorLID,
+    DetectorLIDClassCond,
+    DetectorLIDBatch
+)
+from detectors.detector_proposed import (
+    DetectorLayerStatistics,
+    extract_layer_embeddings
+)
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
 try:
