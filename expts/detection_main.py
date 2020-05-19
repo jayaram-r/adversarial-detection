@@ -42,12 +42,20 @@ from detectors.detector_odds_are_odd import (
     fit_odds_are_odd,
     detect_odds_are_odd
 )
-from detectors.detector_deep_mahalanobis import (
-        get_mahalanobis_scores,
-        fit_mahalanobis_scores
+from detectors.deep_mahalanobis import (
+    get_mahalanobis_scores,
+    fit_mahalanobis_scores,
+    get_mahalanobis_labels
 )
-from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, DetectorLIDBatch
-from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
+from detectors.detector_lid_paper import (
+    DetectorLID,
+    DetectorLIDClassCond,
+    DetectorLIDBatch
+)
+from detectors.detector_proposed import (
+    DetectorLayerStatistics,
+    extract_layer_embeddings
+)
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
 try:
@@ -113,47 +121,6 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
         config_trust_score['model_dr'] = None
 
     return config_trust_score
-
-
-def obtain_mahalanobis_labels(model, device, test_loader, adv_data_loader, noisy_data_loader):
-
-    total = 0
-    selected_list = []
-    selected_index = 0
-    for idx, elements in enumerate(zip(adv_data_loader, noisy_data_loader, test_loader)):
-        adv_data = elements[0][0]
-        noisy_data = elements[1][0]
-        data = elements[2][0]
-        target = elements[2][1]
-
-        output_adv = model(adv_data.type(torch.FloatTensor).cuda())
-        pred_adv = output_adv.data.max(1)[1]
-        equal_flag_adv = pred_adv.eq(target.cuda()).cpu()
-        
-        output_noisy = model(noisy_data.type(torch.FloatTensor).cuda())
-        pred_noise = output_noisy.data.max(1)[1]
-        equal_flag_noise = pred_noise.eq(target.cuda()).cpu()
-
-        output = model(data.type(torch.FloatTensor).cuda())
-        pred = output.data.max(1)[1]
-        equal_flag = pred.eq(target.cuda()).cpu()
-        if total == 0:
-            label_tot = target.clone().data.cpu()
-        else:
-            label_tot = torch.cat((label_tot, target.clone().data.cpu()), 0)
-
-        for i in range(data.size(0)):
-            if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
-                selected_list.append(selected_index)
-
-            selected_index += 1
-
-        total += data.size(0)
-
-    selected_list = torch.LongTensor(selected_list)
-    label_tot = torch.index_select(label_tot, 0, selected_list)
-
-    return label_tot.cpu().detach().numpy()
 
 
 def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
@@ -753,17 +720,14 @@ def main():
                 models_folds.append(det_model)
 
         elif args.detection_method == 'mahalanobis':
-            # Range of noise standard deviation values
+            # Generate noisy data from a range of noise standard deviation values
             stdev_low = NOISE_STDEV_MIN[args.model_type]
             stdev_high = NOISE_STDEV_MAX[args.model_type]
             stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
             data_te_noisy = add_gaussian_noise(data_te_clean, stdev_values, seed=args.seed)
 
-            test_loader = convert_to_loader(data_te_clean, labels_te_clean)
-            noisy_loader = convert_to_loader(data_te_noisy, labels_te_clean)
-            adv_loader = convert_to_loader(data_te_adv, labels_te_clean)
-            labels_te_mahal = obtain_mahalanobis_labels(model, device, test_loader, adv_loader, noisy_loader)
-
+            labels_te_mahal = get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv,
+                                                     labels_te_clean)
             fit_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir,
                                    train_fold_loader, data_te_clean, data_te_adv, data_te_noisy, labels_te_mahal)
             get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir)

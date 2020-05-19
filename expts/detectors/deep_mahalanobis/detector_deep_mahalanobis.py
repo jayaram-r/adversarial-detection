@@ -1,25 +1,85 @@
+"""
+Deep Mahalanobis detection method repurposed from the author's implementation:
+https://github.com/pokaxpoka/deep_Mahalanobis_detector
+
+"""
 from nets.svhn import *
 from nets.cifar10 import *
 from nets.mnist import *
 from nets.resnet import *
-#from detectors.tf_robustify import *
 import itertools as itt
 from sklearn.metrics import confusion_matrix
-from helpers.utils import get_samples_as_ndarray
-import detectors.lib_generation as lib_generation
-import detectors.lib_regression as lib_regression
-
+from helpers.utils import (
+    get_samples_as_ndarray,
+    convert_to_loader
+)
+import detectors.deep_mahalanobis.lib_generation as lib_generation
+import detectors.deep_mahalanobis.lib_regression as lib_regression
 import torch
 import numpy as np
 import os
-
 from torch.autograd import Variable
 from sklearn.linear_model import LogisticRegressionCV
 
-def fit_mahalanobis_scores(model, adv_type, dataset, num_labels, outf,
-        train_loader, test_clean_data, test_adv_data, test_noisy_data, test_label):
-    
-    outf = outf
+
+def get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv, labels_te_clean):
+    # Convert numpy arrays to torch data loaders with appropriate dtype and device
+    data_loader = convert_to_loader(data_te_clean, labels_te_clean, dtype_x=torch.float, device=device)
+    noisy_data_loader = convert_to_loader(data_te_noisy, labels_te_clean, dtype_x=torch.float, device=device)
+    adv_data_loader = convert_to_loader(data_te_adv, labels_te_clean, dtype_x=torch.float, device=device)
+
+    total = 0
+    selected_list = []
+    selected_index = 0
+    with torch.no_grad():
+        for elements in zip(adv_data_loader, noisy_data_loader, data_loader):
+            adv_data, _ = elements[0]
+            # adv_data = adv_data.to(device=device, dtype=torch.float)
+            noisy_data, _ = elements[1]
+            # noisy_data = noisy_data.to(device=device, dtype=torch.float)
+            data, target = elements[2]
+            # data = data.to(device=device, dtype=torch.float)
+            # target = target.to(device=device)
+            n_batch = data.size(0)
+
+            # predictions on adversarial data
+            output_adv = model(adv_data)
+            pred_adv = output_adv.max(1)[1]
+            equal_flag_adv = pred_adv.eq(target).cpu()
+
+            # predictions on noisy data
+            output_noisy = model(noisy_data)
+            pred_noise = output_noisy.max(1)[1]
+            equal_flag_noise = pred_noise.eq(target).cpu()
+
+            # predictions on clean data
+            output = model(data)
+            pred = output.max(1)[1]
+            equal_flag = pred.eq(target).cpu()
+
+            if total == 0:
+                label_tot = target.clone().cpu()
+            else:
+                label_tot = torch.cat((label_tot, target.clone().cpu()), 0)
+
+            for i in range(n_batch):
+                if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
+                    # Correct prediction on the clean and noisy sample, but incorrect prediction on the
+                    # adversarial sample
+                    selected_list.append(selected_index)
+
+                selected_index += 1
+
+            total += n_batch
+
+    # return labels of the selected indices as a numpy array
+    selected_list = torch.LongTensor(selected_list)
+    label_tot = torch.index_select(label_tot, 0, selected_list)
+    return label_tot.detach().cpu().numpy()
+
+
+def fit_mahalanobis_scores(model, adv_type, dataset, num_labels, outf, train_loader, test_clean_data,
+                           test_adv_data, test_noisy_data, test_label):
     net_type = dataset
 
     test_clean_data = torch.from_numpy(test_clean_data)
@@ -36,6 +96,8 @@ def fit_mahalanobis_scores(model, adv_type, dataset, num_labels, outf,
         temp_x = torch.rand(2,3,32,32).cuda()
     elif dataset == 'svhn':
         temp_x = torch.rand(2,3,32,32).cuda()
+    else:
+        raise ValueError("Unknown dataset '{}'".format(dataset))
 
     temp_x = Variable(temp_x)
     _, temp_list = model.layer_wise_deep_mahalanobis(temp_x)
@@ -115,10 +177,11 @@ def fit_mahalanobis_scores(model, adv_type, dataset, num_labels, outf,
         np.save(file_name, Mahalanobis_data)
         
     print('scores calculated')
-        #return Mahalanobis_out
+    #return Mahalanobis_out
+
 
 def get_mahalanobis_scores(model, adv_type, dataset, num_labels, outf):
-        #train_loader, test_clean_data, test_adv_data, test_noisy_data, test_label):
+    #train_loader, test_clean_data, test_adv_data, test_noisy_data, test_label):
 
     # initial setup
     #dataset_list = ['cifar10', 'cifar100', 'svhn']
@@ -155,8 +218,10 @@ def get_mahalanobis_scores(model, adv_type, dataset, num_labels, outf):
                     best_auroc = results['TMP']['AUROC']
                     best_index = score
                     best_result = lib_regression.detection_performance(lr, X_test, Y_test, outf)
+
             list_best_results_out.append(best_result)
             list_best_results_index_out.append(best_index)
+
         list_best_results.append(list_best_results_out)
         list_best_results_index.append(list_best_results_index_out)
     '''
@@ -164,7 +229,7 @@ def get_mahalanobis_scores(model, adv_type, dataset, num_labels, outf):
     dataset_list = [dataset]
     adv_test_list = [adv_type]
     print('evaluate the Mahalanobis estimator')
-    score_list = ['Mahalanobis_0.0', 'Mahalanobis_0.01', 'Mahalanobis_0.005', \
+    score_list = ['Mahalanobis_0.0', 'Mahalanobis_0.01', 'Mahalanobis_0.005',
                   'Mahalanobis_0.002', 'Mahalanobis_0.0014', 'Mahalanobis_0.001', 'Mahalanobis_0.0005']
     list_best_results_ours, list_best_results_index_ours = [], []
     for dataset in dataset_list:
@@ -193,8 +258,10 @@ def get_mahalanobis_scores(model, adv_type, dataset, num_labels, outf):
                     best_auroc = results['TMP']['AUROC']
                     best_index = score
                     best_result = lib_regression.detection_performance(lr, X_test, Y_test, outf)
+
             list_best_results_out.append(best_result)
             list_best_results_index_out.append(best_index)
+
         list_best_results_ours.append(list_best_results_out)
         list_best_results_index_ours.append(list_best_results_index_out)
 
@@ -240,4 +307,5 @@ def get_mahalanobis_scores(model, adv_type, dataset, num_labels, outf):
             print('Input noise: ' + list_best_results_index_ours[count_in][count_out])
             print('')
             count_out += 1
+
         count_in += 1
