@@ -44,7 +44,8 @@ from detectors.detector_odds_are_odd import (
 )
 from detectors.deep_mahalanobis.detector_deep_mahalanobis import (
     get_mahalanobis_scores,
-    fit_mahalanobis_scores
+    fit_mahalanobis_scores,
+    get_mahalanobis_labels
 )
 from detectors.detector_lid_paper import (
     DetectorLID,
@@ -120,62 +121,6 @@ def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
         config_trust_score['model_dr'] = None
 
     return config_trust_score
-
-
-def get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv, labels_te_clean):
-    # Convert numpy arrays to torch data loaders with appropriate dtype and device
-    data_loader = convert_to_loader(data_te_clean, labels_te_clean, dtype_x=torch.float, device=device)
-    noisy_data_loader = convert_to_loader(data_te_noisy, labels_te_clean, dtype_x=torch.float, device=device)
-    adv_data_loader = convert_to_loader(data_te_adv, labels_te_clean, dtype_x=torch.float, device=device)
-
-    total = 0
-    selected_list = []
-    selected_index = 0
-    with torch.no_grad():
-        for elements in zip(adv_data_loader, noisy_data_loader, data_loader):
-            adv_data, _ = elements[0]
-            # adv_data = adv_data.to(device=device, dtype=torch.float)
-            noisy_data, _ = elements[1]
-            # noisy_data = noisy_data.to(device=device, dtype=torch.float)
-            data, target = elements[2]
-            # data = data.to(device=device, dtype=torch.float)
-            # target = target.to(device=device)
-            n_batch = data.size(0)
-
-            # predictions on adversarial data
-            output_adv = model(adv_data)
-            pred_adv = output_adv.max(1)[1]
-            equal_flag_adv = pred_adv.eq(target).cpu()
-
-            # predictions on noisy data
-            output_noisy = model(noisy_data)
-            pred_noise = output_noisy.max(1)[1]
-            equal_flag_noise = pred_noise.eq(target).cpu()
-
-            # predictions on clean data
-            output = model(data)
-            pred = output.max(1)[1]
-            equal_flag = pred.eq(target).cpu()
-
-            if total == 0:
-                label_tot = target.clone().cpu()
-            else:
-                label_tot = torch.cat((label_tot, target.clone().cpu()), 0)
-
-            for i in range(n_batch):
-                if equal_flag[i] == 1 and equal_flag_noise[i] == 1 and equal_flag_adv[i] == 0:
-                    # Correct prediction on the clean and noisy sample, but incorrect prediction on the
-                    # adversarial sample
-                    selected_list.append(selected_index)
-
-                selected_index += 1
-
-            total += n_batch
-
-    # return labels of the selected indices as a numpy array
-    selected_list = torch.LongTensor(selected_list)
-    label_tot = torch.index_select(label_tot, 0, selected_list)
-    return label_tot.detach().cpu().numpy()
 
 
 def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
