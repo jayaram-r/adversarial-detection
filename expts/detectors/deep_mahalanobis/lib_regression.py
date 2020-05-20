@@ -70,27 +70,30 @@ def detection_performance(regressor, X, Y, outf):
             l1.write("{}\n".format(-y_pred[i]))
         else:
             l2.write("{}\n".format(-y_pred[i]))
+
     l1.close()
     l2.close()
     results = callog.metric(outf, ['TMP'])
     return results
 
 
-def load_characteristics(score, dataset, out, outf):
+def load_characteristics(score, dataset, out_type, outf):
     """
     Load the calculated scores
     return: data and label of input score
     """
     X, Y = None, None
     
-    file_name = os.path.join(outf, "%s_%s_%s.npy" % (score, dataset, out))
+    file_name = os.path.join(outf, "%s_%s_%s.npy" % (score, dataset, out_type))
     data = np.load(file_name)
     
     if X is None:
         X = data[:, :-1]
     else:
         X = np.concatenate((X, data[:, :-1]), axis=1)
+
     if Y is None:
         Y = data[:, -1] # labels only need to load once
-         
+        # should this be cast to type int?
+
     return X, Y
