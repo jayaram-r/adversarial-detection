@@ -343,9 +343,9 @@ def main():
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
 
     elif args.detection_method == 'mahalanobis':
-        # Should we apply dimensionality reduction or pre-processing to the layer embeddings?
-        # According to the paper, they transform a `C x H x W` layer embedding to a `C x 1` vector through
-        # average pooling
+        # No dimensionality reduction needed here
+        # According to the paper, they internally transform a `C x H x W` layer embedding to a `C x 1` vector
+        # through global average pooling
         apply_dim_reduc = False
 
     # Model file for dimension reduction, if required
@@ -725,12 +725,18 @@ def main():
             stdev_high = NOISE_STDEV_MAX[args.model_type]
             stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
             data_te_noisy = add_gaussian_noise(data_te_clean, stdev_values, seed=args.seed)
-
+            # Get the labels for samples on which the DNN predicts correctly on the clean and noisy versions, but
+            # incorrectly on the adversarial version. This will have length <= the length of `labels_te_clean`
             labels_te_mahal = get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv,
                                                      labels_te_clean)
-            fit_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir,
-                                   train_fold_loader, data_te_clean, data_te_adv, data_te_noisy, labels_te_mahal)
-            get_mahalanobis_scores(model, args.adv_attack, args.model_type, num_classes, args.output_dir)
+            # Sub-directory for this fold so that the output files are not overwritten
+            temp_direc = os.path.join(output_dir, 'fold_{}'.format(i + 1))
+            if not os.path.isdir(temp_direc):
+                os.makedirs(temp_direc)
+
+            fit_mahalanobis_scores(model, device, args.adv_attack, args.model_type, num_classes, temp_direc,
+                                   train_fold_loader, data_te_clean, data_te_adv, data_te_noisy)
+            get_mahalanobis_scores(args.adv_attack, args.model_type, temp_direc)
         
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
