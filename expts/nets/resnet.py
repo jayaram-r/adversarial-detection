@@ -135,7 +135,7 @@ class ResNet(nn.Module):
         if layer_index == 6:
             return x
 
-        x = out.view(x.size(0), -1)
+        x = x.view(x.size(0), -1)
         x = self.linear(x)
         if layer_index == 7:
             return x

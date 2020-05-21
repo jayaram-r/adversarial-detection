@@ -7,8 +7,6 @@ from nets.svhn import *
 from nets.cifar10 import *
 from nets.mnist import *
 from nets.resnet import *
-import itertools as itt
-from sklearn.metrics import confusion_matrix
 from helpers.utils import (
     get_samples_as_ndarray,
     convert_to_loader
@@ -18,7 +16,6 @@ import detectors.deep_mahalanobis.lib_regression as lib_regression
 import torch
 import numpy as np
 import os
-from torch.autograd import Variable
 from sklearn.linear_model import LogisticRegressionCV
 from sklearn.preprocessing import MinMaxScaler
 
@@ -118,12 +115,8 @@ def fit_mahalanobis_scores(model, device, adv_type, net_type, num_labels, outf, 
     print("Number of layer embeddings: {:d}".format(num_output))
     
     feature_list = np.zeros(num_output, dtype=np.int)
-    count = 0
-    for out in temp_list:
-        # out = out.view(2, -1)
-        # print(out.shape, out.size(1))
-        feature_list[count] = out.size(1)   # num. channels for conv. layers; num. dimensions for FC layers
-        count += 1
+    for i, out in enumerate(temp_list):
+        feature_list[i] = out.size(1)   # num. channels for conv. layers; num. dimensions for FC layers
         
     print('Calculating the sample mean and covariance matrix')
     sample_mean, precision = lib_generation.sample_estimator(model, device, num_labels, feature_list, train_loader)
@@ -155,7 +148,8 @@ def fit_mahalanobis_scores(model, device, adv_type, net_type, num_labels, outf, 
         np.save(file_name, mahalanobis_data)
 
         print("Training a logistic classifier to discriminate in-distribution from OOD/adversarial samples")
-        model_dict_curr = train_logistic_classifier(mahalanobis_data, scale_features=False, n_jobs=n_jobs)
+        model_dict_curr = train_logistic_classifier(mahalanobis_data, scale_features=False, balance_classes=False,
+                                                    n_jobs=n_jobs)
         auc_curr = model_dict_curr['auc_avg']
         if auc_curr > auc_max:
             auc_max = auc_curr
@@ -199,7 +193,7 @@ def train_logistic_classifier(mahalanobis_data, n_cv_folds=5,
     print("Using {:d}-fold cross-validation with area under ROC curve as the metric to select the best "
           "regularization hyperparameter.".format(n_cv_folds))
     print("Proportion of positive (adversarial or OOD) samples in the training data: {:.4f}".format(pos_prop))
-    if pos_prop <= 0.2:
+    if pos_prop <= 0.1:
         # high imbalance in the classes
         balance_classes = True
 
