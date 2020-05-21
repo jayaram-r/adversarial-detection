@@ -8,8 +8,8 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
 from scipy.spatial.distance import pdist, cdist, squareform
+from helpers.constants import NORMALIZE_IMAGES
 
 
 # lid of a batch of query points X
@@ -166,6 +166,8 @@ def get_Mahalanobis_score(model, device, test_loader, num_classes, outf, out_fla
     if model.training:
         model.eval()
 
+    scale_images = NORMALIZE_IMAGES[net_type][1]
+    n_channels = len(scale_images)
     Mahalanobis = []
     if out_flag:
         temp_file_name = '%s/confidence_Ga%s_In.txt'%(outf, str(layer_index))
@@ -226,25 +228,16 @@ def get_Mahalanobis_score(model, device, test_loader, num_classes, outf, out_fla
                                  gradient.index_select(1, torch.LongTensor([2]).cuda()) / (0.2010))
         '''
         
-        if net_type == 'mnist':
+        if n_channels == 1:
             gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / 0.3081)
-        elif net_type == 'cifar10':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / 0.2023)
-            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / 0.1994)
-            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / 0.2010)
-        elif net_type == 'svhn':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / 0.5)
-            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / 0.5)
-            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / 0.5)
+                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / scale_images[0])
         else:
-            raise ValueError("Unknown net type '{}'".format(net_type))
+            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / scale_images[0])
+            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / scale_images[1])
+            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / scale_images[2])
 
         with torch.no_grad():
             tempInputs = torch.add(data, -magnitude, gradient).to(device=device, dtype=torch.float)
@@ -282,6 +275,8 @@ def get_Mahalanobis_score_adv(model, device, test_data, num_classes, net_type, s
     if model.training:
         model.eval()
 
+    scale_images = NORMALIZE_IMAGES[net_type][1]
+    n_channels = len(scale_images)
     n_samp = test_data.size(0)
     batch_size = 100
     total = 0
@@ -338,25 +333,16 @@ def get_Mahalanobis_score_adv(model, device, test_data, num_classes, net_type, s
                                  gradient.index_select(1, torch.LongTensor([2]).cuda()) / (0.2010))
         '''
 
-        if net_type == 'mnist':
+        if n_channels == 1:
             gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / 0.3081)
-        elif net_type == 'cifar10':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / 0.2023)
-            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / 0.1994)
-            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / 0.2010)
-        elif net_type == 'svhn':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / 0.5)
-            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / 0.5)
-            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
-                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / 0.5)
+                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / scale_images[0])
         else:
-            raise ValueError("Unknown net type '{}'".format(net_type))
+            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / scale_images[0])
+            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / scale_images[1])
+            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / scale_images[2])
         
         with torch.no_grad():
             tempInputs = torch.add(data, -magnitude, gradient).to(device=device, dtype=torch.float)
@@ -383,7 +369,7 @@ def get_Mahalanobis_score_adv(model, device, test_data, num_classes, net_type, s
 
 
 # Not used
-def get_posterior(model, net_type, test_loader, magnitude, temperature, outf, out_flag):
+def get_posterior(model, device, net_type, test_loader, magnitude, temperature, outf, out_flag):
     '''
     Compute the maximum value of (processed) posterior distribution - ODIN
     return: null
@@ -392,6 +378,8 @@ def get_posterior(model, net_type, test_loader, magnitude, temperature, outf, ou
     if model.training:
         model.eval()
 
+    scale_images = NORMALIZE_IMAGES[net_type][1]
+    n_channels = len(scale_images)
     total = 0
     if out_flag:
         temp_file_name_val = '%s/confidence_PoV_In.txt' % (outf)
@@ -405,14 +393,13 @@ def get_posterior(model, net_type, test_loader, magnitude, temperature, outf, ou
 
     for data, _ in test_loader:
         total += data.size(0)
-        data = data.cuda()
-        data = Variable(data, requires_grad=True)
+        data = data.cuda(device=device)
+        data.requires_grad = True
         batch_output = model(data)
 
         # temperature scaling
         outputs = batch_output / temperature
         labels = outputs.max(1)[1]
-        labels = Variable(labels)
         loss = criterion(outputs, labels)
         loss.backward()
 
@@ -436,29 +423,23 @@ def get_posterior(model, net_type, test_loader, magnitude, temperature, outf, ou
                                  gradient.index_select(1, torch.LongTensor([2]).cuda()) / (0.2010))
         '''
 
-        if net_type == 'mnist':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda()) / 0.3081)
-        elif net_type == 'cifar10':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda()) / 0.2023)
-            gradient.index_copy_(1, torch.LongTensor([1]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([1]).cuda()) / 0.1994)
-            gradient.index_copy_(1, torch.LongTensor([2]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([2]).cuda()) / 0.2010)
-        elif net_type == 'svhn':
-            gradient.index_copy_(1, torch.LongTensor([0]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([0]).cuda()) / 0.5)
-            gradient.index_copy_(1, torch.LongTensor([1]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([1]).cuda()) / 0.5)
-            gradient.index_copy_(1, torch.LongTensor([2]).cuda(),
-                                 gradient.index_select(1, torch.LongTensor([2]).cuda()) / 0.5)
+        if n_channels == 1:
+            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / scale_images[0])
+        else:
+            gradient.index_copy_(1, torch.LongTensor([0]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([0]).cuda(device=device)) / scale_images[0])
+            gradient.index_copy_(1, torch.LongTensor([1]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([1]).cuda(device=device)) / scale_images[1])
+            gradient.index_copy_(1, torch.LongTensor([2]).cuda(device=device),
+                                 gradient.index_select(1, torch.LongTensor([2]).cuda(device=device)) / scale_images[2])
 
-        tempInputs = torch.add(data, -magnitude, gradient)
-        outputs = model(Variable(tempInputs, volatile=True))
-        outputs = outputs / temperature
-        soft_out = F.softmax(outputs, dim=1)
-        soft_out, _ = torch.max(soft_out, dim=1)
+        with torch.no_grad():
+            tempInputs = torch.add(data, -magnitude, gradient)
+            outputs = model(tempInputs)
+            outputs = outputs / temperature
+            soft_out = F.softmax(outputs, dim=1)
+            soft_out, _ = torch.max(soft_out, dim=1)
 
         for i in range(data.size(0)):
             if total <= 1000:
