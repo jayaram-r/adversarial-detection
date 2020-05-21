@@ -720,24 +720,26 @@ def main():
                 models_folds.append(det_model)
 
         elif args.detection_method == 'mahalanobis':
-            # Generate noisy data from a range of noise standard deviation values
-            stdev_low = NOISE_STDEV_MIN[args.model_type]
-            stdev_high = NOISE_STDEV_MAX[args.model_type]
-            stdev_values = np.linspace(stdev_low, stdev_high, num=NUM_NOISE_VALUES)
-            data_te_noisy = add_gaussian_noise(data_te_clean, stdev_values, seed=args.seed)
-            # Get the labels for samples on which the DNN predicts correctly on the clean and noisy versions, but
-            # incorrectly on the adversarial version. This will have length <= the length of `labels_te_clean`
-            labels_te_mahal = get_mahalanobis_labels(model, device, data_te_clean, data_te_noisy, data_te_adv,
-                                                     labels_te_clean)
             # Sub-directory for this fold so that the output files are not overwritten
             temp_direc = os.path.join(output_dir, 'fold_{}'.format(i + 1))
             if not os.path.isdir(temp_direc):
                 os.makedirs(temp_direc)
 
-            fit_mahalanobis_scores(model, device, args.adv_attack, args.model_type, num_classes, temp_direc,
-                                   train_fold_loader, data_te_clean, data_te_adv, data_te_noisy)
-            get_mahalanobis_scores(args.adv_attack, args.model_type, temp_direc)
-        
+            # Calculate the mahalanobis distance features per layer and fit a logistic classifier on the extracted
+            # features using data from the training fold
+            model_detector = fit_mahalanobis_scores(
+                model, device, args.adv_attack, args.model_type, num_classes, temp_direc, train_fold_loader,
+                data_tr, data_tr_adv, data_tr_noisy, n_jobs=args.n_jobs
+            )
+            # Calculate the mahalanobis distance features per layer for the best noise magnitude and predict the
+            # logistic classifer to score the samples.
+            # Scores on clean data from the test fold
+            scores_adv1 = get_mahalanobis_scores(model_detector, data_te, model, device, args.model_type)
+
+            # Scores on adversarial data from the test fold
+            scores_adv2 = get_mahalanobis_scores(model_detector, data_te_adv, model, device, args.model_type)
+
+            scores_adv = np.concatenate([scores_adv1, scores_adv2])
         else:
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 
