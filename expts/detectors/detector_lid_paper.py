@@ -331,10 +331,10 @@ class DetectorLID:
         ).fit(features_lid, labels)
 
         # Larger values of this score correspond to a higher probability of predicting class 1 (adversarial)
-        scores_normal = self.model_logistic.decision_function(features_lid_normal)
-        scores_adversarial = self.model_logistic.decision_function(features_lid_adversarial)
+        scores_normal = self.model_logistic.decision_function(self.scaler.transform(features_lid_normal))
+        scores_adversarial = self.model_logistic.decision_function(self.scaler.transform(features_lid_adversarial))
         if noisy_data:
-            scores_noisy = self.model_logistic.decision_function(features_lid_noisy)
+            scores_noisy = self.model_logistic.decision_function(self.scaler.transform(features_lid_noisy))
             return self, scores_normal, scores_adversarial, scores_noisy
         else:
             return self, scores_normal, scores_adversarial
@@ -828,10 +828,10 @@ class DetectorLIDClassCond:
         ).fit(features_lid, labels_bin)
 
         # Larger values of this score correspond to a higher probability of predicting class 1 (adversarial)
-        scores_normal = self.model_logistic.decision_function(features_lid_normal)
-        scores_adversarial = self.model_logistic.decision_function(features_lid_adversarial)
+        scores_normal = self.model_logistic.decision_function(self.scaler.transform(features_lid_normal))
+        scores_adversarial = self.model_logistic.decision_function(self.scaler.transform(features_lid_adversarial))
         if noisy_data:
-            scores_noisy = self.model_logistic.decision_function(features_lid_noisy)
+            scores_noisy = self.model_logistic.decision_function(self.scaler.transform(features_lid_noisy))
             return self, scores_normal, scores_adversarial, scores_noisy
         else:
             return self, scores_normal, scores_adversarial
