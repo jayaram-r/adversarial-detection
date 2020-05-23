@@ -741,9 +741,9 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     else:
         plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), rotation=0)
 
-    plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
-    plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
-    # plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
+    plt.xlabel(plot_dict['x_label'], fontsize=9, fontweight='bold')
+    plt.ylabel(plot_dict['y_label'], fontsize=9, fontweight='bold')
+    # plt.title(plot_dict['title'], fontsize=9, fontweight='bold')
     if not place_legend_outside:
         plt.legend(loc='best', prop={'size': 'xx-small', 'weight': 'bold'})
     else:

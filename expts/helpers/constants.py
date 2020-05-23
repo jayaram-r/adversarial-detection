@@ -116,6 +116,6 @@ NUM_RANDOM_SAMPLES = 20000
 NUM_BOOTSTRAP = 100
 
 # Plot colors and markers
-COLORS = ['r', 'b', 'g', 'orange', 'hotpink', 'm', 'lawngreen', 'grey', 'c', 'y', 'steelblue', 'tan',
+COLORS = ['r', 'b', 'hotpink', 'orange', 'g', 'm', 'lawngreen', 'grey', 'c', 'y', 'steelblue', 'tan',
           'lightsalmon', 'navy', 'gold']
 MARKERS = ['o', '^', 'v', 's', '*', 'D', 'P', '>', '<', 'X', 'h', '1', '_', '2', '|', '3', '4']
