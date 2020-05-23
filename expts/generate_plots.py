@@ -12,8 +12,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-dir', '-o', required=True, help='output directory with the performance '
                                                                   'metrics files')
-    parser.add_argument('--plot-dir', '-o', default='', help='directory to save the plot files')
-    parser.add_argument('--pos-label', '-p', default='adversarial',
+    parser.add_argument('--plot-dir', '-p', default='', help='directory to save the plot files')
+    parser.add_argument('--pos-label', '--pl', default='adversarial',
                         help='label for the positive class - e.g. adversarial or ood')
     parser.add_argument('--name-prefix', '--pre', default='', help='optional prefix for the plot filenames')
     parser.add_argument('--log-scale', action='store_true', default=False,
