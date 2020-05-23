@@ -745,10 +745,11 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.ylabel(plot_dict['y_label'], fontsize=9, fontweight='bold')
     # plt.title(plot_dict['title'], fontsize=9, fontweight='bold')
     if not place_legend_outside:
-        plt.legend(loc='best', prop={'size': 'xx-small', 'weight': 'bold'})
+        plt.legend(loc='best', frameon=False, prop={'size': 'xx-small', 'weight': 'bold'})
     else:
         # place the upper right end of the box outside and slightly below the plot axes
-        plt.legend(loc='upper right', bbox_to_anchor=(1, -0.07), prop={'size': 'xx-small', 'weight': 'bold'})
+        plt.legend(loc='upper right', frameon=False, bbox_to_anchor=(1, -0.07),
+                   prop={'size': 'xx-small', 'weight': 'bold'})
 
     fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
