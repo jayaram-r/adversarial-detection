@@ -785,7 +785,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['auc']['CI_lower'])
         y_up = np.array(d['auc']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': np.around(100 * d['proportion'], decimals=2),
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -811,7 +811,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['avg_prec']['CI_lower'])
         y_up = np.array(d['avg_prec']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': np.around(100 * d['proportion'], decimals=2),
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -838,7 +838,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             y_low = np.array([v[j] for v in d['pauc']['CI_lower']])
             y_up = np.array([v[j] for v in d['pauc']['CI_upper']])
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': np.around(100 * d['proportion'], decimals=2),
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
@@ -867,7 +867,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             # Excess FPR above the target value `f`
             fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': np.around(100 * d['proportion'], decimals=2),
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
