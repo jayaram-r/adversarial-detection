@@ -18,7 +18,8 @@ from helpers.constants import (
     FPR_MAX_PAUC,
     FPR_THRESH,
     BATCH_SIZE_DEF,
-    COLORS
+    COLORS,
+    MARKERS
 )
 from torch.utils.data import Dataset, TensorDataset, DataLoader
 import matplotlib
@@ -528,8 +529,6 @@ def metrics_for_accuracy(labels, clean_labels, output_file=None):
     return results
 
 
-# TODO: Can we stratify by attack labels in order to subsample while preserving the same proportion of different
-#  attack methods as in the full sample?
 def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
                                               num_random_samples=100, seed=SEED_DEFAULT, output_file=None,
                                               max_pos_proportion=1.0, log_scale=False):
@@ -703,7 +702,7 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
 
 
 def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False,
-                log_scale=False, n_ticks=8):
+                log_scale=False, n_ticks=8, hide_errorbar=False):
     fig = plt.figure()
     if log_scale:
         plt.xscale('log', basex=10)
@@ -712,19 +711,20 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     y_vals = []
     for j, m in enumerate(methods):
         d = plot_dict[m]
-        if 'y_err' not in d:
-            plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker='.', label=m)
+        if hide_errorbar or ('y_err' not in d):
+            plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker=MARKERS[j], label=m)
         else:
             plt.errorbar(d['x_vals'], d['y_vals'], yerr=d['y_err'],
                          fmt='', elinewidth=1, capsize=4,
-                         linestyle='--', color=COLORS[j], marker='.', label=m)
+                         linestyle='--', color=COLORS[j], marker=MARKERS[j], label=m)
 
         x_vals.extend(d['x_vals'])
         y_vals.extend(d['y_vals'])
-        if 'y_low' in d:
-            y_vals.extend(d['y_low'])
-        if 'y_up' in d:
-            y_vals.extend(d['y_up'])
+        if not hide_errorbar:
+            if 'y_low' in d:
+                y_vals.extend(d['y_low'])
+            if 'y_up' in d:
+                y_vals.extend(d['y_up'])
 
     x_bounds = get_data_bounds(np.array(x_vals), alpha=0.99)
     y_bounds = get_data_bounds(np.array(y_vals), alpha=0.99)
@@ -743,19 +743,20 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
 
     plt.xlabel(plot_dict['x_label'], fontsize=10, fontweight='bold')
     plt.ylabel(plot_dict['y_label'], fontsize=10, fontweight='bold')
-    plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
+    # plt.title(plot_dict['title'], fontsize=10, fontweight='bold')
     if not place_legend_outside:
         plt.legend(loc='best', prop={'size': 'xx-small', 'weight': 'bold'})
     else:
         # place the upper right end of the box outside and slightly below the plot axes
         plt.legend(loc='upper right', bbox_to_anchor=(1, -0.07), prop={'size': 'xx-small', 'weight': 'bold'})
 
-    fig.savefig(plot_file, dpi=600, bbox_inches='tight', transparent=False)
+    fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
+    fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
 
 
 def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial',
-                                log_scale=False):
+                                log_scale=False, hide_errorbar=False, name_prefix=''):
     """
     Plot the performance comparison for different detection methods.
 
@@ -765,17 +766,18 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     :param place_legend_outside: Set to True to place the legend outside the plot area.
     :param pos_label: string with the positive class label.
     :param log_scale: Set to True to use a logarithmic scale on the x-axis.
-    :return: None
+    :param hide_errorbar: Set to True to hide error-bars from the plots.
+    :param name_prefix: String with a file prefix.
     """
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    x_label = '% {} samples'.format(pos_label)
+    x_label = 'Proportion of {} samples (%)'.format(pos_label)
     methods = sorted(results_dict.keys())
     # AUC plots
     plot_dict = dict()
     plot_dict['x_label'] = x_label
-    plot_dict['y_label'] = 'AUC'
+    plot_dict['y_label'] = 'Area under ROC'
     plot_dict['title'] = 'Area under ROC curve'
     for m in methods:
         d = results_dict[m]
@@ -790,15 +792,19 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             'y_err': [y_med - y_low, y_up - y_med]
         }
 
-    plot_file = os.path.join(output_dir, '{}_comparison.png'.format('auc'))
+    if name_prefix:
+        plot_file = os.path.join(output_dir, '{}_{}'.format(name_prefix, 'auc'))
+    else:
+        plot_file = os.path.join(output_dir, '{}'.format('auc'))
+
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale)
+                log_scale=log_scale, hide_errorbar=hide_errorbar)
 
     # Average precision plots
     plot_dict = dict()
     plot_dict['x_label'] = x_label
-    plot_dict['y_label'] = 'Avg. precision'
-    plot_dict['title'] = 'Average precision or area under PR curve'
+    plot_dict['y_label'] = 'Average precision'
+    plot_dict['title'] = 'Average precision (area under PR curve)'
     for m in methods:
         d = results_dict[m]
         y_med = np.array(d['avg_prec']['median'])
@@ -812,15 +818,19 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             'y_err': [y_med - y_low, y_up - y_med]
         }
 
-    plot_file = os.path.join(output_dir, '{}_comparison.png'.format('avg_prec'))
+    if name_prefix:
+        plot_file = os.path.join(output_dir, '{}_{}'.format(name_prefix, 'avg_prec'))
+    else:
+        plot_file = os.path.join(output_dir, '{}'.format('avg_prec'))
+
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale)
+                log_scale=log_scale, hide_errorbar=hide_errorbar)
 
     # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
         plot_dict = dict()
         plot_dict['x_label'] = x_label
-        plot_dict['y_label'] = 'p-AUC'
+        plot_dict['y_label'] = 'Partial AUROC (FPR <= {:.4f})'.format(f)
         plot_dict['title'] = "Partial area under ROC curve (FPR <= {:.4f})".format(f)
         for m in methods:
             d = results_dict[m]
@@ -835,30 +845,42 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
                 'y_err': [y_med - y_low, y_up - y_med]
             }
 
-        plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('pauc', j + 1))
-        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale)
+        if name_prefix:
+            plot_file = os.path.join(output_dir, '{}_{}_{:d}'.format(name_prefix, 'pauc', j + 1))
+        else:
+            plot_file = os.path.join(output_dir, '{}_{:d}'.format('pauc', j + 1))
 
-    # Scaled TPR for different target FPR values
+        plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
+                    log_scale=log_scale, hide_errorbar=hide_errorbar)
+
+    # TPR for different target FPR values
     for j, f in enumerate(FPR_THRESH):
         plot_dict = dict()
         plot_dict['x_label'] = x_label
-        plot_dict['y_label'] = 'Scaled TPR'
-        plot_dict['title'] = "TPR / max(1, FPR / alpha) for alpha = {:.4f}".format(f)
+        plot_dict['y_label'] = 'TPR at FPR = {:.4f}'.format(f)
+        plot_dict['title'] = 'TPR at FPR = {:.4f}'.format(f)
         for m in methods:
             d = results_dict[m]
-            tpr_arr = np.array([v[j] for v in d['tpr']['median']])
+            y_med = np.array([v[j] for v in d['tpr']['median']])
+            y_low = np.array([v[j] for v in d['tpr']['CI_lower']])
+            y_up = np.array([v[j] for v in d['tpr']['CI_upper']])
             # Excess FPR above the target value `f`
             fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
-            y_vals = tpr_arr / fpr_arr
             plot_dict[m] = {
                 'x_vals': 100 * d['proportion'],
-                'y_vals': y_vals
+                'y_vals': y_med,
+                'y_low': y_low,
+                'y_up': y_up,
+                'y_err': [y_med - y_low, y_up - y_med]
             }
 
-        plot_file = os.path.join(output_dir, '{}_comparison_{:d}.png'.format('tpr', j + 1))
+        if name_prefix:
+            plot_file = os.path.join(output_dir, '{}_{}_{:d}'.format(name_prefix, 'tpr', j + 1))
+        else:
+            plot_file = os.path.join(output_dir, '{}_{:d}'.format('tpr', j + 1))
+
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale)
+                    log_scale=log_scale, hide_errorbar=hide_errorbar)
 
 
 def get_num_jobs(n_jobs):

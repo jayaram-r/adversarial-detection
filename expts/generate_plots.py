@@ -14,6 +14,7 @@ def main():
                                                                   'metrics files')
     parser.add_argument('--pos-label', '-p', default='adversarial',
                         help='label for the positive class - e.g. adversarial or ood')
+    parser.add_argument('--name-prefix', '--pre', default='', help='optional prefix for the plot filenames')
     parser.add_argument('--log-scale', action='store_true', default=False,
                         help='use log scale for the x-axis of the plots')
     args = parser.parse_args()
@@ -32,9 +33,14 @@ def main():
         with open(fname, 'rb') as fp:
             results[m] = pickle.load(fp)
 
+    if len(methods) <= 8:
+        plo = False
+    else:
+        plo = True
+
     if results:
-        plot_performance_comparison(results, args.output_dir, place_legend_outside=True, pos_label=args.pos_label,
-                                    log_scale=args.log_scale)
+        plot_performance_comparison(results, args.output_dir, place_legend_outside=plo, pos_label=args.pos_label,
+                                    log_scale=args.log_scale, hide_errorbar=True, name_prefix=args.name_prefix)
     else:
         print("No performance metrics files were found in the specified output directory.")
 
