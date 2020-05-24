@@ -4,6 +4,7 @@ import torch
 import os
 import sys
 import pickle
+import copy
 from multiprocessing import cpu_count
 from helpers.generate_data import MFA_model
 from sklearn.metrics import (
@@ -702,7 +703,33 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
 
 
 def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False,
-                log_scale=False, n_ticks=8, hide_errorbar=False):
+                log_scale=False, hide_errorbar=False):
+
+    def legend_name_map(name_orig):
+        # Setting consistent method names to be used for legends in the paper
+        name_new = copy.copy(name_orig)
+        name_orig = name_orig.lower()
+        if name_orig.startswith('lid'):
+            name_new = 'LID'
+        elif name_orig.startswith('deep_knn'):
+            name_new = 'Deep KNN'
+        elif name_orig.startswith('trust'):
+            name_new = 'Trust Score'
+        elif name_orig.startswith('deep_mahal'):
+            name_new = 'Deep Mahalanobis'
+        elif name_orig.startswith('odds'):
+            name_new = 'Odds are odd'
+        elif name_orig.startswith('propo'):
+            comps = name_orig.split('_')
+            if comps[2] == 'pval' and comps[3] == 'fis':
+                name_new = 'Proposed, Fisher, {}'.format(comps[1])
+            elif comps[2] == 'pval' and comps[3] == 'hmp':
+                name_new = 'Proposed, HMP, {}'.format(comps[1])
+            elif comps[2] == 'klpe':
+                name_new = 'Proposed, LPE, {}'.format(comps[1])
+
+        return name_new
+
     fig = plt.figure()
     if log_scale:
         plt.xscale('log', basex=10)
@@ -712,11 +739,12 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     for j, m in enumerate(methods):
         d = plot_dict[m]
         if hide_errorbar or ('y_err' not in d):
-            plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker=MARKERS[j], label=m)
+            plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker=MARKERS[j],
+                     label=legend_name_map(m))
         else:
             plt.errorbar(d['x_vals'], d['y_vals'], yerr=d['y_err'],
                          fmt='', elinewidth=1, capsize=4,
-                         linestyle='--', color=COLORS[j], marker=MARKERS[j], label=m)
+                         linestyle='--', color=COLORS[j], marker=MARKERS[j], label=legend_name_map(m))
 
         x_vals.extend(d['x_vals'])
         y_vals.extend(d['y_vals'])
@@ -727,29 +755,41 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
                 y_vals.extend(d['y_up'])
 
     x_bounds = get_data_bounds(np.array(x_vals), alpha=0.99)
-    y_bounds = get_data_bounds(np.array(y_vals), alpha=0.99)
+    y_bounds = get_data_bounds(np.array(y_vals), alpha=0.95)
     if min_yrange:
         # Ensure that the range of y-axis is not smaller than `min_yrange`
         v = min(y_bounds[1] - min_yrange, y_bounds[0])
         y_bounds = (v, y_bounds[1])
 
+    # Axes limits
     plt.xlim([x_bounds[0], x_bounds[1]])
     plt.ylim([y_bounds[0], y_bounds[1]])
-    plt.yticks(np.linspace(y_bounds[0], y_bounds[1], num=n_ticks), rotation=0)
+    # Axes ticks
+    v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=10), decimals=2))
+    plt.yticks(v, fontsize=13, rotation=0)
     if log_scale:
-        plt.xticks(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks), rotation=0)
+        v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=10), decimals=0))
     else:
-        plt.xticks(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), rotation=0)
+        v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=10), decimals=0))
 
-    plt.xlabel(plot_dict['x_label'], fontsize=9, fontweight='bold')
-    plt.ylabel(plot_dict['y_label'], fontsize=9, fontweight='bold')
-    # plt.title(plot_dict['title'], fontsize=9, fontweight='bold')
+    plt.xticks(v, fontsize=13, rotation=0)
+    plt.xlabel(plot_dict['x_label'], fontsize=13, fontweight='normal')
+    plt.ylabel(plot_dict['y_label'], fontsize=13, fontweight='normal')
+    # plt.title(plot_dict['title'], fontsize=10, fontweight='normal')
+    # Legend font sizes:
+    # xx-small, x-small, small, medium, large, x-large, xx-large
     if not place_legend_outside:
-        plt.legend(loc='best', frameon=False, prop={'size': 'xx-small', 'weight': 'bold'})
+        '''
+        plt.legend(loc='lower center', prop={'size': 'x-small', 'weight': 'normal'},
+                   frameon=True, ncol=4, fancybox=True, framealpha=0.7)
+        '''
+        plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
+                   prop={'size': 'x-small', 'weight': 'bold'},
+                   frameon=True, ncol=4, fancybox=True, framealpha=0.7)
     else:
         # place the upper right end of the box outside and slightly below the plot axes
         plt.legend(loc='upper right', frameon=False, bbox_to_anchor=(1, -0.07),
-                   prop={'size': 'xx-small', 'weight': 'bold'})
+                   prop={'size': 'x-small', 'weight': 'normal'})
 
     fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
@@ -786,7 +826,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['auc']['CI_lower'])
         y_up = np.array(d['auc']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': np.around(100 * d['proportion'], decimals=2),
+            'x_vals': 100 * d['proportion'],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -812,7 +852,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['avg_prec']['CI_lower'])
         y_up = np.array(d['avg_prec']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': np.around(100 * d['proportion'], decimals=2),
+            'x_vals': 100 * d['proportion'],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -831,15 +871,15 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     for j, f in enumerate(FPR_MAX_PAUC):
         plot_dict = dict()
         plot_dict['x_label'] = x_label
-        plot_dict['y_label'] = 'Partial AUROC (FPR <= {:.4f})'.format(f)
-        plot_dict['title'] = "Partial area under ROC curve (FPR <= {:.4f})".format(f)
+        plot_dict['y_label'] = r"Partial AUROC (FPR $\leq$ {:g})".format(f)
+        plot_dict['title'] = r"Partial area under ROC curve (FPR $\leq$ {:g})".format(f)
         for m in methods:
             d = results_dict[m]
             y_med = np.array([v[j] for v in d['pauc']['median']])
             y_low = np.array([v[j] for v in d['pauc']['CI_lower']])
             y_up = np.array([v[j] for v in d['pauc']['CI_upper']])
             plot_dict[m] = {
-                'x_vals': np.around(100 * d['proportion'], decimals=2),
+                'x_vals': 100 * d['proportion'],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
@@ -858,8 +898,8 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     for j, f in enumerate(FPR_THRESH):
         plot_dict = dict()
         plot_dict['x_label'] = x_label
-        plot_dict['y_label'] = 'TPR at FPR = {:.4f}'.format(f)
-        plot_dict['title'] = 'TPR at FPR = {:.4f}'.format(f)
+        plot_dict['y_label'] = 'TPR at FPR = {:g}'.format(f)
+        plot_dict['title'] = 'TPR at FPR = {:g}'.format(f)
         for m in methods:
             d = results_dict[m]
             y_med = np.array([v[j] for v in d['tpr']['median']])
@@ -868,7 +908,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             # Excess FPR above the target value `f`
             fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
             plot_dict[m] = {
-                'x_vals': np.around(100 * d['proportion'], decimals=2),
+                'x_vals': 100 * d['proportion'],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
