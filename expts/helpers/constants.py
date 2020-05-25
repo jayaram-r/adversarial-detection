@@ -116,6 +116,7 @@ NUM_RANDOM_SAMPLES = 20000
 NUM_BOOTSTRAP = 100
 
 # Plot colors and markers
-COLORS = ['r', 'b', 'hotpink', 'orange', 'g', 'm', 'lawngreen', 'grey', 'c', 'y', 'steelblue', 'tan',
+# https://matplotlib.org/2.0.2/examples/color/named_colors.html
+COLORS = ['r', 'b', 'c', 'orange', 'g', 'm', 'lawngreen', 'grey', 'hotpink', 'y', 'steelblue', 'tan',
           'lightsalmon', 'navy', 'gold']
 MARKERS = ['o', '^', 'v', 's', '*', 'x', 'd', '>', '<', '1', 'h', 'P', '_', '2', '|', '3', '4']

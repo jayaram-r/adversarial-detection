@@ -739,12 +739,12 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     for j, m in enumerate(methods):
         d = plot_dict[m]
         if hide_errorbar or ('y_err' not in d):
-            plt.plot(d['x_vals'], d['y_vals'], linestyle='--', color=COLORS[j], marker=MARKERS[j],
+            plt.plot(d['x_vals'], d['y_vals'], linestyle='-', linewidth=0.75, color=COLORS[j], marker=MARKERS[j],
                      label=legend_name_map(m))
         else:
             plt.errorbar(d['x_vals'], d['y_vals'], yerr=d['y_err'],
                          fmt='', elinewidth=1, capsize=4,
-                         linestyle='--', color=COLORS[j], marker=MARKERS[j], label=legend_name_map(m))
+                         linestyle='-', linewidth=0.75, color=COLORS[j], marker=MARKERS[j], label=legend_name_map(m))
 
         x_vals.extend(d['x_vals'])
         y_vals.extend(d['y_vals'])
@@ -755,7 +755,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
                 y_vals.extend(d['y_up'])
 
     x_bounds = get_data_bounds(np.array(x_vals), alpha=0.99)
-    y_bounds = get_data_bounds(np.array(y_vals), alpha=0.95)
+    y_bounds = get_data_bounds(np.array(y_vals), alpha=0.99)
     if min_yrange:
         # Ensure that the range of y-axis is not smaller than `min_yrange`
         v = min(y_bounds[1] - min_yrange, y_bounds[0])
