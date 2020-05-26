@@ -36,21 +36,10 @@ from helpers.utils import (
     load_detector_checkpoint
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
-from detectors.detector_odds_are_odd import (
-    get_wcls,
-    return_data,
-    fit_odds_are_odd,
-    detect_odds_are_odd
-)
 from detectors.deep_mahalanobis import (
     get_mahalanobis_scores,
     fit_mahalanobis_scores,
     get_mahalanobis_labels
-)
-from detectors.detector_lid_paper import (
-    DetectorLID,
-    DetectorLIDClassCond,
-    DetectorLIDBatch
 )
 from detectors.detector_proposed import (
     DetectorLayerStatistics,
@@ -62,26 +51,6 @@ try:
     import cPickle as pickle
 except:
     import pickle
-
-
-# Parameters that were used for the attack data generation
-ATTACK_PARAMS = {
-    'stepsize': 0.05,
-    'confidence': 0,
-    'epsilon': EPSILON_VALUES[0],
-    'maxiterations': 1000,
-    'iterations': 40,
-    'maxepsilon': 1
-}
-
-# Proportion of attack samples from each method when a mixed attack strategy is used at test time.
-# The proportions should sum to 1. Note that this is a proportion of the subset of attack samples and not a
-# proportion of all the test samples.
-MIXED_ATTACK_PROPORTIONS = {
-    'FGSM': 0.1,
-    'PGD': 0.4,
-    'CW': 0.5
-}
 
 
 def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
@@ -210,9 +179,6 @@ def main():
     parser.add_argument('--pvalue-fusion', '--pf', choices=['harmonic_mean', 'fisher'], default='harmonic_mean',
                         help="Name of the method to use for combining p-values from multiple layers for the "
                              "proposed method. Choices are: 'harmonic_mean' and 'fisher'")
-    parser.add_argument('--ood-detection', '--ood', action='store_true', default=False,
-                        help="Option that enables out-of-distribution detection instead of adversarial detection "
-                             "for the proposed method")
     parser.add_argument(
         '--use-top-ranked', '--utr', action='store_true', default=False,
         help="Option that enables the proposed method to use only the top-ranked (by p-values) test statistics for "
@@ -246,15 +212,8 @@ def main():
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
-    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW', CUSTOM_ATTACK], default='PGD',
-                        help='type of adversarial attack')
-    # parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
-    #                     help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
-    parser.add_argument('--max-attack-prop', '--map', type=float, default=0.5,
-                        help="Maximum proportion of attack samples in the test fold. Should be a value in (0, 1]")
-    parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
-                        help='Use option to enable a mixed attack strategy with multiple methods in '
-                             'different proportions')
+    parser.add_argument('--max-outlier-prop', '--mop', type=float, default=0.5,
+                        help="Maximum proportion of outlier samples in the test fold. Should be a value in (0, 1]")
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
@@ -281,7 +240,7 @@ def main():
     # Output directory
     if not args.output_dir:
         base_dir = get_output_path(args.model_type)
-        output_dir = os.path.join(base_dir, 'detection')
+        output_dir = os.path.join(base_dir, 'detection_ood')
     else:
         output_dir = args.output_dir
 
@@ -303,11 +262,7 @@ def main():
             if args.pvalue_fusion == 'fisher':
                 st += '_fis'
 
-        if not args.ood_detection:
-            method_name = '{:.5s}_{:.5s}_{}_adv'.format(method_name, args.test_statistic, st)
-        else:
-            method_name = '{:.5s}_{:.5s}_{}_ood'.format(method_name, args.test_statistic, st)
-
+        method_name = '{:.5s}_{:.5s}_{}_ood'.format(method_name, args.test_statistic, st)
         if args.use_top_ranked:
             method_name = '{}_top{:d}'.format(method_name, args.num_layers)
         elif args.use_deep_layers:
@@ -332,12 +287,6 @@ def main():
 
     elif args.detection_method == 'dknn':
         apply_dim_reduc = True
-        # If `n_neighbors` is specified, append that value to the name string
-        if n_neighbors is not None:
-            method_name = '{}_k{:d}'.format(method_name, n_neighbors)
-
-    elif args.detection_method in ['lid', 'lid_class_cond']:
-        apply_dim_reduc = False
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
@@ -423,17 +372,6 @@ def main():
     if not os.path.isdir(d):
         raise ValueError("Directory for the numpy data files not found: {}".format(d))
 
-    # Not used
-    attack_params_list = [
-        ('stepsize', ATTACK_PARAMS['stepsize']),
-        ('confidence', ATTACK_PARAMS['confidence']),
-        ('epsilon', ATTACK_PARAMS['epsilon']),
-        ('maxiterations', ATTACK_PARAMS['maxiterations']),
-        ('iterations', ATTACK_PARAMS['iterations']),
-        ('maxepsilon', ATTACK_PARAMS['maxepsilon']),
-        ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
-    ]
-
     # Initialization
     if args.resume_from_ckpt:
         scores_folds, labels_folds, models_folds, init_fold = load_detector_checkpoint(output_dir, method_name,
@@ -448,7 +386,6 @@ def main():
 
     ti = time.time()
     # Cross-validation
-    
     for i in range(init_fold, args.num_folds):
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
@@ -469,7 +406,7 @@ def main():
         test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
 
         # Get the range of values in the data array
-        bounds = get_data_bounds(np.concatenate([data_tr, data_te], axis=0))
+        # bounds = get_data_bounds(np.concatenate([data_tr, data_te], axis=0))
 
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
         layer_embeddings_tr, labels_pred_tr = helper_layer_embeddings(
@@ -495,33 +432,25 @@ def main():
             numpy_save_path_ood = numpy_save_path_ood.replace('varun', 'jayaram', 1)
 
         data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood = load_numpy_data(numpy_save_path_ood)
-        num_clean_tr_ood = labels_tr_ood.shape[0]
-        num_clean_te_ood = labels_te_ood.shape[0]
 
-        # Data loader for the train fold
-        train_fold_loader_ood = convert_to_loader(data_tr_ood, labels_tr_ood, batch_size=args.batch_size, device=device)
-        # Data loader for the test fold
+        # Data loader for the outlier data from the train fold
+        # train_fold_loader_ood = convert_to_loader(data_tr_ood, labels_tr_ood, batch_size=args.batch_size, device=device)
+        # Data loader for the outlier data from the test fold
         test_fold_loader_ood = convert_to_loader(data_te_ood, labels_te_ood, batch_size=args.batch_size, device=device)
 
-        # Get the range of values in the data array
-        bounds_ood = get_data_bounds(np.concatenate([data_tr_ood, data_te_ood], axis=0))
-
+        '''
         print("\nCalculating the layer embeddings and DNN predictions for the ood train data split:")
         layer_embeddings_tr_ood, labels_pred_tr_ood = helper_layer_embeddings(
             model, device, train_fold_loader_ood, args.detection_method, labels_tr_ood
         )
+        '''
         print("\nCalculating the layer embeddings and DNN predictions for the ood test data split:")
         layer_embeddings_te_ood, labels_pred_te_ood = helper_layer_embeddings(
             model, device, test_fold_loader_ood, args.detection_method, labels_te_ood
         )
-
         # verify if this is needed or not?
         # Delete the data loaders in case they are not used further
-        if args.detection_method != 'mahalanobis':
-            del train_fold_loader_ood
-
-        if args.detection_method != 'odds':
-            del test_fold_loader_ood
+        del test_fold_loader_ood
 
         ############################# NOISY #########################################################
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
@@ -556,137 +485,6 @@ def main():
         del noisy_train_fold_loader
         del noisy_test_fold_loader
 
-
-        '''
-        # Load the saved adversarial numpy data generated from this training and test fold
-        _, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
-        )
-        # `labels_te_adv` corresponds to the class labels of the clean samples, not that predicted by the DNN
-        labels_te_clean = labels_te_adv
-        num_adv_tr = labels_tr_adv.shape[0]
-        num_adv_te = labels_te_adv.shape[0]
-        print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-              "samples = {:.4f}".format(num_clean_tr, num_adv_tr, (100. * num_adv_tr) / (num_clean_tr + num_adv_tr)))
-        print("Test fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-              "samples = {:.4f}".format(num_clean_te, num_adv_te, (100. * num_adv_te) / (num_clean_te + num_adv_te)))
-
-        # Adversarial data loader for the train fold
-        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
-                                                  device=device)
-        # Adversarial data loader for the test fold
-        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size,
-                                                 device=device)
-        '''
-
-
-
-        '''
-        if args.detection_method in ['lid', 'lid_class_cond']:
-            # Needed only for the LID method
-            print("\nCalculating the layer embeddings and DNN predictions for the adversarial train data split:")
-            layer_embeddings_tr_adv, labels_pred_tr_adv = helper_layer_embeddings(
-                model, device, adv_train_fold_loader, args.detection_method, labels_tr_adv
-            )
-            check_label_mismatch(labels_tr_adv, labels_pred_tr_adv)
-
-        print("\nCalculating the layer embeddings and DNN predictions for the adversarial test data split:")
-        layer_embeddings_te_adv, labels_pred_te_adv = helper_layer_embeddings(
-            model, device, adv_test_fold_loader, args.detection_method, labels_te_adv
-        )
-        check_label_mismatch(labels_te_adv, labels_pred_te_adv)
-        # Delete the data loaders in case they are not used further
-        del adv_train_fold_loader
-        if args.detection_method != 'odds':
-            del adv_test_fold_loader
-
-        # Detection labels (0 denoting clean and 1 adversarial)
-        labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int), np.ones(labels_pred_te_adv.shape[0], dtype=np.int)])
-        '''
-
-
-
-        '''
-        if args.detection_method == 'odds':
-            # call functions from detectors/detector_odds_are_odd.py
-            train_inputs = (data_tr, labels_tr)
-            # train_adv_inputs = (data_tr_adv, labels_tr_adv)
-            predictor = fit_odds_are_odd(train_inputs, 
-                                         None, 
-                                         model, 
-                                         args.model_type, 
-                                         num_classes,
-                                         bounds[0],
-                                         bounds[1])
-            next(predictor)
-            detections_clean, detections_attack = detect_odds_are_odd(predictor, 
-                                                                      test_fold_loader,
-                                                                      adv_test_fold_loader,
-                                                                      use_cuda=use_cuda)
-            scores_adv = np.concatenate([detections_clean, detections_attack])
-
-        elif args.detection_method == 'lid':
-            # Set to `None` to skip noisy data
-            # layer_embeddings_tr_noisy = None
-            kwargs = {
-                'n_neighbors': n_neighbors,
-                'skip_dim_reduction': (not apply_dim_reduc),
-                'model_dim_reduction': model_dim_reduc,
-                'max_iter': 200,
-                'balanced_classification': True,
-                'n_jobs': args.n_jobs,
-                'save_knn_indices_to_file': True,
-                'seed_rng': args.seed
-            }
-            if args.batch_lid:
-                det_model = DetectorLIDBatch(n_batches=10, **kwargs)
-            else:
-                det_model = DetectorLID(**kwargs)
-
-            # Fit the detector on clean, noisy, and adversarial data from the training fold
-            _ = det_model.fit(layer_embeddings_tr, layer_embeddings_tr_adv,
-                              layer_embeddings_noisy=layer_embeddings_tr_noisy)
-            # Scores on clean data from the test fold
-            scores_adv1 = det_model.score(layer_embeddings_te, cleanup=False)
-
-            # Scores on adversarial data from the test fold
-            scores_adv2 = det_model.score(layer_embeddings_te_adv, cleanup=True)
-
-            scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            if args.save_detec_model:
-                models_folds.append(det_model)
-
-        elif args.detection_method == 'lid_class_cond':
-            # Set to `None` to skip noisy data
-            # layer_embeddings_tr_noisy = None
-            # labels_pred_tr_noisy = None
-
-            det_model = DetectorLIDClassCond(
-                n_neighbors=n_neighbors,
-                skip_dim_reduction=(not apply_dim_reduc),
-                model_dim_reduction=model_dim_reduc,
-                max_iter=200,
-                balanced_classification=True,
-                n_jobs=args.n_jobs,
-                save_knn_indices_to_file=True,
-                seed_rng=args.seed
-            )
-            # Fit the detector on clean, noisy, and adversarial data from the training fold
-            _ = det_model.fit(layer_embeddings_tr, labels_tr, labels_pred_tr,
-                              layer_embeddings_tr_adv, labels_pred_tr_adv,
-                              layer_embeddings_noisy=layer_embeddings_tr_noisy,
-                              labels_pred_noisy=labels_pred_tr_noisy)
-            # Scores on clean data from the test fold
-            scores_adv1 = det_model.score(layer_embeddings_te, labels_pred_te, cleanup=False)
-
-            # Scores on adversarial data from the test fold
-            scores_adv2 = det_model.score(layer_embeddings_te_adv, labels_pred_te_adv, cleanup=True)
-
-            scores_adv = np.concatenate([scores_adv1, scores_adv2])
-            if args.save_detec_model:
-                models_folds.append(det_model)
-        '''
-
         if args.detection_method == 'proposed':
             nl = len(layer_embeddings_tr)
             st_ind = 0
@@ -704,7 +502,7 @@ def main():
             det_model = DetectorLayerStatistics(
                 layer_statistic=args.test_statistic,
                 score_type=args.score_type,
-                ood_detection=args.ood_detection,
+                ood_detection=True,
                 pvalue_fusion=args.pvalue_fusion,
                 use_top_ranked=args.use_top_ranked,
                 num_top_ranked=args.num_layers,
@@ -786,8 +584,8 @@ def main():
             # Calculate the mahalanobis distance features per layer and fit a logistic classifier on the extracted
             # features using data from the training fold
             model_detector = fit_mahalanobis_scores(
-                model, device, args.adv_attack, args.model_type, num_classes, temp_direc, train_fold_loader,
-                data_tr, data_tr_adv, data_tr_noisy, n_jobs=args.n_jobs
+                model, device, 'ood', args.model_type, num_classes, temp_direc, train_fold_loader,
+                data_tr, data_tr_ood, data_tr_noisy, n_jobs=args.n_jobs
             )
             # Calculate the mahalanobis distance features per layer for the best noise magnitude and predict the
             # logistic classifer to score the samples.
@@ -813,10 +611,10 @@ def main():
         save_detector_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name,
                                  args.save_detec_model)
 
-    print("\nCalculating performance metrics for different proportion of attack samples:")
+    print("\nCalculating performance metrics for different proportion of outlier samples:")
     fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
     results_dict = metrics_varying_positive_class_proportion(
-        scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
+        scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_outlier_prop, log_scale=False
     )
     print("Performance metrics saved to the file: {}".format(fname))
     tf = time.time()
