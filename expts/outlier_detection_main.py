@@ -485,6 +485,9 @@ def main():
         del noisy_train_fold_loader
         del noisy_test_fold_loader
 
+        # Detection labels (0 denoting clean and 1 outlier)
+        labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
+                                       np.ones(labels_pred_te_ood.shape[0], dtype=np.int)])
         if args.detection_method == 'proposed':
             nl = len(layer_embeddings_tr)
             st_ind = 0
