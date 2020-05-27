@@ -54,7 +54,7 @@ def filter_data_classes(data_tr, labels_tr):
     Randomly select half of the set of distinct classes and exclude data from these classes.
     '''
     classes_uniq = np.unique(labels_tr)
-    n_classes = labels_uniq.shape[0]
+    n_classes = classes_uniq.shape[0]
     n_excl = n_classes // 2
     v = np.random.permutation(classes_uniq)
     classes_excl = v[:n_excl]
