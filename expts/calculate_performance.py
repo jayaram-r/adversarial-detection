@@ -1,5 +1,6 @@
 """
-Read the saved detection scores from a specified method, calculate performance metrics and save to a file.
+Read the saved detection scores and labels from a specified method, calculate performance metrics, and save the
+performance metrics to a file.
 
 """
 from __future__ import absolute_import, division, print_function
@@ -18,71 +19,9 @@ from helpers.utils import (
     list_all_adversarial_subdirs,
     check_label_mismatch,
     metrics_varying_positive_class_proportion,
-    load_detector_checkpoint
+    load_detector_checkpoint,
+    load_adversarial_wrapper
 )
-
-
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
-    # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
-    if adv_attack != CUSTOM_ATTACK:
-        # Load the saved adversarial numpy data generated from this training and test fold
-        # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
-
-        # Maximum number of adversarial samples to include in the test fold
-        max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
-        data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-            numpy_save_path,
-            max_n_test=max_num_adv,
-            sampling_type='ranked_by_norm',
-            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
-        )
-
-        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
-    else:
-        # Custom attack data generation was different. Only test fold data was generated
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
-
-        # Adversarial inputs from the test fold
-        data_te_adv = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
-        # Clean inputs corresponding to the adversarial inputs from the test fold
-        data_te_clean = np.load(os.path.join(numpy_save_path, "data_te_clean.npy"))
-
-        # Predicted (mis-classified) labels
-        labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
-        # Labels of the original inputs from which the adversarial inputs were created
-        labels_te = np.load(os.path.join(numpy_save_path, "labels_te_clean.npy"))
-
-        # Norm of perturbations
-        norm_perturb = np.load(os.path.join(numpy_save_path, 'norm_perturb.npy'))
-        # Mask indicating which samples are adversarial
-        mask = np.load(os.path.join(numpy_save_path, "is_adver.npy"))
-        # Adversarial samples with very large perturbation are excluded
-        mask_norm = norm_perturb <= np.percentile(norm_perturb[mask], 95.)
-        mask_incl = np.logical_and(mask, mask_norm)
-
-        data_te_adv = data_te_adv[mask_incl, :]
-        data_te_clean = data_te_clean[mask_incl, :]
-        labels_te_adv = labels_te[mask_incl]
-        # Check if the original and predicted labels are all different for the adversarial inputs
-        check_label_mismatch(labels_te_adv, labels_pred_te[mask_incl])
-
-        # We don't generate adversarial samples from the train fold for the custom attack.
-        # Returning the train fold data from Carlini-Wagner attack instead. This is used only by the supervised
-        # detection methods
-        data_tr_clean, _, data_tr_adv, labels_tr_adv, _, _ = load_adversarial_wrapper(
-            i, model_type, 'CW', max_attack_prop, num_clean_te
-        )
-        # Alternative: return the test fold data in place of the train fold data
-        # data_tr_adv = data_te_adv
-        # data_tr_clean = data_te_clean
-        # labels_tr_adv = labels_te_adv
-
-        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
 
 
 def main():
