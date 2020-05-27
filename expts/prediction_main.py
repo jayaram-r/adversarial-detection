@@ -1,5 +1,5 @@
 """
-Main script for running the adversarial and OOD detection experiments.
+Main script for calculating the corrected classification performance.
 """
 from __future__ import absolute_import, division, print_function
 import sys
@@ -30,7 +30,11 @@ from helpers.utils import (
     get_output_path,
     list_all_adversarial_subdirs,
     check_label_mismatch,
-    metrics_varying_positive_class_proportion
+    metrics_varying_positive_class_proportion,
+    save_detector_checkpoint,
+    load_detector_checkpoint,
+    helper_layer_embeddings,
+    get_config_trust_score
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
@@ -40,7 +44,7 @@ from detectors.detector_odds_are_odd import (
     detect_odds_are_odd
 )
 from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, DetectorLIDBatch
-from detectors.detector_proposed import DetectorLayerStatistics, extract_layer_embeddings
+from detectors.detector_proposed import DetectorLayerStatistics
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
 try:
@@ -48,104 +52,8 @@ try:
 except:
     import pickle
 
-
-# Parameters that were used for the attack data generation
-ATTACK_PARAMS = {
-    'stepsize': 0.05,
-    'confidence': 0,
-    'epsilon': EPSILON_VALUES[0],
-    'maxiterations': 1000,
-    'iterations': 40,
-    'maxepsilon': 1
-}
-
-# Proportion of attack samples from each method when a mixed attack strategy is used at test time.
-# The proportions should sum to 1. Note that this is a proportion of the subset of attack samples and not a
-# proportion of all the test samples.
-MIXED_ATTACK_PROPORTIONS = {
-    'FGSM': 0.1,
-    'PGD': 0.4,
-    'CW': 0.5
-}
-
 # Set to False before releasing the code
 PATH_HACK = True
-
-
-def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
-    layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings(
-        model, device, data_loader, method=method
-    )
-    # NOTE: `labels` returned by this function should be the same as the `labels_orig`
-    if not np.array_equal(labels_orig, labels):
-        raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
-                         "labels.")
-
-    return layer_embeddings, labels_pred
-
-
-def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
-    config_trust_score = dict()
-    # defines the `1 - alpha` density level set
-    config_trust_score['alpha'] = 0.0
-    # number of neighbors; set to 10 in the paper
-    config_trust_score['n_neighbors'] = n_neighbors
-
-    if layer_type == 'input':
-        layer_index = 0
-    elif layer_type == 'logit':
-        layer_index = -1
-    elif layer_type == 'prelogit':
-        layer_index = -2
-    else:
-        raise ValueError("Unknown layer type '{}'".format(layer_type))
-
-    config_trust_score['layer'] = layer_index
-
-    # Dimension reduction model for the specified layer
-    if model_dim_reduc:
-        config_trust_score['model_dr'] = model_dim_reduc[layer_index]
-    else:
-        config_trust_score['model_dr'] = None
-
-    return config_trust_score
-
-
-def save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, save_detec_model):
-    # Save the scores and detection labels from the cross-validation folds to a pickle file
-    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
-    tmp = {'scores_folds': scores_folds, 'labels_folds': labels_folds}
-    with open(fname, 'wb') as fp:
-        pickle.dump(tmp, fp)
-
-    if save_detec_model and models_folds:
-        # Save the detection models from the cross-validation folds to a pickle file
-        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
-        with open(fname, 'wb') as fp:
-            pickle.dump(models_folds, fp)
-
-
-def load_checkpoint(output_dir, method_name, save_detec_model):
-    fname = os.path.join(output_dir, 'scores_{}.pkl'.format(method_name))
-    with open(fname, 'rb') as fp:
-        tmp = pickle.load(fp)
-
-    scores_folds = tmp['scores_folds']
-    labels_folds = tmp['labels_folds']
-    # Load the models if required
-    if save_detec_model:
-        fname = os.path.join(output_dir, 'models_{}.pkl'.format(method_name))
-        with open(fname, 'rb') as fp:
-            models_folds = pickle.load(fp)
-    else:
-        models_folds = []
-
-    n_folds = len(scores_folds)
-    assert len(labels_folds) == n_folds, "'scores_folds' and 'labels_folds' do not have the same length"
-    if models_folds:
-        assert len(models_folds) == n_folds, "'models_folds' and 'scores_folds' do not have the same length"
-
-    return scores_folds, labels_folds, models_folds, n_folds
 
 
 def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te, index=0):
@@ -388,21 +296,10 @@ def main():
     if not os.path.isdir(d):
         raise ValueError("Directory for the numpy data files not found: {}".format(d))
 
-    # Not used
-    attack_params_list = [
-        ('stepsize', ATTACK_PARAMS['stepsize']),
-        ('confidence', ATTACK_PARAMS['confidence']),
-        ('epsilon', ATTACK_PARAMS['epsilon']),
-        ('maxiterations', ATTACK_PARAMS['maxiterations']),
-        ('iterations', ATTACK_PARAMS['iterations']),
-        ('maxepsilon', ATTACK_PARAMS['maxepsilon']),
-        ('pnorm', ATTACK_NORM_MAP[args.adv_attack])
-    ]
-
     # Initialization
     if args.resume_from_ckpt:
-        scores_folds, labels_folds, models_folds, init_fold = load_checkpoint(output_dir, method_name,
-                                                                              args.save_detec_model)
+        scores_folds, labels_folds, models_folds, init_fold = load_detector_checkpoint(output_dir, method_name,
+                                                                                       args.save_detec_model)
         print("Loading saved results from a previous run. Completed {:d} fold(s). Resuming from fold {:d}.".
               format(init_fold, init_fold + 1))
     else:
@@ -573,7 +470,8 @@ def main():
         scores_folds.append(scores_adv)
         labels_folds.append(labels_adv_folds)
         #saved every fold
-        save_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name, args.save_detec_model)
+        save_detector_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name,
+                                 args.save_detec_model)
 
     print("\nCalculating performance metrics for different proportion of attack samples:")
     fname = os.path.join(output_dir, 'corrected_accuracies_{}.pkl'.format(method_name))

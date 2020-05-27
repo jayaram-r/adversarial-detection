@@ -40,7 +40,7 @@ from helpers.utils import (
     get_predicted_classes
 )
 from helpers import knn_attack
-from detectors.detector_proposed import extract_layer_embeddings as extract_layer_embeddings_numpy
+from helpers.utils import extract_layer_embeddings as extract_layer_embeddings_numpy
 
 # Declaring global model objects to avoid copies in memory
 models_detec_propo = None

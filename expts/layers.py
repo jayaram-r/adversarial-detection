@@ -36,8 +36,11 @@ from helpers.constants import (
     MAX_SAMPLES_DIM_REDUCTION,
     DETECTION_METHODS
 )
-from helpers.utils import load_model_checkpoint, get_num_jobs
-from detectors.detector_proposed import extract_layer_embeddings
+from helpers.utils import (
+    load_model_checkpoint,
+    get_num_jobs,
+    extract_layer_embeddings
+)
 try:
     import cPickle as pickle
 except:

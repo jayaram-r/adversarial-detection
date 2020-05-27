@@ -33,7 +33,10 @@ from helpers.utils import (
     metrics_varying_positive_class_proportion,
     add_gaussian_noise,
     save_detector_checkpoint,
-    load_detector_checkpoint
+    load_detector_checkpoint,
+    helper_layer_embeddings,
+    get_config_trust_score,
+    load_adversarial_wrapper
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
@@ -52,16 +55,9 @@ from detectors.detector_lid_paper import (
     DetectorLIDClassCond,
     DetectorLIDBatch
 )
-from detectors.detector_proposed import (
-    DetectorLayerStatistics,
-    extract_layer_embeddings
-)
+from detectors.detector_proposed import DetectorLayerStatistics
 from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
-try:
-    import cPickle as pickle
-except:
-    import pickle
 
 
 # Parameters that were used for the attack data generation
@@ -73,117 +69,6 @@ ATTACK_PARAMS = {
     'iterations': 40,
     'maxepsilon': 1
 }
-
-# Proportion of attack samples from each method when a mixed attack strategy is used at test time.
-# The proportions should sum to 1. Note that this is a proportion of the subset of attack samples and not a
-# proportion of all the test samples.
-MIXED_ATTACK_PROPORTIONS = {
-    'FGSM': 0.1,
-    'PGD': 0.4,
-    'CW': 0.5
-}
-
-
-def helper_layer_embeddings(model, device, data_loader, method, labels_orig):
-    layer_embeddings, labels, labels_pred, _ = extract_layer_embeddings(
-        model, device, data_loader, method=method
-    )
-    # NOTE: `labels` returned by this function should be the same as the `labels_orig`
-    if not np.array_equal(labels_orig, labels):
-        raise ValueError("Class labels returned by 'extract_layer_embeddings' is different from the original "
-                         "labels.")
-
-    return layer_embeddings, labels_pred
-
-
-def get_config_trust_score(model_dim_reduc, layer_type, n_neighbors):
-    config_trust_score = dict()
-    # defines the `1 - alpha` density level set
-    config_trust_score['alpha'] = 0.0
-    # number of neighbors; set to 10 in the paper
-    config_trust_score['n_neighbors'] = n_neighbors
-
-    if layer_type == 'input':
-        layer_index = 0
-    elif layer_type == 'logit':
-        layer_index = -1
-    elif layer_type == 'prelogit':
-        layer_index = -2
-    else:
-        raise ValueError("Unknown layer type '{}'".format(layer_type))
-
-    config_trust_score['layer'] = layer_index
-
-    # Dimension reduction model for the specified layer
-    if model_dim_reduc:
-        config_trust_score['model_dr'] = model_dim_reduc[layer_index]
-    else:
-        config_trust_score['model_dr'] = None
-
-    return config_trust_score
-
-
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
-    # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
-    if adv_attack != CUSTOM_ATTACK:
-        # Load the saved adversarial numpy data generated from this training and test fold
-        # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
-
-        # Maximum number of adversarial samples to include in the test fold
-        max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
-        data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-            numpy_save_path,
-            max_n_test=max_num_adv,
-            sampling_type='ranked_by_norm',
-            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
-        )
-
-        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
-    else:
-        # Custom attack data generation was different. Only test fold data was generated
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
-        # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
-
-        # Adversarial inputs from the test fold
-        data_te_adv = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
-        # Clean inputs corresponding to the adversarial inputs from the test fold
-        data_te_clean = np.load(os.path.join(numpy_save_path, "data_te_clean.npy"))
-
-        # Predicted (mis-classified) labels
-        labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
-        # Labels of the original inputs from which the adversarial inputs were created
-        labels_te = np.load(os.path.join(numpy_save_path, "labels_te_clean.npy"))
-
-        # Norm of perturbations
-        norm_perturb = np.load(os.path.join(numpy_save_path, 'norm_perturb.npy'))
-        # Mask indicating which samples are adversarial
-        mask = np.load(os.path.join(numpy_save_path, "is_adver.npy"))
-        # Adversarial samples with very large perturbation are excluded
-        mask_norm = norm_perturb <= np.percentile(norm_perturb[mask], 95.)
-        mask_incl = np.logical_and(mask, mask_norm)
-
-        data_te_adv = data_te_adv[mask_incl, :]
-        data_te_clean = data_te_clean[mask_incl, :]
-        labels_te_adv = labels_te[mask_incl]
-        # Check if the original and predicted labels are all different for the adversarial inputs
-        check_label_mismatch(labels_te_adv, labels_pred_te[mask_incl])
-
-        # We don't generate adversarial samples from the train fold for the custom attack.
-        # Returning the train fold data from Carlini-Wagner attack instead. This is used only by the supervised
-        # detection methods
-        data_tr_clean, _, data_tr_adv, labels_tr_adv, _, _ = load_adversarial_wrapper(
-            i, model_type, 'CW', max_attack_prop, num_clean_te
-        )
-        # Alternative: return the test fold data in place of the train fold data
-        # data_tr_adv = data_te_adv
-        # data_tr_clean = data_te_clean
-        # labels_tr_adv = labels_te_adv
-
-        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
 
 
 def main():
