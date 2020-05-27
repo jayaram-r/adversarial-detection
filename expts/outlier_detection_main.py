@@ -49,6 +49,14 @@ from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
 
 
+# Outlier or OOD datasets corresponding to given inlier datasets
+inlier_outlier_map = {
+    'cifar10': 'svhn',
+    'mnist': 'notmnist',
+    'svhn': 'cifar10'
+}
+
+
 def filter_data_classes(data_tr, labels_tr):
     '''
     Randomly select half of the set of distinct classes and exclude data from these classes.
@@ -239,7 +247,6 @@ def main():
 
     # Data loader and pre-trained DNN model corresponding to the dataset
     data_path = DATA_PATH
-    #MNIST will never be loaded
     if args.model_type == 'mnist':
         '''
         transform = transforms.Compose(
@@ -315,9 +322,6 @@ def main():
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
-        num_clean_tr = labels_tr.shape[0]
-        num_clean_te = labels_te.shape[0]
-        
         # Data loader for the train fold
         train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
         # Data loader for the test fold
@@ -338,16 +342,11 @@ def main():
             del train_fold_loader
 
         del test_fold_loader
-       
         ############################ OUTLIERS ########################################################
-        # find the ood dataset w.r.t to the cifar10 input
-        if args.model_type == 'cifar10':
-            replacement = 'svhn'
-            numpy_save_path_ood = get_clean_data_path(replacement, i + 1)
-            # Temporary hack to use backup data directory
-            numpy_save_path_ood = numpy_save_path_ood.replace('varun', 'jayaram', 1)
-        else:
-            raise NotImplementedError("Code does not support this option yet")
+        # path to the OOD dataset
+        numpy_save_path_ood = get_clean_data_path(inlier_outlier_map[args.model_type], i + 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path_ood = numpy_save_path_ood.replace('varun', 'jayaram', 1)
 
         data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood = load_numpy_data(numpy_save_path_ood)
         if args.censor_classes:
