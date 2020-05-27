@@ -49,6 +49,30 @@ from detectors.detector_deep_knn import DeepKNN
 from detectors.detector_trust_score import TrustScore
 
 
+def filter_data_classes(data_tr, labels_tr):
+    '''
+    Randomly select half of the set of distinct classes and exclude data from these classes.
+    '''
+    classes_uniq = np.unique(labels_tr)
+    n_classes = labels_uniq.shape[0]
+    n_excl = n_classes // 2
+    v = np.random.permutation(classes_uniq)
+    classes_excl = v[:n_excl]
+
+    n_samp = labels_tr.shape[0]
+    mask_tr = np.ones(n_samp, dtype=np.bool)
+    for c in classes_excl:
+        mask_tr[labels_tr == c] = False
+
+    data_tr = data_tr[mask_tr, :]
+    labels_tr = labels_tr[mask_tr]
+    print("\nList of excluded classes: {}".format(', '.join(map(str, classes_excl))))
+    print("Original size of training data: {:d}".format(n_samp))
+    print("Reduced size of training data: {:d}".format(labels_tr.shape[0]))
+
+    return data_tr, labels_tr
+
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
@@ -63,6 +87,8 @@ def main():
     parser.add_argument('--save-detec-model', action='store_true', default=False,
                         help='Use this option to save the list of detection models from the CV folds to a pickle '
                              'file. Note that the files tend to large in size.')
+    parser.add_argument('--censor-classes', action='store_true', default=False,
+                        help='Use this option to censor data from a random subset of classes in the training fold.')
     ################ Optional arguments for the proposed method
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
@@ -278,6 +304,7 @@ def main():
         models_folds = []
         init_fold = 0
 
+    np.random.rand(args.seed)
     ti = time.time()
     # Cross-validation
     for i in range(init_fold, args.num_folds):
@@ -323,6 +350,9 @@ def main():
             raise NotImplementedError("Code does not support this option yet")
 
         data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood = load_numpy_data(numpy_save_path_ood)
+        if args.censor_classes:
+            # Exclude data from a random subset of classes for the training fold
+            data_tr_ood, labels_tr_ood = filter_data_classes(data_tr_ood, labels_tr_ood)
 
         '''
         # Data loader for the outlier data from the train fold
