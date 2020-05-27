@@ -33,7 +33,9 @@ def main():
                         help='model type or name of the dataset')
     parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
                         help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
-
+    parser.add_argument('--x-var', choices=['proportion', 'norm'], default='norm',
+                        help="Choice of variable on the x-axis. Options are 'norm' for the perturbation norm, "
+                             "and 'proportion' for proportion of adversarial/OOD samples.")
     ################ Optional arguments for the proposed method
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
@@ -141,8 +143,10 @@ def main():
 
     # Load the saved detection scores and labels from the test folds for the given method
     scores_folds, labels_folds, _, _ = load_detector_checkpoint(output_dir, method_name, False)
+
     num_folds = len(scores_folds)
     # Perturbation norm for the test folds
+    norm_type = ATTACK_NORM_MAP[args.adv_attack]
     norm_folds = []
     for i in range(num_folds):
         # Load the saved clean numpy data from this fold
@@ -168,14 +172,30 @@ def main():
               "samples = {:.4f}".format(i + 1, num_clean_te, num_adv_te,
                                         (100. * num_adv_te) / (num_clean_te + num_adv_te)))
 
+        assert data_te_clean.shape[0] == num_adv_te
+        assert data_te_adv.shape[0] == num_adv_te
+        # perturbation norm of test fold adversarial samples
+        diff = data_te_adv.reshape(num_adv_te, -1) - data_te_clean.reshape(num_adv_te, -1)
+        if norm_type == 'inf':
+            norm_diff_te = np.linalg.norm(diff, ord=np.inf, axis=1)
+        else:
+            # expecting a non-negative integer
+            norm_diff_te = np.linalg.norm(diff, ord=int(norm_type), axis=1)
 
+        # Filling in zeros for the perturbation norm of clean test fold samples
+        norm_folds.append(np.concatenate([np.zeros(num_clean_te), norm_diff_te]))
 
-    print("\nCalculating performance metrics for different proportion of attack samples:")
-    fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
-    results_dict = metrics_varying_positive_class_proportion(
-        scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
-    )
-    print("Performance metrics calculated and saved to the file: {}".format(fname))
+    if args.x_var == 'proportion':
+        print("\nCalculating performance metrics for different proportion of attack samples:")
+        # fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
+        fname = None
+        results_dict = metrics_varying_positive_class_proportion(
+            scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
+        )
+    else:
+        pass
+
+    # print("Performance metrics calculated and saved to the file: {}".format(fname))
 
 
 if __name__ == '__main__':
