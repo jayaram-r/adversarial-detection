@@ -21,7 +21,8 @@ from helpers.dimension_reduction_methods import (
 )
 from helpers.utils import (
     log_sum_exp,
-    combine_and_vectorize
+    combine_and_vectorize,
+    extract_layer_embeddings
 )
 from detectors.pvalue_estimation import (
     pvalue_score,
@@ -43,101 +44,6 @@ from detectors.localized_pvalue_estimation import averaged_KLPE_anomaly_detectio
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 logger = logging.getLogger(__name__)
-
-
-def extract_layer_embeddings(model, device, data_loader, method='proposed', num_samples=None):
-    """
-    Extract the layer embeddings produced by a trained DNN model on the given data set. Also, returns the true class
-    and the predicted class for each sample.
-
-    :param model: torch NN model.
-    :param device: torch device type - cuda or cpu.
-    :param data_loader: torch data loader object which is an instancee of `torch.utils.data.DataLoader`.
-    :param method: string with the name of the proposed method. Valid choices are ['proposed', 'odds', 'lid'].
-    :param num_samples: None or an int value specifying the number of samples to select.
-
-    :return:
-        - embeddings: list of numpy arrays, one per layer, where the i-th array has shape `(N, d_i)`, `N` being
-                      the number of samples and `d_i` being the vectorized dimension of layer `i`.
-        - labels: numpy array of class labels. Has shape `(N, )`.
-        - labels_pred: numpy array of the model-predicted class labels. Has shape `(N, )`.
-        - counts: numpy array of sample counts for each distinct class in `labels`.
-    """
-    if model.training:
-        model.eval()
-
-    labels = []
-    labels_pred = []
-    embeddings = []
-    n_layers = 0
-    num_samples_partial = 0
-    with torch.no_grad():
-        for batch_idx, (data, target) in enumerate(data_loader):
-            data = data.to(device)
-            # target = target.to(device)
-
-            temp = target.detach().cpu().numpy()
-            labels.extend(temp)
-            num_samples_partial += temp.shape[0]
-            # print(batch_idx)
-
-            # Predicted class
-            outputs = model(data)
-            _, predicted = outputs.max(1)
-            labels_pred.extend(predicted.detach().cpu().numpy())
-            # Layer outputs
-            if method in ('mahalanobis', 'proposed', 'dknn', 'trust'):
-                outputs_layers = model.layer_wise(data)
-            elif method == 'odds':
-                outputs_layers = model.layer_wise_odds_are_odd(data)
-            elif method in ['lid', 'lid_class_cond']:
-                outputs_layers = model.layer_wise_lid_method(data)
-            else:
-                raise ValueError("Invalid value '{}' for input 'method'".format(method))
-
-            if batch_idx > 0:
-                for i in range(n_layers):
-                    embeddings[i].append(outputs_layers[i].detach().cpu().numpy())
-            else:
-                # First batch
-                n_layers = len(outputs_layers)
-                embeddings = [[v.detach().cpu().numpy()] for v in outputs_layers]
-
-            if num_samples:
-                if num_samples_partial >= num_samples:
-                    break
-
-    '''
-    `embeddings` will be a list of length equal to the number of layers.
-    `embeddings[i]` will be a list of numpy arrays corresponding to the data batches for layer `i`.
-    `embeddings[i][j]` will be an array of shape `(b, d1, d2, d3)` or `(b, d1)` where `b` is the batch size
-     and the rest are dimensions.
-    '''
-    # This takes up more memory
-    # embeddings = [combine_and_vectorize(v) for v in embeddings]
-    for i in range(n_layers):
-        embeddings[i] = combine_and_vectorize(embeddings[i])
-
-    labels = np.array(labels, dtype=np.int)
-    labels_pred = np.array(labels_pred, dtype=np.int)
-    # Unique label counts
-    print("\nNumber of labeled samples per class:")
-    labels_uniq, counts = np.unique(labels, return_counts=True)
-    for a, b in zip(labels_uniq, counts):
-        print("class {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels.shape[0]))
-
-    # if (np.max(counts) / np.min(counts)) >= 1.2:
-    #    logger.warning("Classes are not balanced.")
-
-    print("\nNumber of predicted samples per class:")
-    preds_uniq, counts_pred = np.unique(labels_pred, return_counts=True)
-    for a, b in zip(preds_uniq, counts_pred):
-        print("class {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels_pred.shape[0]))
-
-    if preds_uniq.shape[0] != labels_uniq.shape[0]:
-        logger.error("Number of unique predicted classes is not the same as the number of labeled classes.")
-
-    return embeddings, labels, labels_pred, counts
 
 
 def transform_layer_embeddings(embeddings_in, transform_models):
