@@ -146,7 +146,7 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
         print("class {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels.shape[0]))
 
     # if (np.max(counts) / np.min(counts)) >= 1.2:
-    #    logger.warning("Classes are not balanced.")
+    #    print("WARNING: classes are not balanced.")
 
     print("\nNumber of predicted samples per class:")
     preds_uniq, counts_pred = np.unique(labels_pred, return_counts=True)
@@ -154,7 +154,7 @@ def extract_layer_embeddings(model, device, data_loader, method='proposed', num_
         print("class {}, count = {:d}, proportion = {:.4f}".format(a, b, b / labels_pred.shape[0]))
 
     if preds_uniq.shape[0] != labels_uniq.shape[0]:
-        logger.error("Number of unique predicted classes is not the same as the number of labeled classes.")
+        print("WARNING: Number of unique predicted classes is not the same as the number of labeled classes.")
 
     return embeddings, labels, labels_pred, counts
 
