@@ -19,6 +19,7 @@ from helpers.utils import (
     list_all_adversarial_subdirs,
     check_label_mismatch,
     metrics_varying_positive_class_proportion,
+    metrics_varying_perturbation_norm,
     load_detector_checkpoint,
     load_adversarial_wrapper
 )
@@ -192,8 +193,13 @@ def main():
         results_dict = metrics_varying_positive_class_proportion(
             scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
         )
-    else:
-        pass
+    elif args.x_var == 'norm':
+        print("\nCalculating performance metrics as a function of perturbation norm:")
+        fname = os.path.join(output_dir, 'detection_metrics_norm_{}.pkl'.format(method_name))
+        # fname = None
+        results_dict = metrics_varying_perturbation_norm(
+            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=args.max_attack_prop
+        )
 
     # print("Performance metrics calculated and saved to the file: {}".format(fname))
 
