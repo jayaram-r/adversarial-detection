@@ -57,28 +57,57 @@ inlier_outlier_map = {
 }
 
 
-def filter_data_classes(data_tr, labels_tr):
+def filter_data_classes(data_tr, labels_tr, data_te, labels_te, ind_fold, include_noise_samples=True):
     '''
-    Randomly select half of the set of distinct classes and exclude data from these classes.
+    Select half of the set of distinct classes based in the fold index; exclude data from these classes in the
+    training fold, and include data from these classes in the test fold.
     '''
+    np.random.seed(SEED_DEFAULT + ind_fold)    # same random noise data will be generated for a particular fold
+
     classes_uniq = np.unique(labels_tr)
     n_classes = classes_uniq.shape[0]
     n_excl = n_classes // 2
-    v = np.random.permutation(classes_uniq)
-    classes_excl = v[:n_excl]
+    # Excluding a random subset of classes
+    # v = np.random.permutation(classes_uniq)
+    # classes_excl = v[:n_excl]
 
-    n_samp = labels_tr.shape[0]
-    mask_tr = np.ones(n_samp, dtype=np.bool)
+    # Classes are excluded from the training fold and included in the test fold
+    classes_excl = classes_uniq[ind_fold: (ind_fold + n_excl)]
+    # classes_incl = list(set(classes_uniq) - set(classes_excl))
+
+    n_samp_tr = labels_tr.shape[0]
+    mask_tr = np.full(n_samp_tr, True)
+    n_samp_te = labels_te.shape[0]
+    mask_te = np.full(n_samp_te, False)
     for c in classes_excl:
         mask_tr[labels_tr == c] = False
+        mask_te[labels_te == c] = True
 
+    # Range of values in the train fold data
+    bounds = get_data_bounds(data_tr, alpha=0.99)
     data_tr = data_tr[mask_tr, :]
     labels_tr = labels_tr[mask_tr]
-    print("\nList of excluded classes: {}".format(', '.join(map(str, classes_excl))))
-    print("Original size of training data: {:d}".format(n_samp))
-    print("Reduced size of training data: {:d}".format(labels_tr.shape[0]))
+    data_te = data_te[mask_te, :]
+    labels_te = labels_te[mask_te]
+    if include_noise_samples:
+        # Number of noise samples
+        n_noise_samp = int(np.ceil(n_samp_te / float(n_classes)))
+        shape_ten = list(data_te.shape)
+        shape_ten[0] = n_noise_samp
+        shape_ten = tuple(shape_ten)
+        print("Including {:d} uniform noise samples from the range ({:.4f}, {:.4f})".format(n_noise_samp,
+                                                                                            bounds[0], bounds[1]))
+        data_noise = (bounds[1] - bounds[0]) * np.random.rand(*shape_ten) + bounds[0]
+        data_te = np.vstack((data_te, data_noise))
+        labels_te = np.concatenate([labels_te, n_classes * np.ones(n_noise_samp, dtype=np.int)])
 
-    return data_tr, labels_tr
+    print("\nList of excluded classes: {}".format(', '.join(map(str, classes_excl))))
+    print("Original size of the train fold: {:d}".format(n_samp_tr))
+    print("New size of the train fold: {:d}".format(labels_tr.shape[0]))
+    print("Original size of the test fold: {:d}".format(n_samp_te))
+    print("New size of the test fold: {:d}".format(labels_te.shape[0]))
+
+    return data_tr, labels_tr, data_te, labels_te
 
 
 def main():
@@ -311,7 +340,6 @@ def main():
         models_folds = []
         init_fold = 0
 
-    np.random.rand(args.seed)
     ti = time.time()
     # Cross-validation
     for i in range(init_fold, args.num_folds):
@@ -323,9 +351,11 @@ def main():
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         # Data loader for the train fold
-        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device,
+                                              dtype_x=torch.float)
         # Data loader for the test fold
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
+        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device,
+                                             dtype_x=torch.float)
 
         # Get the range of values in the data array
         # bounds = get_data_bounds(np.concatenate([data_tr, data_te], axis=0))
@@ -351,18 +381,22 @@ def main():
         data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood = load_numpy_data(numpy_save_path_ood)
         if args.censor_classes:
             # Exclude data from a random subset of classes for the training fold
-            data_tr_ood, labels_tr_ood = filter_data_classes(data_tr_ood, labels_tr_ood)
+            data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood = filter_data_classes(
+                data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood, i, include_noise_samples=True
+            )
 
         '''
         # Data loader for the outlier data from the train fold
-        train_fold_loader_ood = convert_to_loader(data_tr_ood, labels_tr_ood, batch_size=args.batch_size, device=device)
+        train_fold_loader_ood = convert_to_loader(data_tr_ood, labels_tr_ood, batch_size=args.batch_size, 
+                                                  device=device, dtype_x=torch.float)
         print("\nCalculating the layer embeddings and DNN predictions for the ood train data split:")
         layer_embeddings_tr_ood, labels_pred_tr_ood = helper_layer_embeddings(
             model, device, train_fold_loader_ood, args.detection_method, labels_tr_ood
         )
         '''
         # Data loader for the outlier data from the test fold
-        test_fold_loader_ood = convert_to_loader(data_te_ood, labels_te_ood, batch_size=args.batch_size, device=device)
+        test_fold_loader_ood = convert_to_loader(data_te_ood, labels_te_ood, batch_size=args.batch_size,
+                                                 device=device, dtype_x=torch.float)
         print("\nCalculating the layer embeddings and DNN predictions for the ood test data split:")
         layer_embeddings_te_ood, labels_pred_te_ood = helper_layer_embeddings(
             model, device, test_fold_loader_ood, args.detection_method, labels_te_ood
