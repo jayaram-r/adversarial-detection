@@ -198,7 +198,8 @@ def main():
         fname = os.path.join(output_dir, 'detection_metrics_norm_{}.pkl'.format(method_name))
         # fname = None
         results_dict = metrics_varying_perturbation_norm(
-            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=args.max_attack_prop
+            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=args.max_attack_prop,
+            log_scale=False
         )
 
     # print("Performance metrics calculated and saved to the file: {}".format(fname))
