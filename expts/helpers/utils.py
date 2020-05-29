@@ -1042,33 +1042,34 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
     return results
 
 
+def legend_name_map(name_orig):
+    # Setting consistent method names to be used for legends in the paper
+    name_new = copy.copy(name_orig)
+    name_orig = name_orig.lower()
+    if name_orig.startswith('lid'):
+        name_new = 'LID'
+    elif name_orig.startswith('deep_knn'):
+        name_new = 'Deep KNN'
+    elif name_orig.startswith('trust'):
+        name_new = 'Trust Score'
+    elif name_orig.startswith('deep_mahal'):
+        name_new = 'Deep Mahalanobis'
+    elif name_orig.startswith('odds'):
+        name_new = 'Odds are odd'
+    elif name_orig.startswith('propo'):
+        comps = name_orig.split('_')
+        if comps[2] == 'pval' and comps[3] == 'fis':
+            name_new = '{}, Fisher, {}'.format(METHOD_NAME_PROPOSED, comps[1])
+        elif comps[2] == 'pval' and comps[3] == 'hmp':
+            name_new = '{}, HMP, {}'.format(METHOD_NAME_PROPOSED, comps[1])
+        elif comps[2] == 'klpe':
+            name_new = '{}, LPE, {}'.format(METHOD_NAME_PROPOSED, comps[1])
+
+    return name_new
+
+
 def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False, hide_legend=False,
                 log_scale=False, hide_errorbar=True, x_axis='proportion'):
-
-    def legend_name_map(name_orig):
-        # Setting consistent method names to be used for legends in the paper
-        name_new = copy.copy(name_orig)
-        name_orig = name_orig.lower()
-        if name_orig.startswith('lid'):
-            name_new = 'LID'
-        elif name_orig.startswith('deep_knn'):
-            name_new = 'Deep KNN'
-        elif name_orig.startswith('trust'):
-            name_new = 'Trust Score'
-        elif name_orig.startswith('deep_mahal'):
-            name_new = 'Deep Mahalanobis'
-        elif name_orig.startswith('odds'):
-            name_new = 'Odds are odd'
-        elif name_orig.startswith('propo'):
-            comps = name_orig.split('_')
-            if comps[2] == 'pval' and comps[3] == 'fis':
-                name_new = '{}, Fisher, {}'.format(METHOD_NAME_PROPOSED, comps[1])
-            elif comps[2] == 'pval' and comps[3] == 'hmp':
-                name_new = '{}, HMP, {}'.format(METHOD_NAME_PROPOSED, comps[1])
-            elif comps[2] == 'klpe':
-                name_new = '{}, LPE, {}'.format(METHOD_NAME_PROPOSED, comps[1])
-
-        return name_new
 
     fig = plt.figure()
     if log_scale:
@@ -1143,7 +1144,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
                        frameon=True, ncol=4, fancybox=True, framealpha=0.7)
             '''
             plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
-                       prop={'size': 'small', 'weight': 'bold'},
+                       prop={'size': 'x-small', 'weight': 'bold'},
                        frameon=True, ncol=4, fancybox=True, framealpha=0.7)
         else:
             # place the upper right end of the box outside and slightly below the plot axes

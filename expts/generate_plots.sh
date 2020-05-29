@@ -2,7 +2,7 @@
 x_axis='norm'
 pos_label='adversarial'
 plot_dir="/nobackup/varun/adversarial-detection/expts/plots_all/$x_axis"
-plot_dir_sel="/nobackup/varun/adversarial-detection/expts/plots"
+plot_dir_sel="/nobackup/varun/adversarial-detection/expts/plots/$x_axis"
 
 for model in 'svhn'; do
     base_dir="/nobackup/varun/adversarial-detection/expts/outputs/${model}/detection"
