@@ -1139,10 +1139,6 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
         # Legend font sizes:
         # xx-small, x-small, small, medium, large, x-large, xx-large
         if not place_legend_outside:
-            '''
-            plt.legend(loc='lower center', prop={'size': 'x-small', 'weight': 'normal'},
-                       frameon=True, ncol=4, fancybox=True, framealpha=0.7)
-            '''
             plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
                        prop={'size': 'x-small', 'weight': 'bold'},
                        frameon=True, ncol=4, fancybox=True, framealpha=0.7)
@@ -1179,14 +1175,14 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
 
         # Axes limits
         ax.set_ylim([y_bounds[0], y_bounds[1]])
-        if k == 1:
-            ax.set_xlim([x_bounds[0], x_bounds[1]])
+        ax.set_xlim([x_bounds[0], x_bounds[1]])
 
         # Axes ticks
         n_ticks = 10
         # y-axis
         v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=n_ticks), decimals=2))
-        ax.set_yticks(v, fontsize=13, rotation=0)
+        ax.set_yticks(v)
+        ax.set_yticklabels(['{:g}'.format(vv) for vv in v], fontsize=13, rotation=0)
         # x-axis
         if x_axis == 'proportion':
             rot = 0
@@ -1199,8 +1195,9 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
         else:
             raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
+        ax.set_xticks(v)
         if k == 1:
-            ax.set_xticks(v, fontsize=13, rotation=rot)
+            ax.set_xticklabels(['{:g}'.format(vv) for vv in v], fontsize=13, rotation=rot)
 
         # Axes labels
         ax.set_ylabel(plot_dict['y_label'][k], fontsize=13, fontweight='normal')
@@ -1361,8 +1358,8 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
     j = len(FPR_MAX_PAUC) - 1
     plot_dict = dict()
     plot_dict['x_label'] = x_label
-    plot_dict['y_label'] = ['Average precision',
-                            r"Partial AUROC (FPR $\leq$ {:g})".format(FPR_MAX_PAUC[j])]
+    plot_dict['y_label'] = ['Avg. precision',
+                            r"p-AUROC (FPR $\leq$ {:g})".format(FPR_MAX_PAUC[j])]
     plot_dict['title'] = 'Average precision and Partial AUROC'
     for m in methods:
         d = results_dict[m]
