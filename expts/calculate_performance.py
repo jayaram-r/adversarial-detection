@@ -197,13 +197,12 @@ def main():
     if args.x_var == 'proportion':
         print("\nCalculating performance metrics for different proportion of attack samples:")
         results_dict = metrics_varying_positive_class_proportion(
-            scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
+            scores_folds, labels_folds, output_file=fname, max_pos_proportion=0.3, log_scale=False
         )
     elif args.x_var == 'norm':
         print("\nCalculating performance metrics as a function of increasing perturbation norm:")
         results_dict = metrics_varying_perturbation_norm(
-            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=args.max_attack_prop,
-            log_scale=True
+            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=0.3, log_scale=True
         )
 
     if fname:
