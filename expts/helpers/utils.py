@@ -1125,7 +1125,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
             v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
                                     decimals=4))
         else:
-            v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=4))
+            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=4))
     else:
         raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
