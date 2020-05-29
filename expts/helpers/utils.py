@@ -944,10 +944,10 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
     else:
         prop_range = np.unique(np.linspace(p_min, p_max, num=num_prop))
 
-    # dict with the positive proportion and the corresponding performance metrics.
-    # The median and confidence interval values are calculated for each performance metric
+    # dict with the positive proportion and the corresponding performance metrics
     results = {
         'proportion': prop_range,
+        'norm': [],
         'auc': {'median': [], 'CI_lower': [], 'CI_upper': []},
         'avg_prec': {'median': [], 'CI_lower': [], 'CI_upper': []},
         'pauc': {'median': [], 'CI_lower': [], 'CI_upper': []},
@@ -956,6 +956,7 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
     }
     metric_names = list(results.keys())
     metric_names.remove('proportion')
+    metric_names.remove('norm')
 
     ##################### A small utility function
     def _append_percentiles(x, y):
@@ -980,12 +981,17 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
     for p in prop_range:
         print("\nPerformance metrics for target positive proportion: {:.4f}".format(p))
         metrics_dict = {k: [] for k in metric_names}
-        # Cross-validation folds
+        norm_temp = []
+        # cross-validation folds
         for i in range(n_folds):
             # number of positive samples from this fold
             n_pos = min(int(np.ceil(p * n_samp[i])), n_pos_max[i])
             # index of `n_pos` positive samples with the smallest perturbation norm
             ind_curr = ind_pos[i][:n_pos]
+            v = np.max(norm_perturb[i][ind_curr])
+            norm_temp.append(v)
+            print("Fold {:d}: #positive samples = {:d}, target proportion = {:.4f}, actual proportion = {:.4f}, "
+                  "norm perturbation = {:.4f}".format(i + 1, n_pos, p, n_pos / n_samp[i], v))
 
             scores_curr = np.concatenate([scores[i][ind_curr], scores_neg[i]])
             labels_curr = np.concatenate([labels[i][ind_curr], labels_neg[i]])
@@ -996,6 +1002,9 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
             metrics_dict['avg_prec'].append(ret[2])
             metrics_dict['tpr'].append(ret[3][np.newaxis, :])  # array
             metrics_dict['fpr'].append(ret[4][np.newaxis, :])  # array
+
+        # maximum perturbation norm for fixed proportion `p`
+        results['norm'].append(max(norm_temp))
 
         # Concatenate the performance metrics from the different folds.
         # Then calculate the mean value across the folds of each performance metric.
