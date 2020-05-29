@@ -150,8 +150,8 @@ def main():
     num_folds = len(scores_folds)
     assert num_folds == 5, "Saved scores from the pickle file do not have all 5 folds"
     # Perturbation norm for the test folds
-    # norm_type = ATTACK_NORM_MAP[args.adv_attack]
-    norm_type = '2'     # using L2 norm on the x-axis for all attacks
+    norm_type = ATTACK_NORM_MAP[args.adv_attack]
+    # norm_type = '2'     # using L2 norm on the x-axis for all attacks
     norm_folds = []
     for i in range(num_folds):
         # Load the saved clean numpy data from this fold

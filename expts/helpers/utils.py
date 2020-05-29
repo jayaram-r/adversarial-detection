@@ -1156,6 +1156,70 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.close(fig)
 
 
+def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=False, x_axis='proportion'):
+
+    fig, axes = plt.subplots(nrows=2, sharex=True)
+    for k, ax in enumerate(axes):
+        x_vals = []
+        y_vals = []
+        for j, m in enumerate(methods):
+            d = plot_dict[m]
+            ax.plot(d['x_vals'], d['y_vals'][k], linestyle='-', linewidth=0.75, color=COLORS[j], marker=MARKERS[j],
+                    label=legend_name_map(m))
+
+            x_vals.extend(d['x_vals'])
+            y_vals.extend(d['y_vals'][k])
+
+        x_bounds = get_data_bounds(np.array(x_vals), alpha=0.99)
+        y_bounds = get_data_bounds(np.array(y_vals), alpha=0.99)
+        if min_yrange:
+            # Ensure that the range of y-axis is not smaller than `min_yrange`
+            v = min(y_bounds[1] - min_yrange, y_bounds[0])
+            y_bounds = (v, y_bounds[1])
+
+        # Axes limits
+        ax.set_ylim([y_bounds[0], y_bounds[1]])
+        if k == 1:
+            ax.set_xlim([x_bounds[0], x_bounds[1]])
+
+        # Axes ticks
+        n_ticks = 10
+        # y-axis
+        v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=n_ticks), decimals=2))
+        ax.set_yticks(v, fontsize=13, rotation=0)
+        # x-axis
+        if x_axis == 'proportion':
+            rot = 0
+            # round off values to nearest integer
+            v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
+        elif x_axis == 'norm':
+            rot = 40
+            # round off values to 4 decimals places
+            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=4))
+        else:
+            raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
+
+        if k == 1:
+            ax.set_xticks(v, fontsize=13, rotation=rot)
+
+        # Axes labels
+        ax.set_ylabel(plot_dict['y_label'][k], fontsize=13, fontweight='normal')
+        if k == 1:
+            ax.set_xlabel(plot_dict['x_label'], fontsize=13, fontweight='normal')
+
+        # Legend only for the top subplot
+        if not hide_legend and (k == 0):
+            # Legend font sizes:
+            # xx-small, x-small, small, medium, large, x-large, xx-large
+            ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
+                      prop={'size': 'x-small', 'weight': 'bold'},
+                      frameon=True, ncol=4, fancybox=True, framealpha=0.7)
+
+    fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
+    fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
+    plt.close(fig)
+
+
 def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_outside=True, hide_legend=False,
                                 pos_label='adversarial', log_scale=False, hide_errorbar=True, name_prefix=''):
     """
@@ -1292,6 +1356,28 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
                     hide_legend=hide_legend, log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
+
+    # Two subplots with a shared x-axis, one with average precision and the other with p-AUC below FPR = 0.2
+    j = len(FPR_MAX_PAUC) - 1
+    plot_dict = dict()
+    plot_dict['x_label'] = x_label
+    plot_dict['y_label'] = ['Average precision',
+                            r"Partial AUROC (FPR $\leq$ {:g})".format(FPR_MAX_PAUC[j])]
+    plot_dict['title'] = 'Average precision and Partial AUROC'
+    for m in methods:
+        d = results_dict[m]
+        plot_dict[m] = {
+            'x_vals': s * d[x_axis],
+            'y_vals': [np.array(d['avg_prec']['median']),
+                       np.array([v[j] for v in d['pauc']['median']])]
+        }
+
+    if name_prefix:
+        plot_file = os.path.join(output_dir, '{}_{}'.format(name_prefix, 'avg_prec_and_pauc'))
+    else:
+        plot_file = os.path.join(output_dir, '{}'.format('avg_prec_and_pauc'))
+
+    subplot_helper(plot_dict, methods, plot_file, min_yrange=0.1, hide_legend=hide_legend, x_axis=x_axis)
 
 
 def get_num_jobs(n_jobs):
