@@ -891,8 +891,158 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     return results
 
 
+def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1, num_prop=10,
+                                      output_file=None, max_pos_proportion=1.0, log_scale=False):
+    """
+    Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
+    For each proportion, the estimates are calculated from different random samples, and the median and confidence
+    interval values of each performance metric are reported.
+
+    :param scores: list of 1D numpy arrays with the detection scores from the test folds of cross-validation.
+    :param labels: list of 1D numpy array with the binary detection labels from the test folds of cross-validation.
+    :param norm_perturb: list of 1D numpy arrays with the norm of perturbation for adversarial samples. For clean
+                         samples, these values are set to 0.
+    :param pos_label: postive class label; set to 1 by default.
+    :param num_prop: number of positive proportion values to evaluate.
+    :param output_file: (optional) path to an output file where the metrics dict is written to using the
+                        Pickle protocol.
+    :param max_pos_proportion: Maximum proportion of positive samples to include in the plots. Should be a float
+                               value between 0 and 1.
+    :param log_scale: Set to True to use logarithmically spaced positive proportion values.
+
+    :return: a dict with the proportion of positive samples and all the performance metrics.
+    """
+    n_folds = len(scores)
+    n_samp = []
+    ind_pos = []
+    n_pos_max = []
+    scores_neg = []
+    labels_neg = []
+    for i in range(n_folds):
+        n_samp.append(float(labels[i].shape[0]))
+        # index of positive samples
+        mask = (labels[i] == pos_label)
+        temp = np.where(mask)[0]
+        n_pos_max.append(temp.shape[0])
+        # sort the index of positive samples in increasing order of perturbation norm
+        ind_sort = np.argsort(norm_perturb[i][temp])
+        ind_pos.append(temp[ind_sort])
+
+        # index of negative samples
+        temp = np.where(~mask)[0]
+        scores_neg.append(scores[i][temp])
+        labels_neg.append(labels[i][temp])
+
+    # Minimum proportion of positive samples. Ensuring that there are at least 5 positive samples
+    p_min = max([max(5., np.ceil(0.005 * n_samp[i])) / n_samp[i] for i in range(n_folds)])
+    # Maximum proportion of positive samples considering all the folds
+    p_max = min([n_pos_max[i] / n_samp[i] for i in range(n_folds)])
+    p_max = min(p_max, max_pos_proportion)
+    # Range of proportion of positive samples
+    if log_scale:
+        prop_range = np.unique(np.logspace(np.log10(p_min), np.log10(p_max), num=num_prop))
+    else:
+        prop_range = np.unique(np.linspace(p_min, p_max, num=num_prop))
+
+    # dict with the positive proportion and the corresponding performance metrics
+    results = {
+        'proportion': prop_range,
+        'norm': [],
+        'auc': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'avg_prec': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'pauc': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'tpr': {'median': [], 'CI_lower': [], 'CI_upper': []},
+        'fpr': {'median': [], 'CI_lower': [], 'CI_upper': []}
+    }
+    metric_names = list(results.keys())
+    metric_names.remove('proportion')
+    metric_names.remove('norm')
+
+    ##################### A small utility function
+    def _append_percentiles(x, y):
+        # `x` will be an array of shape either `(n_folds, )` or `(n_folds, k)`.
+        # Since there are not multiple random trials in this case, we simply find the mean value across the folds
+        # and use this value in place of the median and confidence intervals.
+        if len(x.shape) == 2:
+            a = np.mean(x, axis=0)
+        else:
+            a = np.mean(x)
+
+        y['CI_lower'].append(a)
+        y['median'].append(a)
+        y['CI_upper'].append(a)
+
+        return a
+    #####################
+
+    num_pauc = len(FPR_MAX_PAUC)
+    num_tpr = len(FPR_THRESH)
+    # Varying the proportion of positive samples
+    for p in prop_range:
+        print("\nPerformance metrics for target positive proportion: {:.4f}".format(p))
+        metrics_dict = {k: [] for k in metric_names}
+        norm_temp = []
+        # cross-validation folds
+        for i in range(n_folds):
+            # number of positive samples from this fold
+            n_pos = min(int(np.ceil(p * n_samp[i])), n_pos_max[i])
+            # index of `n_pos` positive samples with the smallest perturbation norm
+            ind_curr = ind_pos[i][:n_pos]
+            v = np.max(norm_perturb[i][ind_curr])
+            norm_temp.append(v)
+            print("Fold {:d}: #positive samples = {:d}, target proportion = {:.4f}, actual proportion = {:.4f}, "
+                  "norm perturbation = {:.6f}".format(i + 1, n_pos, p, n_pos / n_samp[i], v))
+
+            scores_curr = np.concatenate([scores[i][ind_curr], scores_neg[i]])
+            labels_curr = np.concatenate([labels[i][ind_curr], labels_neg[i]])
+            # Calculate performance metrics for this trial
+            ret = metrics_detection(scores_curr, labels_curr, pos_label=pos_label, verbose=False)
+            metrics_dict['auc'].append(ret[0])
+            metrics_dict['pauc'].append(ret[1][np.newaxis, :]) # array
+            metrics_dict['avg_prec'].append(ret[2])
+            metrics_dict['tpr'].append(ret[3][np.newaxis, :])  # array
+            metrics_dict['fpr'].append(ret[4][np.newaxis, :])  # array
+
+        # maximum perturbation norm for fixed proportion `p`
+        results['norm'].append(max(norm_temp))
+
+        # Concatenate the performance metrics from the different folds.
+        # Then calculate the mean value across the folds of each performance metric.
+        # `metrics_dict['auc']` will be a list of scalar values
+        arr = np.array(metrics_dict['auc'])
+        ret = _append_percentiles(arr, results['auc'])
+        print("Area under the ROC curve = {:.6f}".format(ret))
+
+        # `metrics_dict['avg_prec']` will be a list of scalar values
+        arr = np.array(metrics_dict['avg_prec'])
+        ret = _append_percentiles(arr, results['avg_prec'])
+        print("Average precision = {:.6f}".format(ret))
+
+        # `metrics_dict['pauc']` will be a list of arrays, each of shape `(1, num_pauc)`
+        arr = np.concatenate(metrics_dict['pauc'], axis=0)
+        ret = _append_percentiles(arr, results['pauc'])
+        for a, b in zip(FPR_MAX_PAUC, ret):
+            print("Partial-AUC below fpr {:.4f} = {:.6f}".format(a, b))
+
+        # `metrics_dict['tpr']` and `metrics_dict['fpr']` will be a list of arrays, each of shape `(1, num_tpr)`
+        arr = np.concatenate(metrics_dict['tpr'], axis=0)
+        ret1 = _append_percentiles(arr, results['tpr'])
+        arr = np.concatenate(metrics_dict['fpr'], axis=0)
+        ret2 = _append_percentiles(arr, results['fpr'])
+        print("TPR\tFPR_target\tFPR_actual\tTPR_scaled")
+        for a, b, c in zip(ret1, FPR_THRESH, ret2):
+            print("{:.6f}\t{:.6f}\t{:.6f}\t{:.6f}".format(a, b, c, a / max(1, c / b)))
+
+    # Save the results to a pickle file if required
+    if output_file:
+        with open(output_file, 'wb') as fp:
+            pickle.dump(results, fp)
+
+    return results
+
+
 def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False,
-                log_scale=False, hide_errorbar=False):
+                log_scale=False, hide_errorbar=False, x_axis='proportion'):
 
     def legend_name_map(name_orig):
         # Setting consistent method names to be used for legends in the paper
@@ -954,14 +1104,32 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.xlim([x_bounds[0], x_bounds[1]])
     plt.ylim([y_bounds[0], y_bounds[1]])
     # Axes ticks
-    v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=10), decimals=2))
+    n_ticks = 10
+    # y-axis
+    v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=n_ticks), decimals=2))
     plt.yticks(v, fontsize=13, rotation=0)
-    if log_scale:
-        v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=10), decimals=0))
+    # x-axis
+    if x_axis == 'proportion':
+        rot = 0
+        # round off values to nearest integer
+        if log_scale:
+            v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
+                                    decimals=0))
+        else:
+            v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
+    elif x_axis == 'norm':
+        rot = 30
+        # round off values to 4 decimals places
+        if log_scale:
+            v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
+                                    decimals=4))
+        else:
+            v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=4))
     else:
-        v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=10), decimals=0))
+        raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
-    plt.xticks(v, fontsize=13, rotation=0)
+    plt.xticks(v, fontsize=13, rotation=rot)
+    # Axes labels
     plt.xlabel(plot_dict['x_label'], fontsize=13, fontweight='normal')
     plt.ylabel(plot_dict['y_label'], fontsize=13, fontweight='normal')
     # plt.title(plot_dict['title'], fontsize=10, fontweight='normal')
@@ -985,14 +1153,15 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.close(fig)
 
 
-def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial',
-                                log_scale=False, hide_errorbar=False, name_prefix=''):
+def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', place_legend_outside=True,
+                                pos_label='adversarial', log_scale=False, hide_errorbar=True, name_prefix=''):
     """
     Plot the performance comparison for different detection methods.
 
     :param results_dict: dict mapping each method name to its metrics dict (obtained from the function
                          `metrics_varying_positive_class_proportion`).
     :param output_dir: path to the output directory where the plots are to be saved.
+    :param x_axis: variable to show in the x-axis; options are 'proportion' and 'norm'.
     :param place_legend_outside: Set to True to place the legend outside the plot area.
     :param pos_label: string with the positive class label.
     :param log_scale: Set to True to use a logarithmic scale on the x-axis.
@@ -1002,7 +1171,15 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    x_label = 'Proportion of {} samples (%)'.format(pos_label)
+    if x_axis == 'proportion':
+        x_label = 'Proportion of {} samples (%)'.format(pos_label)
+        s = 100.
+    elif x_axis == 'norm':
+        x_label = 'Perturbation norm'
+        s = 1.
+    else:
+        raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
+
     methods = sorted(results_dict.keys())
     # AUC plots
     plot_dict = dict()
@@ -1015,7 +1192,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['auc']['CI_lower'])
         y_up = np.array(d['auc']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': s * d[x_axis],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -1028,7 +1205,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         plot_file = os.path.join(output_dir, '{}'.format('auc'))
 
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale, hide_errorbar=hide_errorbar)
+                log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Average precision plots
     plot_dict = dict()
@@ -1041,7 +1218,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['avg_prec']['CI_lower'])
         y_up = np.array(d['avg_prec']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': s * d[x_axis],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -1054,7 +1231,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         plot_file = os.path.join(output_dir, '{}'.format('avg_prec'))
 
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale, hide_errorbar=hide_errorbar)
+                log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
@@ -1068,7 +1245,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             y_low = np.array([v[j] for v in d['pauc']['CI_lower']])
             y_up = np.array([v[j] for v in d['pauc']['CI_upper']])
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': s * d[x_axis],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
@@ -1081,7 +1258,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             plot_file = os.path.join(output_dir, '{}_{:d}'.format('pauc', j + 1))
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale, hide_errorbar=hide_errorbar)
+                    log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # TPR for different target FPR values
     for j, f in enumerate(FPR_THRESH):
@@ -1097,7 +1274,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             # Excess FPR above the target value `f`
             fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': s * d[x_axis],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
@@ -1110,7 +1287,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             plot_file = os.path.join(output_dir, '{}_{:d}'.format('tpr', j + 1))
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale, hide_errorbar=hide_errorbar)
+                    log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
 
 def get_num_jobs(n_jobs):
