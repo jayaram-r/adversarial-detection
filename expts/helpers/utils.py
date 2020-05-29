@@ -1120,13 +1120,13 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
         else:
             v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
     elif x_axis == 'norm':
-        rot = 40
-        # round off values to 4 decimals places
+        rot = 0
         if log_scale:
-            v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
-                                    decimals=4))
+            v = np.unique(np.around(
+                np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks), decimals=0
+            ))
         else:
-            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=4))
+            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=0))
     else:
         raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
@@ -1147,6 +1147,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
             plt.legend(loc='upper right', frameon=False, bbox_to_anchor=(1, -0.07),
                        prop={'size': 'x-small', 'weight': 'normal'})
 
+    fig.tight_layout()
     fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
@@ -1180,7 +1181,7 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
         # Axes ticks
         n_ticks = 10
         # y-axis
-        v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=n_ticks), decimals=2))
+        v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=8), decimals=2))
         ax.set_yticks(v)
         ax.set_yticklabels(['{:g}'.format(vv) for vv in v], fontsize=13, rotation=0)
         # x-axis
@@ -1189,9 +1190,8 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
             # round off values to nearest integer
             v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
         elif x_axis == 'norm':
-            rot = 40
-            # round off values to 4 decimals places
-            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=4))
+            rot = 0
+            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=0))
         else:
             raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
@@ -1212,6 +1212,7 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
                       prop={'size': 'x-small', 'weight': 'bold'},
                       frameon=True, ncol=4, fancybox=True, framealpha=0.7)
 
+    fig.tight_layout()
     fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
@@ -1240,8 +1241,8 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
         x_label = 'Proportion of {} samples (%)'.format(pos_label)
         s = 100.
     elif x_axis == 'norm':
-        x_label = 'Perturbation norm'
-        s = 1.
+        x_label = 'Perturbation norm (x 100)'
+        s = 100.
     else:
         raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
@@ -1359,7 +1360,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
     plot_dict = dict()
     plot_dict['x_label'] = x_label
     plot_dict['y_label'] = ['Avg. precision',
-                            r"p-AUROC (FPR $\leq$ {:g})".format(FPR_MAX_PAUC[j])]
+                            r"p-AUC (FPR $\leq$ {:g})".format(FPR_MAX_PAUC[j])]
     plot_dict['title'] = 'Average precision and Partial AUROC'
     for m in methods:
         d = results_dict[m]
