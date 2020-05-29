@@ -14,6 +14,10 @@ NORMALIZE_IMAGES = {
     'svhn': ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 }
 
+# Acronym for the proposed method
+# METHOD_NAME_PROPOSED = 'Proposed'
+METHOD_NAME_PROPOSED = 'ReBeL'
+
 # Number of neighbors is calculated as a function of the data size (number of samples) `N`.
 # Number of neighbors, `k = N ** NEIGHBORHOOD_CONST`.
 NEIGHBORHOOD_CONST = 0.4

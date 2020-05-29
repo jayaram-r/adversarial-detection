@@ -6,7 +6,7 @@ x_var='norm'
 for model in 'svhn'; do
     base_dir="/nobackup/varun/adversarial-detection/expts/outputs/${model}/detection"
     #for attack in 'CW' 'PGD' 'FGSM' 'Custom'; do
-    for attack in 'CW' 'Custom'; do
+    for attack in 'CW' 'Custom' 'PGD' 'FGSM'; do
         echo "Calculating performance metrics on ${model}, ${attack}"
 
         target_dir="${base_dir}/${attack}/all/$x_var"
@@ -43,7 +43,7 @@ for model in 'svhn'; do
         python -u calculate_performance.py -o $output_dir --x-var $x_var -m $model --dm odds --adv-attack $attack --gpu $gpu
         cp ${output_dir}/${x_var}/detection_metrics_odds_are_odd.pkl ${target_dir}/
 
-        #trust score
+        #trust score applied to the prelogit layers
         output_dir="${base_dir}/${attack}/trust_score"
         python -u calculate_performance.py -o $output_dir --x-var $x_var -m $model --dm trust --lts prelogit --adv-attack $attack --gpu $gpu
         cp ${output_dir}/${x_var}/detection_metrics_trust_prelogit.pkl ${target_dir}/

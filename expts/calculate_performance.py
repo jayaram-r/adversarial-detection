@@ -148,7 +148,7 @@ def main():
     scores_folds, labels_folds, _, _ = load_detector_checkpoint(output_dir, method_name, False)
 
     num_folds = len(scores_folds)
-    assert num_folds == 5, "Saved scores from the pickle file do not have 5 folds"
+    assert num_folds == 5, "Saved scores from the pickle file do not have all 5 folds"
     # Perturbation norm for the test folds
     norm_type = ATTACK_NORM_MAP[args.adv_attack]
     norm_folds = []
@@ -192,17 +192,20 @@ def main():
     output_subdir = os.path.join(output_dir, args.x_var)
     if not os.path.isdir(output_subdir):
         os.makedirs(output_subdir)
+
+    max_pos_prop = 0.3  # maximum proportion of positive (adversarial or ood) samples
     # fname = None
     fname = os.path.join(output_subdir, 'detection_metrics_{}.pkl'.format(method_name))
     if args.x_var == 'proportion':
         print("\nCalculating performance metrics for different proportion of attack samples:")
         results_dict = metrics_varying_positive_class_proportion(
-            scores_folds, labels_folds, output_file=fname, max_pos_proportion=0.3, log_scale=False
+            scores_folds, labels_folds, output_file=fname, max_pos_proportion=max_pos_prop, log_scale=False
         )
     elif args.x_var == 'norm':
         print("\nCalculating performance metrics as a function of increasing perturbation norm:")
         results_dict = metrics_varying_perturbation_norm(
-            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=0.3, log_scale=True
+            scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=max_pos_prop,
+            log_scale=False
         )
 
     if fname:

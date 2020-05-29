@@ -719,9 +719,9 @@ def metrics_for_accuracy(labels, clean_labels, output_file=None):
     return results
 
 
-def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=10,
+def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_prop=12,
                                               num_random_samples=100, seed=SEED_DEFAULT, output_file=None,
-                                              max_pos_proportion=1.0, log_scale=False):
+                                              max_pos_proportion=0.5, log_scale=False):
     """
     Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
     For each proportion, the estimates are calculated from different random samples, and the median and confidence
@@ -891,8 +891,8 @@ def metrics_varying_positive_class_proportion(scores, labels, pos_label=1, num_p
     return results
 
 
-def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1, num_prop=10,
-                                      output_file=None, max_pos_proportion=1.0, log_scale=False):
+def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1, num_prop=12,
+                                      output_file=None, max_pos_proportion=0.5, log_scale=False):
     """
     Calculate a number of performance metrics as the fraction of positive samples in the data is varied.
     For each proportion, the estimates are calculated from different random samples, and the median and confidence
@@ -1042,8 +1042,8 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
     return results
 
 
-def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False,
-                log_scale=False, hide_errorbar=False, x_axis='proportion'):
+def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False, hide_legend=False,
+                log_scale=False, hide_errorbar=True, x_axis='proportion'):
 
     def legend_name_map(name_orig):
         # Setting consistent method names to be used for legends in the paper
@@ -1062,11 +1062,11 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
         elif name_orig.startswith('propo'):
             comps = name_orig.split('_')
             if comps[2] == 'pval' and comps[3] == 'fis':
-                name_new = 'Proposed, Fisher, {}'.format(comps[1])
+                name_new = '{}, Fisher, {}'.format(METHOD_NAME_PROPOSED, comps[1])
             elif comps[2] == 'pval' and comps[3] == 'hmp':
-                name_new = 'Proposed, HMP, {}'.format(comps[1])
+                name_new = '{}, HMP, {}'.format(METHOD_NAME_PROPOSED, comps[1])
             elif comps[2] == 'klpe':
-                name_new = 'Proposed, LPE, {}'.format(comps[1])
+                name_new = '{}, LPE, {}'.format(METHOD_NAME_PROPOSED, comps[1])
 
         return name_new
 
@@ -1134,27 +1134,28 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.xlabel(plot_dict['x_label'], fontsize=13, fontweight='normal')
     plt.ylabel(plot_dict['y_label'], fontsize=13, fontweight='normal')
     # plt.title(plot_dict['title'], fontsize=10, fontweight='normal')
-    # Legend font sizes:
-    # xx-small, x-small, small, medium, large, x-large, xx-large
-    if not place_legend_outside:
-        '''
-        plt.legend(loc='lower center', prop={'size': 'x-small', 'weight': 'normal'},
-                   frameon=True, ncol=4, fancybox=True, framealpha=0.7)
-        '''
-        plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
-                   prop={'size': 'x-small', 'weight': 'bold'},
-                   frameon=True, ncol=4, fancybox=True, framealpha=0.7)
-    else:
-        # place the upper right end of the box outside and slightly below the plot axes
-        plt.legend(loc='upper right', frameon=False, bbox_to_anchor=(1, -0.07),
-                   prop={'size': 'x-small', 'weight': 'normal'})
+    if not hide_legend:
+        # Legend font sizes:
+        # xx-small, x-small, small, medium, large, x-large, xx-large
+        if not place_legend_outside:
+            '''
+            plt.legend(loc='lower center', prop={'size': 'x-small', 'weight': 'normal'},
+                       frameon=True, ncol=4, fancybox=True, framealpha=0.7)
+            '''
+            plt.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1),
+                       prop={'size': 'small', 'weight': 'bold'},
+                       frameon=True, ncol=4, fancybox=True, framealpha=0.7)
+        else:
+            # place the upper right end of the box outside and slightly below the plot axes
+            plt.legend(loc='upper right', frameon=False, bbox_to_anchor=(1, -0.07),
+                       prop={'size': 'x-small', 'weight': 'normal'})
 
     fig.savefig('{}.png'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     fig.savefig('{}.pdf'.format(plot_file), dpi=600, bbox_inches='tight', transparent=False)
     plt.close(fig)
 
 
-def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', place_legend_outside=True,
+def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_outside=True, hide_legend=False,
                                 pos_label='adversarial', log_scale=False, hide_errorbar=True, name_prefix=''):
     """
     Plot the performance comparison for different detection methods.
@@ -1164,6 +1165,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', p
     :param output_dir: path to the output directory where the plots are to be saved.
     :param x_axis: variable to show in the x-axis; options are 'proportion' and 'norm'.
     :param place_legend_outside: Set to True to place the legend outside the plot area.
+    :param hide_legend: Set to True to hide the legend.
     :param pos_label: string with the positive class label.
     :param log_scale: Set to True to use a logarithmic scale on the x-axis.
     :param hide_errorbar: Set to True to hide error-bars from the plots.
@@ -1206,7 +1208,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', p
         plot_file = os.path.join(output_dir, '{}'.format('auc'))
 
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
+                hide_legend=hide_legend, log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Average precision plots
     plot_dict = dict()
@@ -1232,7 +1234,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', p
         plot_file = os.path.join(output_dir, '{}'.format('avg_prec'))
 
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
+                hide_legend=hide_legend, log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
@@ -1259,7 +1261,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', p
             plot_file = os.path.join(output_dir, '{}_{:d}'.format('pauc', j + 1))
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
+                    hide_legend=hide_legend, log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # TPR for different target FPR values
     for j, f in enumerate(FPR_THRESH):
@@ -1288,7 +1290,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', p
             plot_file = os.path.join(output_dir, '{}_{:d}'.format('tpr', j + 1))
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
+                    hide_legend=hide_legend, log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
 
 def get_num_jobs(n_jobs):
