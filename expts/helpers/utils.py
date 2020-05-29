@@ -1119,7 +1119,7 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
         else:
             v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
     elif x_axis == 'norm':
-        rot = 30
+        rot = 40
         # round off values to 4 decimals places
         if log_scale:
             v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),

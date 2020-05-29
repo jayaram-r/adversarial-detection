@@ -203,7 +203,7 @@ def main():
         print("\nCalculating performance metrics as a function of increasing perturbation norm:")
         results_dict = metrics_varying_perturbation_norm(
             scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=args.max_attack_prop,
-            log_scale=False
+            log_scale=True
         )
 
     if fname:
