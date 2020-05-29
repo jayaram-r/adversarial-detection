@@ -16,6 +16,9 @@ def main():
     parser.add_argument('--pos-label', '--pl', default='adversarial',
                         help='label for the positive class - e.g. adversarial or ood')
     parser.add_argument('--name-prefix', '--pre', default='', help='optional prefix for the plot filenames')
+    parser.add_argument('--x-axis', choices=['proportion', 'norm'], default='proportion',
+                        help="Choice of variable on the x-axis. Options are 'norm' for the perturbation norm, "
+                             "and 'proportion' for proportion of adversarial/OOD samples.")
     parser.add_argument('--log-scale', action='store_true', default=False,
                         help='use log scale for the x-axis of the plots')
     args = parser.parse_args()
@@ -46,8 +49,9 @@ def main():
         plo = True
 
     if results:
-        plot_performance_comparison(results, plot_dir, place_legend_outside=plo, pos_label=args.pos_label,
-                                    log_scale=args.log_scale, hide_errorbar=True, name_prefix=args.name_prefix)
+        plot_performance_comparison(results, plot_dir, x_axis=args.x_axis, place_legend_outside=plo,
+                                    pos_label=args.pos_label, log_scale=args.log_scale, hide_errorbar=True,
+                                    name_prefix=args.name_prefix)
     else:
         print("No performance metrics files were found in the specified output directory.")
 

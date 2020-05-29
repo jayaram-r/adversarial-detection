@@ -991,7 +991,7 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
             v = np.max(norm_perturb[i][ind_curr])
             norm_temp.append(v)
             print("Fold {:d}: #positive samples = {:d}, target proportion = {:.4f}, actual proportion = {:.4f}, "
-                  "norm perturbation = {:.4f}".format(i + 1, n_pos, p, n_pos / n_samp[i], v))
+                  "norm perturbation = {:.6f}".format(i + 1, n_pos, p, n_pos / n_samp[i], v))
 
             scores_curr = np.concatenate([scores[i][ind_curr], scores_neg[i]])
             labels_curr = np.concatenate([labels[i][ind_curr], labels_neg[i]])
@@ -1042,7 +1042,7 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
 
 
 def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_outside=False,
-                log_scale=False, hide_errorbar=False):
+                log_scale=False, hide_errorbar=False, x_axis='proportion'):
 
     def legend_name_map(name_orig):
         # Setting consistent method names to be used for legends in the paper
@@ -1104,14 +1104,32 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.xlim([x_bounds[0], x_bounds[1]])
     plt.ylim([y_bounds[0], y_bounds[1]])
     # Axes ticks
-    v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=10), decimals=2))
+    n_ticks = 10
+    # y-axis
+    v = np.unique(np.around(np.linspace(y_bounds[0], min(y_bounds[1], 1.), num=n_ticks), decimals=2))
     plt.yticks(v, fontsize=13, rotation=0)
-    if log_scale:
-        v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=10), decimals=0))
+    # x-axis
+    if x_axis == 'proportion':
+        rot = 0
+        # round off values to nearest integer
+        if log_scale:
+            v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
+                                    decimals=0))
+        else:
+            v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
+    elif x_axis == 'norm':
+        rot = 30
+        # round off values to 4 decimals places
+        if log_scale:
+            v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
+                                    decimals=4))
+        else:
+            v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=4))
     else:
-        v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=10), decimals=0))
+        raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
-    plt.xticks(v, fontsize=13, rotation=0)
+    plt.xticks(v, fontsize=13, rotation=rot)
+    # Axes labels
     plt.xlabel(plot_dict['x_label'], fontsize=13, fontweight='normal')
     plt.ylabel(plot_dict['y_label'], fontsize=13, fontweight='normal')
     # plt.title(plot_dict['title'], fontsize=10, fontweight='normal')
@@ -1135,14 +1153,15 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
     plt.close(fig)
 
 
-def plot_performance_comparison(results_dict, output_dir, place_legend_outside=True, pos_label='adversarial',
-                                log_scale=False, hide_errorbar=False, name_prefix=''):
+def plot_performance_comparison(results_dict, output_dir, x_axis='proportion', place_legend_outside=True,
+                                pos_label='adversarial', log_scale=False, hide_errorbar=True, name_prefix=''):
     """
     Plot the performance comparison for different detection methods.
 
     :param results_dict: dict mapping each method name to its metrics dict (obtained from the function
                          `metrics_varying_positive_class_proportion`).
     :param output_dir: path to the output directory where the plots are to be saved.
+    :param x_axis: variable to show in the x-axis; options are 'proportion' and 'norm'.
     :param place_legend_outside: Set to True to place the legend outside the plot area.
     :param pos_label: string with the positive class label.
     :param log_scale: Set to True to use a logarithmic scale on the x-axis.
@@ -1152,7 +1171,15 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
     if not os.path.isdir(output_dir):
         os.makedirs(output_dir)
 
-    x_label = 'Proportion of {} samples (%)'.format(pos_label)
+    if x_axis == 'proportion':
+        x_label = 'Proportion of {} samples (%)'.format(pos_label)
+        s = 100.
+    elif x_axis == 'norm':
+        x_label = 'Perturbation norm'
+        s = 1.
+    else:
+        raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
+
     methods = sorted(results_dict.keys())
     # AUC plots
     plot_dict = dict()
@@ -1165,7 +1192,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['auc']['CI_lower'])
         y_up = np.array(d['auc']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': s * d[x_axis],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -1178,7 +1205,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         plot_file = os.path.join(output_dir, '{}'.format('auc'))
 
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale, hide_errorbar=hide_errorbar)
+                log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Average precision plots
     plot_dict = dict()
@@ -1191,7 +1218,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         y_low = np.array(d['avg_prec']['CI_lower'])
         y_up = np.array(d['avg_prec']['CI_upper'])
         plot_dict[m] = {
-            'x_vals': 100 * d['proportion'],
+            'x_vals': s * d[x_axis],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
@@ -1204,7 +1231,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
         plot_file = os.path.join(output_dir, '{}'.format('avg_prec'))
 
     plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                log_scale=log_scale, hide_errorbar=hide_errorbar)
+                log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Partial AUC below different max-FPR values
     for j, f in enumerate(FPR_MAX_PAUC):
@@ -1218,7 +1245,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             y_low = np.array([v[j] for v in d['pauc']['CI_lower']])
             y_up = np.array([v[j] for v in d['pauc']['CI_upper']])
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': s * d[x_axis],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
@@ -1231,7 +1258,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             plot_file = os.path.join(output_dir, '{}_{:d}'.format('pauc', j + 1))
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale, hide_errorbar=hide_errorbar)
+                    log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # TPR for different target FPR values
     for j, f in enumerate(FPR_THRESH):
@@ -1247,7 +1274,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             # Excess FPR above the target value `f`
             fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
             plot_dict[m] = {
-                'x_vals': 100 * d['proportion'],
+                'x_vals': s * d[x_axis],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
@@ -1260,7 +1287,7 @@ def plot_performance_comparison(results_dict, output_dir, place_legend_outside=T
             plot_file = os.path.join(output_dir, '{}_{:d}'.format('tpr', j + 1))
 
         plot_helper(plot_dict, methods, plot_file, min_yrange=0.1, place_legend_outside=place_legend_outside,
-                    log_scale=log_scale, hide_errorbar=hide_errorbar)
+                    log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
 
 def get_num_jobs(n_jobs):

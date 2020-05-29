@@ -189,20 +189,18 @@ def main():
         # Filling in zeros for the perturbation norm of clean test fold samples
         norm_folds.append(np.concatenate([np.zeros(num_clean_te), norm_diff_te]))
 
-    fname = None
+    output_subdir = os.path.join(output_dir, args.x_var)
+    if not os.path.isdir(output_subdir):
+        os.makedirs(output_subdir)
+    # fname = None
+    fname = os.path.join(output_subdir, 'detection_metrics_{}.pkl'.format(method_name))
     if args.x_var == 'proportion':
         print("\nCalculating performance metrics for different proportion of attack samples:")
-        # fname = os.path.join(output_dir, 'detection_metrics_{}.pkl'.format(method_name))
         results_dict = metrics_varying_positive_class_proportion(
             scores_folds, labels_folds, output_file=fname, max_pos_proportion=args.max_attack_prop, log_scale=False
         )
     elif args.x_var == 'norm':
         print("\nCalculating performance metrics as a function of increasing perturbation norm:")
-        output_subdir = os.path.join(output_dir, 'norm')
-        if not os.path.isdir(output_subdir):
-            os.makedirs(output_subdir)
-
-        fname = os.path.join(output_subdir, 'detection_metrics_{}.pkl'.format(method_name))
         results_dict = metrics_varying_perturbation_norm(
             scores_folds, labels_folds, norm_folds, output_file=fname, max_pos_proportion=args.max_attack_prop,
             log_scale=False
