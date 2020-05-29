@@ -1033,6 +1033,7 @@ def metrics_varying_perturbation_norm(scores, labels, norm_perturb, pos_label=1,
         for a, b, c in zip(ret1, FPR_THRESH, ret2):
             print("{:.6f}\t{:.6f}\t{:.6f}\t{:.6f}".format(a, b, c, a / max(1, c / b)))
 
+    results['norm'] = np.array(results['norm'])
     # Save the results to a pickle file if required
     if output_file:
         with open(output_file, 'wb') as fp:
