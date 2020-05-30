@@ -1120,13 +1120,13 @@ def plot_helper(plot_dict, methods, plot_file, min_yrange=None, place_legend_out
         else:
             v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
     elif x_axis == 'norm':
-        rot = 0
-        # round off values to nearest integer
+        rot = 35
+        # round off values to 3 decimal places
         if log_scale:
             v = np.unique(np.around(np.logspace(np.log10(x_bounds[0]), np.log10(x_bounds[1]), num=n_ticks),
-                                    decimals=0))
+                                    decimals=3))
         else:
-            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=0))
+            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=3))
     else:
         raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
@@ -1190,9 +1190,9 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
             # round off values to nearest integer
             v = np.unique(np.around(np.linspace(max(x_bounds[0], 1.), x_bounds[1], num=n_ticks), decimals=0))
         elif x_axis == 'norm':
-            rot = 0
-            # round off values to nearest integer
-            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=0))
+            rot = 35
+            # round off values to 3 decimal places
+            v = np.unique(np.around(np.linspace(x_bounds[0], x_bounds[1], num=n_ticks), decimals=3))
         else:
             raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 
@@ -1242,8 +1242,8 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
         x_label = 'Proportion of {} samples (%)'.format(pos_label)
         s = 100.
     elif x_axis == 'norm':
-        x_label = r"Perturbation $l_2$ norm (x 100)"
-        s = 100.
+        x_label = r"Perturbation 2-norm"
+        s = 1.
     else:
         raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
 

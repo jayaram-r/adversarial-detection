@@ -4,12 +4,12 @@ pos_label='adversarial'
 plot_dir="/nobackup/varun/adversarial-detection/expts/plots_all/$x_axis"
 plot_dir_sel="/nobackup/varun/adversarial-detection/expts/plots/$x_axis"
 
-for model in 'svhn'; do
+for model in 'svhn' 'cifar10' 'mnist'; do
     base_dir="/nobackup/varun/adversarial-detection/expts/outputs/${model}/detection"
     for attack in 'CW' 'PGD' 'FGSM' 'Custom'; do
         echo "Plotting ${model}, ${attack}"
         out_dir="${base_dir}/${attack}/all/$x_axis"
-        python -u generate_plots.py -o $out_dir -p $plot_dir --pos-label $pos_label --x-axis $x_axis --pre ${model}_${attack}
+        python -u generate_plots.py -o $out_dir -p $plot_dir --pos-label $pos_label --x-axis $x_axis --pre ${model}_${attack} --hide-legend
     done
 done
 
