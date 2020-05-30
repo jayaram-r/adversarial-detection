@@ -1,8 +1,9 @@
 #!/bin/bash
 x_axis='norm'
+#x_axis='proportion'
 pos_label='adversarial'
-plot_dir="/nobackup/varun/adversarial-detection/expts/plots_all/$x_axis"
-plot_dir_sel="/nobackup/varun/adversarial-detection/expts/plots/$x_axis"
+plot_dir="/nobackup/varun/adversarial-detection/expts/plots_all/${pos_label}/$x_axis"
+plot_dir_sel="/nobackup/varun/adversarial-detection/expts/plots/${pos_label}/$x_axis"
 
 for model in 'svhn' 'cifar10' 'mnist'; do
     base_dir="/nobackup/varun/adversarial-detection/expts/outputs/${model}/detection"

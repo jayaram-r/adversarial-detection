@@ -1357,7 +1357,13 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
                     hide_legend=hide_legend, log_scale=log_scale, hide_errorbar=hide_errorbar, x_axis=x_axis)
 
     # Two subplots with a shared x-axis, one with average precision and the other with p-AUC below FPR = 0.2
-    j = len(FPR_MAX_PAUC) - 1
+    if pos_label == 'adversarial':
+        # FPR = 0.2 for adversarial evaluation
+        j = len(FPR_MAX_PAUC) - 1
+    else:
+        # FPR = 0.05 for OOD evaluation
+        j = 1
+
     plot_dict = dict()
     plot_dict['x_label'] = x_label
     plot_dict['y_label'] = ['Avg. precision',
