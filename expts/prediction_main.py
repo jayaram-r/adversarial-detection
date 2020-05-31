@@ -320,7 +320,7 @@ def main():
             num_expec = num_adv_te
         else:
             print("\nTrain fold: number of clean samples = {:d}".format(num_clean_tr))
-            print("\nTest fold: number of clean samples = {:d}".format(num_clean_te))
+            print("Test fold: number of clean samples = {:d}".format(num_clean_te))
             # True class labels of clean samples from this test fold
             labels_true_folds.append(labels_te)
             # Class predictions of the DNN on clean samples from this test fold
@@ -406,7 +406,7 @@ def main():
             raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
 
         # Sanity check
-        if (scores_detec.shape[0] != num_expec) or (labels_pred_detec != num_expec):
+        if (scores_detec.shape[0] != num_expec) or (labels_pred_detec.shape[0] != num_expec):
             raise ValueError(
                 "Detection scores and/or predicted labels do not have the expected length of {:d}; method = {}, "
                 "fold = {:d}".format(num_expec, args.detection_method, i + 1)
