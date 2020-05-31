@@ -8,6 +8,7 @@ import os
 import time
 import copy
 import pickle
+from pprint import pprint
 import numpy as np
 import torch
 from nets.mnist import *
@@ -75,7 +76,7 @@ def combined_classification_performance(scores_detec_folds, thresholds_folds, la
     results['accuracy_dnn'] = (1. / n_folds) * results['accuracy_dnn']
     results['accuracy_combined'] = (1. / n_folds) * results['accuracy_combined']
 
-    print(results)
+    pprint(results, indent=2)
     # Save the results to a pickle file if required
     if output_file:
         with open(output_file, 'wb') as fp:
