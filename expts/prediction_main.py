@@ -34,8 +34,8 @@ from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_proposed import DetectorLayerStatistics
 from detectors.detector_deep_knn import DeepKNN
 
-# Target FPRs for setting thresholds of the detector (1%, 5%, and 10%)
-FPRS_TARGET = [0.01, 0.05, 0.1]
+# Target FPRs for setting thresholds of the detector (0.5%, 1%, 2%, 4%, 6%)
+FPRS_TARGET = [0.005, 0.01, 0.02, 0.04, 0.06]
 
 
 def find_score_thresholds(scores_detec, fprs_target):
@@ -394,7 +394,7 @@ def main():
             _ = det_model.fit(layer_embeddings_tr, labels_tr)
             # Find the score thresholds corresponding to the target FPRs using the scores from the clean train
             # fold data
-            scores_detec_train = det_model.score(layer_embeddings_tr, is_train=True)
+            scores_detec_train, _ = det_model.score(layer_embeddings_tr, is_train=True)
             thresholds = find_score_thresholds(scores_detec_train, FPRS_TARGET)
             if evaluate_on_clean:
                 # Scores and class predictions on clean data from the test fold

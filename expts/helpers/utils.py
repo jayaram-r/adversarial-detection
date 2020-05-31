@@ -438,6 +438,7 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
+        print("Adversarial data sub-directory: {}".format(os.path.basename(numpy_save_path)))
         # Maximum number of adversarial samples to include in the test fold
         max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
         data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
