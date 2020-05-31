@@ -191,11 +191,12 @@ class DeepKNN:
 
         return self
 
-    def score(self, layer_embeddings):
+    def score(self, layer_embeddings, is_train=False):
         """
         :param layer_embeddings: list of numpy arrays with the layer embedding data. Length of the list is equal to
                                  the number of layers. The numpy array at index `i` has shape `(n, d_i)`, where `n`
                                  is the number of samples and `d_i` is the dimension of the embeddings at layer `i`.
+        :param is_train: Set to True if the inputs are the same non-adversarial inputs used with the `fit` method.
 
         :return: (scores, predictions)
             - scores: numpy array of scores corresponding to OOD or adversarial detection. It is the negative log
@@ -217,7 +218,10 @@ class DeepKNN:
                 data_proj = layer_embeddings[i]
 
             # Indices of the nearest neighbors of each test sample
-            nn_indices, _ = self.index_knn[i].query(data_proj, k=self.n_neighbors)
+            if is_train:
+                nn_indices, _ = self.index_knn[i].query_self(k=self.n_neighbors)
+            else:
+                nn_indices, _ = self.index_knn[i].query(data_proj, k=self.n_neighbors)
 
             # Class label counts among the nearest neighbors
             _, nc_counts = neighbors_label_counts(nn_indices, self.labels_train_enc, self.n_classes)
