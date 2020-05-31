@@ -6,18 +6,15 @@ import sys
 import argparse
 import os
 import time
-import random
 import numpy as np
 import torch
 from torchvision import datasets, transforms
 from nets.mnist import *
-# from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
 from helpers.constants import *
 from helpers.utils import (
     load_model_checkpoint,
-    save_model_checkpoint,
     convert_to_loader,
     load_numpy_data,
     get_data_bounds,
@@ -40,8 +37,6 @@ from helpers.utils import (
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
 from detectors.detector_odds_are_odd import (
-    get_wcls,
-    return_data,
     fit_odds_are_odd,
     detect_odds_are_odd
 )
@@ -84,7 +79,10 @@ def main():
                              'Cross-validation folds that were completed earlier will be skipped in the current run.')
     parser.add_argument('--save-detec-model', action='store_true', default=False,
                         help='Use this option to save the list of detection models from the CV folds to a pickle '
-                             'file. Note that the files tend to large in size.')
+                             'file. Note that the files tend to be large in size.')
+    parser.add_argument('--index-adv', type=int, default=0,
+                        help='Index of the adversarial attack parameter to use. This indexes the sorted directories '
+                             'containing the adversarial data files from different attack parameters.')
     ################ Optional arguments for the proposed method
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
@@ -137,9 +135,6 @@ def main():
     #                     help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
     parser.add_argument('--max-attack-prop', '--map', type=float, default=0.5,
                         help="Maximum proportion of attack samples in the test fold. Should be a value in (0, 1]")
-    parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
-                        help='Use option to enable a mixed attack strategy with multiple methods in '
-                             'different proportions')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
@@ -156,7 +151,6 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-    random.seed(args.seed)
 
     # Number of neighbors
     n_neighbors = args.num_neighbors
@@ -216,7 +210,7 @@ def main():
             apply_dim_reduc = True
 
     elif args.detection_method == 'dknn':
-        apply_dim_reduc = True
+        apply_dim_reduc = False
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
@@ -343,9 +337,11 @@ def main():
         num_clean_tr = labels_tr.shape[0]
         num_clean_te = labels_te.shape[0]
         # Data loader for the train fold
-        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, dtype_x=torch.float, batch_size=args.batch_size,
+                                              device=device)
         # Data loader for the test fold
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
+        test_fold_loader = convert_to_loader(data_te, labels_te, dtype_x=torch.float, batch_size=args.batch_size,
+                                             device=device)
 
         # Get the range of values in the data array
         bounds = get_data_bounds(np.concatenate([data_tr, data_te], axis=0))
@@ -397,7 +393,7 @@ def main():
 
         # Load the saved adversarial numpy data generated from this training and test fold
         _, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te
+            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te, index_adv=args.index_adv
         )
         # `labels_te_adv` corresponds to the class labels of the clean samples, not that predicted by the DNN
         labels_te_clean = labels_te_adv
@@ -410,11 +406,11 @@ def main():
               "samples = {:.4f}".format(num_clean_te, num_adv_te, (100. * num_adv_te) / (num_clean_te + num_adv_te)))
 
         # Adversarial data loader for the train fold
-        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
-                                                  device=device)
+        adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, dtype_x=torch.float,
+                                                  batch_size=args.batch_size, device=device)
         # Adversarial data loader for the test fold
-        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size,
-                                                 device=device)
+        adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, dtype_x=torch.float,
+                                                 batch_size=args.batch_size, device=device)
         if args.detection_method in ['lid', 'lid_class_cond']:
             # Needed only for the LID method
             print("\nCalculating the layer embeddings and DNN predictions for the adversarial train data split:")
