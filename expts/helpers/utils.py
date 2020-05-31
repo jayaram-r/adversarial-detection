@@ -429,12 +429,12 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
         return [d]
 
 
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te):
+def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te, index_adv=0):
     # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
     if adv_attack != CUSTOM_ATTACK:
         # Load the saved adversarial numpy data generated from this training and test fold
         # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
+        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[index_adv]
         # Temporary hack to use backup data directory
         numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 

@@ -169,7 +169,7 @@ def main():
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
-    parser.add_argument('--max-outlier-prop', '--mop', type=float, default=0.5,
+    parser.add_argument('--max-outlier-prop', '--mop', type=float, default=0.25,
                         help="Maximum proportion of outlier samples in the test fold. Should be a value in (0, 1]")
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
@@ -243,7 +243,7 @@ def main():
             apply_dim_reduc = True
 
     elif args.detection_method == 'dknn':
-        apply_dim_reduc = True
+        apply_dim_reduc = False
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)

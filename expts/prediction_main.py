@@ -1,28 +1,24 @@
 """
-Main script for calculating the corrected classification performance.
+Main script for calculating the corrected (combined) classification performance of the DNN and the proposed method.
 """
 from __future__ import absolute_import, division, print_function
 import sys
 import argparse
 import os
 import time
-import random
+import copy
+import pickle
 import numpy as np
 import torch
-from torchvision import datasets, transforms
 from nets.mnist import *
-# from nets.cifar10 import *
 from nets.svhn import *
 from nets.resnet import *
 from helpers.constants import *
 from helpers.utils import (
     load_model_checkpoint,
-    save_model_checkpoint,
     convert_to_loader,
     load_numpy_data,
-    get_data_bounds,
     load_adversarial_data,
-    load_noisy_data,
     get_path_dr_models,
     get_clean_data_path,
     get_noisy_data_path,
@@ -30,102 +26,75 @@ from helpers.utils import (
     get_output_path,
     list_all_adversarial_subdirs,
     check_label_mismatch,
-    metrics_varying_positive_class_proportion,
-    save_detector_checkpoint,
-    load_detector_checkpoint,
     helper_layer_embeddings,
-    get_config_trust_score
+    load_adversarial_wrapper
 )
 from helpers.dimension_reduction_methods import load_dimension_reduction_models
-from detectors.detector_odds_are_odd import (
-    get_wcls,
-    return_data,
-    fit_odds_are_odd,
-    detect_odds_are_odd
-)
-from detectors.detector_lid_paper import DetectorLID, DetectorLIDClassCond, DetectorLIDBatch
 from detectors.detector_proposed import DetectorLayerStatistics
 from detectors.detector_deep_knn import DeepKNN
-from detectors.detector_trust_score import TrustScore
-try:
-    import cPickle as pickle
-except:
-    import pickle
 
-# Set to False before releasing the code
-PATH_HACK = True
+# Target FPRs for setting thresholds of the detector (1%, 5%, and 10%)
+FPRS_TARGET = [0.01, 0.05, 0.1]
 
 
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te, index=0):
-    # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
-    if adv_attack != CUSTOM_ATTACK:
-        # Load the saved adversarial numpy data generated from this training and test fold
-        # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[index]
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+def find_score_thresholds(scores_detec, fprs_target):
+    thresholds = np.zeros(len(fprs_target))
+    for i, fpr in enumerate(fprs_target):
+        thresholds[i] = np.percentile(scores_detec, 100 * (1. - fpr), interpolation='higher')
 
-        # Maximum number of adversarial samples in the test fold
-        max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
-        data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-            numpy_save_path,
-            max_n_test=max_num_adv,
-            sampling_type='ranked_by_norm',
-            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
-        )
-    else:
-        # Custom attack
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
+    print("\nScore thresholds: {}".format(', '.join(['{:.4f}'.format(t) for t in thresholds])))
+    return thresholds
 
-        # Adversarial inputs from the train and test fold
-        data_te = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
-        # Predicted (mis-classified) labels
-        labels_pred_te = np.load(os.path.join(numpy_save_path, "labels_te_adv.npy"))
-        # Labels of the original inputs from which the adversarial inputs were created
-        labels_te = np.load(os.path.join(numpy_save_path, "labels_te_clean.npy"))
-        # Norm of perturbations
-        norm_perturb = np.load(os.path.join(numpy_save_path, 'norm_perturb.npy'))
-        # Mask indicating which samples are adversarial
-        mask = np.load(os.path.join(numpy_save_path, "is_adver.npy"))
-        # Adversarial samples with very large perturbation are excluded
-        mask_norm = norm_perturb <= np.percentile(norm_perturb[mask], 95.)
-        mask_incl = np.logical_and(mask, mask_norm)
 
-        data_te_adv = data_te[mask_incl, :]
-        labels_te_adv = labels_te[mask_incl]
-        # Check if the original and predicted labels are all different for the adversarial inputs
-        check_label_mismatch(labels_te_adv, labels_pred_te[mask_incl])
+def combined_classification_performance(scores_detec_folds, thresholds_folds, labels_pred_detec_folds,
+                                        labels_pred_dnn_folds, labels_true_folds, fprs_target, output_file=None):
+    def _accuracy(preds, labels):
+        mask = preds == labels
+        return (100. * mask[mask].shape[0]) / labels.shape[0]
 
-        # We don't generate adversarial samples from the train fold for the custom attack.
-        # Returning the train fold data from Carlini-Wagner attack instead. This is used only by the supervised
-        # detection methods
-        data_tr_adv, labels_tr_adv, _, _ = load_adversarial_wrapper(
-            i, model_type, 'CW', max_attack_prop, num_clean_te
-        )
-        # data_tr_adv = data_te_adv
-        # labels_tr_adv = labels_te_adv
-    
-    return data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
+    n_folds = len(thresholds_folds)
+    n_fprs = len(fprs_target)
+    results = {
+        'FPR_target': np.array(fprs_target),
+        'accuracy_dnn': 0.,     # this accuracy does not depend on the target FPR
+        'accuracy_combined': np.zeros(n_fprs)
+    }
+    for i in range(n_folds):
+        # print("Fold {:d}:".format(i + 1))
+        # Accuracy of the DNN on this test fold
+        results['accuracy_dnn'] += _accuracy(labels_pred_dnn_folds[i], labels_true_folds[i])
+        for j, tau in enumerate(thresholds_folds[i]):
+            mask = scores_detec_folds[i] >= tau
+            # Samples that score above the threshold use the detector's class prediction
+            labels_pred = copy.copy(labels_pred_dnn_folds[i])
+            labels_pred[mask] = labels_pred_detec_folds[i][mask]
+            # Accuracy of the DNN + detector combination
+            results['accuracy_combined'][j] += _accuracy(labels_pred, labels_true_folds[i])
+
+    # average accuracy across test folds
+    results['accuracy_dnn'] = (1. / n_folds) * results['accuracy_dnn']
+    results['accuracy_combined'] = (1. / n_folds) * results['accuracy_combined']
+
+    print(results)
+    # Save the results to a pickle file if required
+    if output_file:
+        with open(output_file, 'wb') as fp:
+            pickle.dump(results, fp)
+
+    return results
 
 
 def main():
     # Training settings
     parser = argparse.ArgumentParser()
-    parser.add_argument('--batch-size', type=int, default=256, help='batch size of evaluation')
     parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
     parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
                         help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
-    parser.add_argument('--resume-from-ckpt', action='store_true', default=False,
-                        help='Use this option to load results and resume from a previous partially completed run. '
-                             'Cross-validation folds that were completed earlier will be skipped in the current run.')
-    parser.add_argument('--save-detec-model', action='store_true', default=False,
-                        help='Use this option to save the list of detection models from the CV folds to a pickle '
-                             'file. Note that the files tend to large in size.')
+    parser.add_argument('--index-adv', type=int, default=0,
+                        help='Index of the adversarial attack parameter to use. This indexes the sorted directories '
+                             'containing the adversarial data files from different attack parameters.')
+    parser.add_argument('--batch-size', type=int, default=256, help='batch size of evaluation')
     ################ Optional arguments for the proposed method
     parser.add_argument('--test-statistic', '--ts', choices=TEST_STATS_SUPPORTED, default='multinomial',
                         help="Test statistic to calculate at the layers for the proposed method. Choices are: {}".
@@ -160,11 +129,6 @@ def main():
              "multinomial test statistic used with the proposed method"
     )
     ################ Optional arguments for the proposed method
-    parser.add_argument('--layer-trust-score', '--lts', choices=LAYERS_TRUST_SCORE, default='input',
-                        help="Which layer to use for the trust score calculation. Choices are: {}".
-                        format(', '.join(LAYERS_TRUST_SCORE)))
-    parser.add_argument('--batch-lid', action='store_true', default=False,
-                        help='Use this option to enable batched, faster version of the LID detector')
     parser.add_argument('--num-neighbors', '--nn', type=int, default=-1,
                         help='Number of nearest neighbors (if applicable to the method). By default, this is set '
                              'to be a power of the number of samples (n): n^{:.1f}'.format(NEIGHBORHOOD_CONST))
@@ -172,15 +136,10 @@ def main():
                         help='Path to the saved dimension reduction model file. Specify only if the default path '
                              'needs to be changed.')
     parser.add_argument('--output-dir', '-o', default='', help='directory path for saving the results of detection')
-    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW', CUSTOM_ATTACK], default='PGD',
-                        help='type of adversarial attack')
-    # parser.add_argument('--p-norm', '-p', choices=['0', '2', 'inf'], default='inf',
-    #                     help="p norm for the adversarial attack; options are '0', '2' and 'inf'")
+    parser.add_argument('--adv-attack', '--aa', choices=['FGSM', 'PGD', 'CW', CUSTOM_ATTACK, 'none'], default='PGD',
+                        help="Type of adversarial attack. Use 'none' to evaluate on clean samples.")
     parser.add_argument('--max-attack-prop', '--map', type=float, default=0.5,
                         help="Maximum proportion of attack samples in the test fold. Should be a value in (0, 1]")
-    parser.add_argument('--mixed-attack', '--ma', action='store_true', default=False,
-                        help='Use option to enable a mixed attack strategy with multiple methods in '
-                             'different proportions')
     parser.add_argument('--num-folds', '--nf', type=int, default=CROSS_VAL_SIZE,
                         help='number of cross-validation folds')
     parser.add_argument('--no-cuda', action='store_true', default=False, help='disables CUDA training')
@@ -197,7 +156,6 @@ def main():
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")
     kwargs_loader = {'num_workers': 1, 'pin_memory': True} if use_cuda else {}
-    random.seed(args.seed)
 
     # Number of neighbors
     n_neighbors = args.num_neighbors
@@ -246,7 +204,7 @@ def main():
         apply_dim_reduc = True
     
     elif args.detection_method == 'dknn':
-        apply_dim_reduc = True
+        apply_dim_reduc = False
         # If `n_neighbors` is specified, append that value to the name string
         if n_neighbors is not None:
             method_name = '{}_k{:d}'.format(method_name, n_neighbors)
@@ -265,11 +223,8 @@ def main():
         else:
             # Load the dimension reduction models for each layer from the pickle file
             model_dim_reduc = load_dimension_reduction_models(fname)
-    
-    config_trust_score = dict()
-    
+
     # Data loader and pre-trained DNN model corresponding to the dataset
-    data_path = DATA_PATH
     if args.model_type == 'mnist':
         num_classes = 10
         model = MNIST().to(device)
@@ -296,45 +251,34 @@ def main():
     if not os.path.isdir(d):
         raise ValueError("Directory for the numpy data files not found: {}".format(d))
 
-    # Initialization
-    if args.resume_from_ckpt:
-        scores_folds, labels_folds, models_folds, init_fold = load_detector_checkpoint(output_dir, method_name,
-                                                                                       args.save_detec_model)
-        print("Loading saved results from a previous run. Completed {:d} fold(s). Resuming from fold {:d}.".
-              format(init_fold, init_fold + 1))
+    if args.adv_attack.lower() == 'none':
+        evaluate_on_clean = True
     else:
-        scores_folds = []
-        labels_folds = []
-        models_folds = []
-        init_fold = 0
+        evaluate_on_clean = False
 
+    # Initialization
+    labels_true_folds = []
+    labels_pred_dnn_folds = []
+    scores_detec_folds = []
+    labels_pred_detec_folds = []
+    thresholds_folds = []
     ti = time.time()
-
-    clean_labels = []
-    
     # Cross-validation
-    for i in range(init_fold, args.num_folds):
+    for i in range(args.num_folds):
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
-        if PATH_HACK:
-            # Temporary hack to use backup data directory
-            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         num_clean_tr = labels_tr.shape[0]
         num_clean_te = labels_te.shape[0]
-        
-        clean_labels.append(data_te)
-
-        # Data loader for the train fold
-        train_fold_loader = convert_to_loader(data_tr, labels_tr, batch_size=args.batch_size, device=device)
-        # Data loader for the test fold
-        test_fold_loader = convert_to_loader(data_te, labels_te, batch_size=args.batch_size, device=device)
-
-        # Get the range of values in the data array
-        bounds = get_data_bounds(np.concatenate([data_tr, data_te], axis=0))
-
+        # Data loader for the train and test fold
+        train_fold_loader = convert_to_loader(data_tr, labels_tr, dtype_x=torch.float, batch_size=args.batch_size,
+                                              device=device)
+        test_fold_loader = convert_to_loader(data_te, labels_te, dtype_x=torch.float, batch_size=args.batch_size,
+                                             device=device)
         print("\nCalculating the layer embeddings and DNN predictions for the clean train data split:")
         layer_embeddings_tr, labels_pred_tr = helper_layer_embeddings(
             model, device, train_fold_loader, args.detection_method, labels_tr
@@ -343,144 +287,145 @@ def main():
         layer_embeddings_te, labels_pred_te = helper_layer_embeddings(
             model, device, test_fold_loader, args.detection_method, labels_te
         )
-        
-        train_fold_loader = None
-        if args.detection_method != 'odds':
-            test_fold_loader = None
-        
-        if args.adv_attack == 'CW':
-            max_index = 4
-        elif args.adv_attack == 'PGD':
-            max_index = 12
-        else:
-            max_index = 1
-        
-        labels_adv_folds = []
+        del train_fold_loader
+        del test_fold_loader
 
-        for index in range(0, max_index):
+        if not evaluate_on_clean:
             # Load the saved adversarial numpy data generated from this training and test fold
-            data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-                i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te, index
+            _, _, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
+                i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te, index_adv=args.index_adv
             )
             num_adv_tr = labels_tr_adv.shape[0]
             num_adv_te = labels_te_adv.shape[0]
-            
-            print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-                "samples = {:.4f}".format(num_clean_tr, num_adv_tr, (100. * num_adv_tr) / (num_clean_tr + num_adv_tr)))
+            print("\nTrain fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of "
+                  "adversarial samples = {:.4f}".format(num_clean_tr, num_adv_tr,
+                                                        (100. * num_adv_tr) / (num_clean_tr + num_adv_tr)))
             print("Test fold: number of clean samples = {:d}, number of adversarial samples = {:d}, % of adversarial "
-                "samples = {:.4f}".format(num_clean_te, num_adv_te, (100. * num_adv_te) / (num_clean_te + num_adv_te)))
-
-            # Adversarial data loader for the train fold
-            adv_train_fold_loader = convert_to_loader(data_tr_adv, labels_tr_adv, batch_size=args.batch_size,
-                                                  device=device)
+                  "samples = {:.4f}".format(num_clean_te, num_adv_te,
+                                            (100. * num_adv_te) / (num_clean_te + num_adv_te)))
             # Adversarial data loader for the test fold
-            adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, batch_size=args.batch_size,
-                                                 device=device)
-
+            adv_test_fold_loader = convert_to_loader(data_te_adv, labels_te_adv, dtype_x=torch.float,
+                                                     batch_size=args.batch_size, device=device)
             print("\nCalculating the layer embeddings and DNN predictions for the adversarial test data split:")
             layer_embeddings_te_adv, labels_pred_te_adv = helper_layer_embeddings(
                 model, device, adv_test_fold_loader, args.detection_method, labels_te_adv
             )
             check_label_mismatch(labels_te_adv, labels_pred_te_adv)
-            adv_train_fold_loader = None
-    
-            if args.detection_method != 'odds':
-                adv_test_fold_loader = None
+            del adv_test_fold_loader
 
-            # Detection labels (0 denoting clean and 1 adversarial)
-            labels_detec = np.concatenate([np.zeros(labels_pred_te.shape[0], dtype=np.int),
-                                       np.ones(labels_pred_te_adv.shape[0], dtype=np.int)])
-            
-            if args.detection_method == 'proposed':
-                nl = len(layer_embeddings_tr)
-                st_ind = 0
-                if args.use_deep_layers:
-                    if args.num_layers > nl:
-                        print("WARNING: number of layers specified using the option '--num-layers' exceeds the number "
-                          "of layers in the model. Using all the layers.")
-                        st_ind = 0
-                    else:
-                        st_ind = nl - args.num_layers
-                        print("Using only the last {:d} layer embeddings from the {:d} layers for the proposed method.".
+            # True class labels of adversarial samples from this test fold
+            labels_true_folds.append(labels_te_adv)
+            # Class predictions of the DNN on adversarial samples from this test fold
+            labels_pred_dnn_folds.append(labels_pred_te_adv)
+            num_expec = num_adv_te
+        else:
+            print("\nTrain fold: number of clean samples = {:d}".format(num_clean_tr))
+            print("\nTest fold: number of clean samples = {:d}".format(num_clean_te))
+            # True class labels of clean samples from this test fold
+            labels_true_folds.append(labels_te)
+            # Class predictions of the DNN on clean samples from this test fold
+            labels_pred_dnn_folds.append(labels_pred_te)
+            num_expec = num_clean_te
+
+        # Detection methods
+        if args.detection_method == 'proposed':
+            nl = len(layer_embeddings_tr)
+            st_ind = 0
+            if args.use_deep_layers:
+                if args.num_layers > nl:
+                    print("WARNING: number of layers specified using the option '--num-layers' exceeds the number "
+                      "of layers in the model. Using all the layers.")
+                    st_ind = 0
+                else:
+                    st_ind = nl - args.num_layers
+                    print("Using only the last {:d} layer embeddings from the {:d} layers for the proposed method.".
                           format(args.num_layers, nl))
 
-                mod_dr = None if (model_dim_reduc is None) else model_dim_reduc[st_ind:]
-                det_model = DetectorLayerStatistics(
-                    layer_statistic=args.test_statistic,
-                    score_type=args.score_type,
-                    ood_detection=args.ood_detection,
-                    pvalue_fusion=args.pvalue_fusion,
-                    use_top_ranked=args.use_top_ranked,
-                    num_top_ranked=args.num_layers,
-                    skip_dim_reduction=(not apply_dim_reduc),
-                    model_dim_reduction=mod_dr,
-                    n_neighbors=n_neighbors,
-                    n_jobs=args.n_jobs,
-                    seed_rng=args.seed
-                )
-                # Fit the detector on clean data from the training fold
-                if args.combine_classes and (args.test_statistic == 'multinomial'):
-                    _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr,
+            mod_dr = None if (model_dim_reduc is None) else model_dim_reduc[st_ind:]
+            det_model = DetectorLayerStatistics(
+                layer_statistic=args.test_statistic,
+                score_type=args.score_type,
+                ood_detection=args.ood_detection,
+                pvalue_fusion=args.pvalue_fusion,
+                use_top_ranked=args.use_top_ranked,
+                num_top_ranked=args.num_layers,
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_dim_reduction=mod_dr,
+                n_neighbors=n_neighbors,
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            # Fit the detector on clean data from the training fold
+            if args.combine_classes and (args.test_statistic == 'multinomial'):
+                _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr,
                                   combine_low_proba_classes=True)
-                else:
-                    _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
-
-                # Scores on clean data from the test fold
-                scores_adv1, corrected_classes_clean = det_model.score(layer_embeddings_te[st_ind:], labels_pred_te, return_corrected_predictions=True, test_layer_pairs=True)
-
-                # Scores on adversarial data from the test fold
-                scores_adv2, corrected_classes_adv = det_model.score(layer_embeddings_te_adv[st_ind:], labels_pred_te_adv, return_corrected_predictions=True, test_layer_pairs=True)
-
-                scores_adv = np.concatenate([scores_adv1, scores_adv2])
-                labels_adv = np.concatenate([corrected_classes_clean, corrected_classes_adv])
-
-            elif args.detection_method == 'dknn':
-                det_model = DeepKNN(
-                    n_neighbors=n_neighbors,
-                    skip_dim_reduction=(not apply_dim_reduc),
-                    model_dim_reduction=model_dim_reduc,
-                    n_jobs=args.n_jobs,
-                    seed_rng=args.seed
-                )
-                # Fit the detector on clean data from the training fold
-                _ = det_model.fit(layer_embeddings_tr, labels_tr)
-
-                # Scores on clean data from the test fold
-                scores_adv1, labels_pred_dknn1 = det_model.score(layer_embeddings_te)
-
-                # Scores on adversarial data from the test fold
-                scores_adv2, labels_pred_dknn2 = det_model.score(layer_embeddings_te_adv)
-
-                scores_adv = np.concatenate([scores_adv1, scores_adv2])
-                labels_adv = np.concatenate([labels_pred_dknn1, labels_pred_dknn2])
-                
-            
             else:
-                raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
+                _ = det_model.fit(layer_embeddings_tr[st_ind:], labels_tr, labels_pred_tr)
 
-            # Sanity check
-            if scores_adv.shape[0] != labels_detec.shape[0]:
-                raise ValueError(
-                    "Detection scores and labels do not have the same length ({:d} != {:d}); method = {}, fold = {:d}".
-                        format(scores_adv.shape[0], labels_detec.shape[0], args.detection_method, i + 1)
+            # Find the score thresholds corresponding to the target FPRs using the scores from the clean train
+            # fold data
+            scores_detec_train = det_model.score(
+                layer_embeddings_tr[st_ind:], labels_pred_tr, test_layer_pairs=True, is_train=True
+            )
+            thresholds = find_score_thresholds(scores_detec_train, FPRS_TARGET)
+            if evaluate_on_clean:
+                # Scores and class predictions on clean data from the test fold
+                scores_detec, labels_pred_detec = det_model.score(
+                    layer_embeddings_te[st_ind:], labels_pred_te,
+                    return_corrected_predictions=True, test_layer_pairs=True
+                )
+            else:
+                # Scores and class predictions on adversarial data from the test fold
+                scores_detec, labels_pred_detec = det_model.score(
+                    layer_embeddings_te_adv[st_ind:], labels_pred_te_adv,
+                    return_corrected_predictions=True, test_layer_pairs=True
                 )
 
-            labels_adv_folds.append(labels_adv)
-        
-        scores_folds.append(scores_adv)
-        labels_folds.append(labels_adv_folds)
-        #saved every fold
-        save_detector_checkpoint(scores_folds, labels_folds, models_folds, output_dir, method_name,
-                                 args.save_detec_model)
+        elif args.detection_method == 'dknn':
+            det_model = DeepKNN(
+                n_neighbors=n_neighbors,
+                skip_dim_reduction=(not apply_dim_reduc),
+                model_dim_reduction=model_dim_reduc,
+                n_jobs=args.n_jobs,
+                seed_rng=args.seed
+            )
+            # Fit the detector on clean data from the training fold
+            _ = det_model.fit(layer_embeddings_tr, labels_tr)
+            # Find the score thresholds corresponding to the target FPRs using the scores from the clean train
+            # fold data
+            scores_detec_train = det_model.score(layer_embeddings_tr, is_train=True)
+            thresholds = find_score_thresholds(scores_detec_train, FPRS_TARGET)
+            if evaluate_on_clean:
+                # Scores and class predictions on clean data from the test fold
+                scores_detec, labels_pred_detec = det_model.score(layer_embeddings_te)
+            else:
+                # Scores and class predictions on adversarial data from the test fold
+                scores_detec, labels_pred_detec = det_model.score(layer_embeddings_te_adv)
 
-    print("\nCalculating performance metrics for different proportion of attack samples:")
+        else:
+            raise ValueError("Unknown detection method name '{}'".format(args.detection_method))
+
+        # Sanity check
+        if (scores_detec.shape[0] != num_expec) or (labels_pred_detec != num_expec):
+            raise ValueError(
+                "Detection scores and/or predicted labels do not have the expected length of {:d}; method = {}, "
+                "fold = {:d}".format(num_expec, args.detection_method, i + 1)
+            )
+
+        scores_detec_folds.append(scores_detec)
+        labels_pred_detec_folds.append(labels_pred_detec)
+        thresholds_folds.append(thresholds)
+
+    print("\nCalculating the combined classification accuracy of the DNN and detector system:")
     fname = os.path.join(output_dir, 'corrected_accuracies_{}.pkl'.format(method_name))
-    results_dict = metrics_for_accuracy(
-        labels_folds, clean_labels, output_file=fname
+    results = combined_classification_performance(
+        scores_detec_folds, thresholds_folds, labels_pred_detec_folds, labels_pred_dnn_folds, labels_true_folds,
+        FPRS_TARGET, output_file=fname
     )
     print("Performance metrics saved to the file: {}".format(fname))
     tf = time.time()
     print("Total time taken: {:.4f} minutes".format((tf - ti) / 60.))
+
 
 if __name__ == '__main__':
     main()
