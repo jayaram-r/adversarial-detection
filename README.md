@@ -1,5 +1,5 @@
-### Detection of adversarial attacks at test-time on deep neural network classifiers
-Code and experiments for the adversarial detection paper.
+### Detection of adversarial attacks + OOD samples at test-time on deep neural network classifiers
+Code and experiments for the anomaly detection paper.
 
 ### Package Requirements
 The following packages with their corresponding version should be installed before running the experiments:
