@@ -22,7 +22,7 @@ Make sure to install version `0.3.3`, with `numba` version `0.46` and `llvmlite`
 ### Adversarial Detection
 The main script for launching the different adversarial detection methods is `detection_main.py`. To see a description of the command line options, type `python detection_main.py -h`.
 A number of these options can be left to their default values and not all of them apply to the different methods.
-The usage of this script is summarized below.
+Details on the usage of this script are given below.
 
 #### Running the proposed method, ReBeL
 ```bash
@@ -201,9 +201,190 @@ python -u detection_main.py -m $dataset --dm $dm --batch-lid --adv-attack $attac
 
 ### Out-of-distribution Detection
 The script for launching the different OOD detection methods is `outlier_detection_main.py`. To see a description of the command line options, type `python outlier_detection_main.py -h`.
+Details on the usage of this script are given below.
 
-### Running the Corrected (Combined) Classification Experiments
+#### Running the proposed method, ReBeL
+```bash
+#Detection method
+dm='proposed'
+
+#Test statistic
+#Options are: 'multinomial', 'binomial', 'trust', 'lid', 'distance'
+ts='multinomial'
+
+#Scoring method
+#Options are: 'pvalue' and 'klpe'
+score='pvalue'
+
+#Method for combing p-values from the layers. Applies only if score='pvalue'
+#Options are: 'fisher' and 'harmonic_mean'
+pf='fisher'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Output directory
+output_dir='./outputs_rebel_fisher'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u outlier_detection_main.py -m $dataset --censor-classes --dm $dm --ts $ts --st $score --pf $pf --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+#Change the scoring method to 'klpe'
+score='klpe'
+
+#Output directory
+output_dir='./outputs_rebel_klpe'
+
+python -u outlier_detection_main.py -m $dataset --censor-classes --dm $dm --ts $ts --st $score --gpu $gpu --n-jobs $n_jobs -o $output_dir
+```
+
+#### Running other detection methods
+```bash
+########################## Deep KNN ###################
+dm='dknn'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Output directory
+output_dir='./outputs_dknn'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u outlier_detection_main.py -m $dataset --censor-classes --dm $dm --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+
+########################## Trust Score ###################
+dm='trust'
+
+#Which layer of the DNN to use
+#Options are: 'input', 'logit', 'prelogit'
+layer='prelogit'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Output directory
+output_dir='./outputs_trust'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u outlier_detection_main.py -m $dataset --censor-classes --dm $dm --lts $layer --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+
+########################## Deep Mahalanobis detector ###################
+dm='mahalanobis'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Output directory
+output_dir='./outputs_mahalanobis'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u outlier_detection_main.py -m $dataset --dm $dm --censor-classes --gpu $gpu --n-jobs $n_jobs -o $output_dir
+```
+
+### Corrected (Combined) Classification Experiments
 The script for launching the corrected classification experiments is `prediction_main.py`. To see a description of the command line options, type `python prediction_main.py -h`.
+
+#### Running the proposed method, ReBeL
+```bash
+#Detection method
+dm='proposed'
+
+#Test statistic
+#Options are: 'multinomial', 'binomial', 'trust', 'lid', 'distance'
+ts='multinomial'
+
+#Scoring method
+#Options are: 'pvalue' and 'klpe'
+score='pvalue'
+
+#Method for combing p-values from the layers. Applies only if score='pvalue'
+#Options are: 'fisher' and 'harmonic_mean'
+pf='fisher'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Output directory
+output_dir='./outputs_rebel_fisher'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+#Adversarial attack
+#Set to  'none' to evaluate on clean data
+attack='none'
+
+python -u prediction_main.py -m $dataset --dm $dm --ts $ts --st $score --pf $pf --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+#Evaluate on CW attack with confidence = 0
+attack='CW'
+index=0
+
+python -u prediction_main.py -m $dataset --dm $dm --index-adv $index --ts $ts --st $score --pf $pf --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+```
+
+#### Running deep KNN
+```bash
+#Detection method
+dm='dknn'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Output directory
+output_dir='./outputs_dknn'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+#Adversarial attack
+#Set to  'none' to evaluate on clean data
+attack='none'
+
+python -u prediction_main.py -m $dataset --dm $dm --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+#Evaluate on CW attack with confidence = 0
+attack='CW'
+index=0
+
+python -u prediction_main.py -m $dataset --dm $dm --index-adv $index --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+```
 
 ### Pre-processing and dimensionality reduction of the DNN layer representations
 The script `layers.py` can be used for this. To see a description of the command line options, type `python layers.py -h`.
