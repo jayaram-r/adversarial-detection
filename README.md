@@ -77,6 +77,128 @@ output_dir='./outputs_rebel_klpe'
 python -u detection_main.py -m $dataset --dm $dm --ts $ts --st $score --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
 ```
 
+#### Running other detection methods
+```bash
+########################## Deep KNN ###################
+dm='dknn'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Adversarial attack
+#Options are: 'CW', 'PGD', 'FGSM', 'Custom'
+attack='CW'
+
+#Output directory
+output_dir='./outputs_dknn'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u detection_main.py -m $dataset --dm $dm --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+
+########################## Trust Score ###################
+dm='trust'
+
+#Which layer of the DNN to use
+#Options are: 'input', 'logit', 'prelogit'
+layer='prelogit'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Adversarial attack
+#Options are: 'CW', 'PGD', 'FGSM', 'Custom'
+attack='CW'
+
+#Output directory
+output_dir='./outputs_trust'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u detection_main.py -m $dataset --dm $dm --lts $layer --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+
+########################## Deep Mahalanobis detector ###################
+dm='mahalanobis'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Adversarial attack
+#Options are: 'CW', 'PGD', 'FGSM', 'Custom'
+attack='CW'
+
+#Output directory
+output_dir='./outputs_mahalanobis'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u detection_main.py -m $dataset --dm $dm --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+
+########################## Local intrinsic dimension based detector ###################
+dm='lid'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Adversarial attack
+#Options are: 'CW', 'PGD', 'FGSM', 'Custom'
+attack='CW'
+
+#Output directory
+output_dir='./outputs_lid'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u detection_main.py -m $dataset --dm $dm --batch-lid --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+
+########################## Odds are odd detector ###################
+dm='odds'
+
+#Dataset
+#Options are: 'mnist', 'cifar10', 'svhn'
+dataset='mnist'
+
+#Adversarial attack
+#Options are: 'CW', 'PGD', 'FGSM', 'Custom'
+attack='CW'
+
+#Output directory
+output_dir='./outputs_odds'
+
+#Number of CPU cores
+n_jobs=16
+
+#GPU ID
+gpu=0
+
+python -u detection_main.py -m $dataset --dm $dm --batch-lid --adv-attack $attack --gpu $gpu --n-jobs $n_jobs -o $output_dir
+
+```
+
 ### Out-of-distribution Detection
 The script for launching the different OOD detection methods is `outlier_detection_main.py`. To see a description of the command line options, type `python outlier_detection_main.py -h`.
 
