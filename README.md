@@ -19,6 +19,11 @@ It is recommended to use a setup a Conda environment with `python3` and install 
 `PyNNDescent` is an approximate nearest neighbors library that we use, and can be installed from [here](https://github.com/lmcinnes/pynndescent). 
 Make sure to install version `0.3.3`, with `numba` version `0.46` and `llvmlite` version `0.30.0`.
 
+The DNN models trained on MNIST, SVHN, and CIFAR-10 datasets can be found under `expts/models/`.
+
+The implementation of all detection methods can be found under `expts/detectors/`.
+
+
 ### Adversarial Detection
 The main script for launching the different adversarial detection methods is `detection_main.py`. To see a description of the command line options, type `python detection_main.py -h`.
 A number of these options can be left to their default values and not all of them apply to the different methods.
