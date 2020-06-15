@@ -693,6 +693,8 @@ class DetectorLayerStatistics:
             raise ValueError("Invalid value '{}' for the input argument 'pvalue_fusion'.".format(self.pvalue_fusion))
 
         # Adversarial or OOD scores for the test samples and the corrected class predictions
+        # log(1 - max_c q(t_{s | c}))
+        arr_numer = np.log(np.clip(1. - np.exp(np.max(pvalues_comb_true, axis=1)), sys.float_info.min, None))
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
         corrected_classes = copy.copy(labels_pred)
@@ -706,7 +708,8 @@ class DetectorLayerStatistics:
                 continue
 
             # OOD score
-            scores_ood[ind] = -1 * pvalues_comb_pred[ind]
+            # scores_ood[ind] = -1 * pvalues_comb_pred[ind]
+            scores_ood[ind] = arr_numer[ind] - pvalues_comb_pred[ind]
 
             # Adversarial score
             # Mask to include all classes, except the predicted class `c`
@@ -753,6 +756,8 @@ class DetectorLayerStatistics:
             log_pvalues_true[:, i] = -1. * self.klpe_models_true[c].score(test_stats_true[c])
 
         # Adversarial or OOD scores for the test samples and the corrected class predictions
+        # log(1 - max_c q(t_{s | c}))
+        arr_numer = np.log(np.clip(1. - np.exp(np.max(log_pvalues_true, axis=1)), sys.float_info.min, None))
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
         corrected_classes = copy.copy(labels_pred)
@@ -767,7 +772,9 @@ class DetectorLayerStatistics:
 
             # OOD score is the negative log of the multivariate p-value estimate of the test statistics under the
             # distribution of the predicted class `c`
-            scores_ood[ind] = self.klpe_models_pred[c].score(test_stats_pred[ind, :])
+            scores_ood_den = self.klpe_models_pred[c].score(test_stats_pred[ind, :])
+            # scores_ood[ind] = scores_ood_den
+            scores_ood[ind] = arr_numer[ind] + scores_ood_den
 
             # Adversarial score
             # Mask to include all classes, except the predicted class `c`
@@ -775,7 +782,7 @@ class DetectorLayerStatistics:
             mask_excl = np.ones(self.n_classes, dtype=np.bool)
             mask_excl[i] = False
             tmp_arr = log_pvalues_true[ind, :]
-            scores_adver[ind] = np.max(tmp_arr[:, mask_excl], axis=1) + scores_ood[ind]
+            scores_adver[ind] = np.max(tmp_arr[:, mask_excl], axis=1) + scores_ood_den
 
             # Corrected prediction is the class corresponding to the maximum log p-value conditioned that class
             # being the true class
