@@ -693,8 +693,9 @@ class DetectorLayerStatistics:
             raise ValueError("Invalid value '{}' for the input argument 'pvalue_fusion'.".format(self.pvalue_fusion))
 
         # Adversarial or OOD scores for the test samples and the corrected class predictions
-        # log(1 - \max_c q(t_{s | c}))
-        scores_ood1 = np.log(np.clip(1. - np.exp(np.max(pvalues_comb_true, axis=1)), sys.float_info.min, 1.))
+        # \max_c q(t_{s | c})
+        scores_ood1 = np.max(pvalues_comb_true, axis=1)
+
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
         corrected_classes = copy.copy(labels_pred)
@@ -708,9 +709,8 @@ class DetectorLayerStatistics:
                 continue
 
             # OOD score
-            # scores_ood[ind] = -1 * pvalues_comb_pred[ind]
-            scores_ood[ind] = scores_ood1[ind] - pvalues_comb_pred[ind]
-
+            # scores_ood[ind] = np.negative(pvalues_comb_pred[ind])
+            scores_ood[ind] = np.negative(np.min(np.vstack([pvalues_comb_pred[ind], scores_ood1[ind]]), axis=0))
             # Adversarial score
             # Mask to include all classes, except the predicted class `c`
             i = np.where(self.labels_unique == c)[0][0]
@@ -756,8 +756,9 @@ class DetectorLayerStatistics:
             log_pvalues_true[:, i] = -1. * self.klpe_models_true[c].score(test_stats_true[c])
 
         # Adversarial or OOD scores for the test samples and the corrected class predictions
-        # log(1 - \max_c q(t_{s | c}))
-        scores_ood1 = np.log(np.clip(1. - np.exp(np.max(log_pvalues_true, axis=1)), sys.float_info.min, 1.))
+        # \max_c q(t_{s | c})
+        scores_ood1 = np.max(log_pvalues_true, axis=1)
+
         scores_adver = np.zeros(n_test)
         scores_ood = np.zeros(n_test)
         corrected_classes = copy.copy(labels_pred)
@@ -770,19 +771,20 @@ class DetectorLayerStatistics:
             if n_pred == 0:
                 continue
 
-            # OOD score is the negative log of the multivariate p-value estimate of the test statistics under the
-            # distribution of the predicted class `c`
-            scores_ood2 = self.klpe_models_pred[c].score(test_stats_pred[ind, :])
-            # scores_ood[ind] = scores_ood2
-            scores_ood[ind] = scores_ood1[ind] + scores_ood2
+            # Log of the multivariate p-value estimate of the test statistics under the distribution of the
+            # predicted class `c`
+            scores_ood2 = np.negative(self.klpe_models_pred[c].score(test_stats_pred[ind, :]))
 
+            # OOD score
+            # scores_ood[ind] = np.negative(scores_ood2)
+            scores_ood[ind] = np.negative(np.min(np.vstack([scores_ood2, scores_ood1[ind]]), axis=0))
             # Adversarial score
             # Mask to include all classes, except the predicted class `c`
             i = np.where(self.labels_unique == c)[0][0]
             mask_excl = np.ones(self.n_classes, dtype=np.bool)
             mask_excl[i] = False
             tmp_arr = log_pvalues_true[ind, :]
-            scores_adver[ind] = np.max(tmp_arr[:, mask_excl], axis=1) + scores_ood2
+            scores_adver[ind] = np.max(tmp_arr[:, mask_excl], axis=1) - scores_ood2
 
             # Corrected prediction is the class corresponding to the maximum log p-value conditioned that class
             # being the true class
