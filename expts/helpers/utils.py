@@ -656,6 +656,41 @@ def log_sum_exp(x):
         return x
 
 
+def gram_matrix_layer_reps(layer_rep, p=1):
+    """
+    Gram matrix computation for a DNN layer representation, taken from:
+    https://github.com/VectorInstitute/gram-ood-detection/blob/master/ResNet_Cifar10.ipynb
+
+    (Search for the function `G_p`, which computes the Gram matrix of order `p`).
+    For conv layers, `layer_rep` has shape `(n, c, h, w)`, where `n` is the batch size, `c` is the number of channels,
+    and `h` and `w` are the image dimensions.
+
+    For FC layers, `layer_rep` has shape `(n, c)`.
+
+    :param layer_rep: torch tensor with the layer representations from a batch of samples.
+    :param p: integer value >= 1.
+    :return:
+    """
+    temp = layer_rep.detach()
+    shape_in = temp.size()
+    # print("Input size: {}".format(shape_in))
+    if p > 1:
+        temp = temp ** p
+
+    temp = temp.reshape(shape_in[0], shape_in[1], -1)
+    # For conv layers, this will result in a tensor of shape `(n, c, h * w)`.
+    # For FC  layers, this  will result in a tensor of shape `(n, c, 1)`.
+    temp = torch.matmul(temp, temp.transpose(dim0=2, dim1=1)).sum(dim=2)
+    # Why is this computing the sum along dim=2 after computing the gram matrix?
+    if p > 1:
+        temp = (temp.sign() * torch.abs(temp) ** (1 / p)).reshape(temp.shape[0], -1)
+    else:
+        temp = (temp.sign() * torch.abs(temp)).reshape(temp.shape[0], -1)
+
+    # print("Output size: {}".format(temp.size()))
+    return temp
+
+
 def metrics_detection(scores, labels, pos_label=1, max_fpr=FPR_MAX_PAUC, verbose=True):
     """
     Wrapper function that calculates a bunch of performance metrics for anomaly detection.
