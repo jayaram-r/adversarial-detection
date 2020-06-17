@@ -710,6 +710,7 @@ class DetectorLayerStatistics:
 
             # OOD score
             # scores_ood[ind] = np.negative(pvalues_comb_pred[ind])
+            # scores_ood[ind] = np.negative(np.max(np.vstack([pvalues_comb_pred[ind], scores_ood1[ind]]), axis=0))
             scores_ood[ind] = np.negative(np.min(np.vstack([pvalues_comb_pred[ind], scores_ood1[ind]]), axis=0))
             # Adversarial score
             # Mask to include all classes, except the predicted class `c`
@@ -777,6 +778,7 @@ class DetectorLayerStatistics:
 
             # OOD score
             # scores_ood[ind] = np.negative(scores_ood2)
+            # scores_ood[ind] = np.negative(np.max(np.vstack([scores_ood2, scores_ood1[ind]]), axis=0))
             scores_ood[ind] = np.negative(np.min(np.vstack([scores_ood2, scores_ood1[ind]]), axis=0))
             # Adversarial score
             # Mask to include all classes, except the predicted class `c`
