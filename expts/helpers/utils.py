@@ -210,12 +210,14 @@ def load_numpy_data(path):
     return data_tr, labels_tr, data_te, labels_te
 
 
-def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm', norm_type='inf', seed=SEED_DEFAULT):
+def load_adversarial_data(path, max_n_train=None, max_n_test=None, sampling_type='ranked_by_norm',
+                          norm_type='inf', seed=SEED_DEFAULT):
     """
     Utility to load adversarial data and labels from saved numpy files. Allows the number of samples from the test
     fold to be specified and has a few sampling options.
 
     :param path: path to the directory where the numpy files are saved.
+    :param max_n_train: None or an int value specifying the maximum number of samples in the train data fold.
     :param max_n_test: None or an int value specifying the maximum number of samples in the test data fold.
     :param sampling_type: string specifying the type of sampling to use. Valid values are:
                          ('uniform', 'ranked_by_norm', 'importance')
@@ -250,13 +252,27 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
         if n_test > max_n_test:
             all_test = False
 
+    n_train = labels_tr.shape[0]
+    all_train = True
+    if max_n_train:
+        if n_train > max_n_train:
+            all_train = False
+
+    if not (all_train and all_test):
+        np.random.seed(seed)
+
+    if all_train:
+        ind_train = np.arange(n_train)
+    else:
+        ind_train = np.random.permutation(n_train)[:max_n_train]
+
     if all_test:
         # First two returned values are the clean data arrays from the train and test fold.
         # The rest are adversarial data and label arrays from the train and test fold
-        return data_tr_clean, data_te_clean, data_tr_adv, labels_tr, data_te_adv, labels_te
+        return (data_tr_clean[ind_train, :], data_te_clean, data_tr_adv[ind_train, :], labels_tr[ind_train],
+                data_te_adv, labels_te)
     else:
         # Test fold data is sub-sampled to the required size using one of the sampling methods
-        np.random.seed(seed)
         ind_test = None
         if sampling_type == 'uniform':
             print("Number of adversarial samples from the test fold = {:d}. Selecting a random subset of {:d} "
@@ -290,8 +306,8 @@ def load_adversarial_data(path, max_n_test=None, sampling_type='ranked_by_norm',
             else:
                 raise ValueError("Invalid value '{}' specified for the input 'sampling_type'".format(sampling_type))
 
-        return (data_tr_clean, data_te_clean[ind_test, :], data_tr_adv, labels_tr, data_te_adv[ind_test, :],
-                labels_te[ind_test])
+        return (data_tr_clean[ind_train, :], data_te_clean[ind_test, :], data_tr_adv[ind_train, :],
+                labels_tr[ind_train], data_te_adv[ind_test, :], labels_te[ind_test])
 
 
 def load_noisy_data(path):
@@ -413,6 +429,7 @@ def get_output_path(model_type):
 def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirectories=True):
     # List all sub-directories corresponding to an adversarial attack
     d = os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type)
+    d = d.replace('varun', 'jayaram', 1)
     if not os.path.isdir(d):
         raise ValueError("Directory '{}' does not exist.".format(d))
     
@@ -427,27 +444,65 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
         return [d]
 
 
-def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_te, index_adv=0):
+def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_tr, num_clean_te, index_adv=0):
     # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
     if adv_attack != CUSTOM_ATTACK:
         # Load the saved adversarial numpy data generated from this training and test fold
-        # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[index_adv]
+        path_list = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[1:6]
 
-        print("Adversarial data sub-directory: {}".format(os.path.basename(numpy_save_path)))
         # Maximum number of adversarial samples to include in the test fold
+        n_paths = len(path_list)
         max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
-        data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_data(
-            numpy_save_path,
-            max_n_test=max_num_adv,
-            sampling_type='ranked_by_norm',
-            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
-        )
+        v = int(np.ceil(max_num_adv / float(n_paths)))
+        max_num_adv_list = [v] * n_paths
+        max_num_adv_list[-1] = max_num_adv - (n_paths - 1) * v
+
+        v = int(np.ceil(num_clean_tr / float(n_paths)))
+        max_num_tr_list = [v] * n_paths
+        max_num_tr_list[-1] = num_clean_tr - (n_paths - 1) * v
+
+        data_tr_clean = []
+        data_te_clean = []
+        data_tr_adv = []
+        labels_tr_adv = []
+        data_te_adv = []
+        labels_te_adv = []
+        for j, numpy_save_path in enumerate(path_list):
+            numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+            print("Adversarial data sub-directory: {}".format(os.path.basename(numpy_save_path)))
+            print("Sanity check (test): #adv samples = {:d}, #adv samples total = {:d}".format(max_num_adv_list[j],
+                                                                                        max_num_adv))
+            print("Sanity check (train): #adv samples = {:d}, #adv samples total = {:d}".format(max_num_tr_list[j],
+                                                                                                num_clean_tr))
+            data_tr_clean__, data_te_clean__, data_tr_adv__, labels_tr_adv__, data_te_adv__, labels_te_adv__ = \
+                load_adversarial_data(
+                    numpy_save_path,
+                    max_n_train=max_num_tr_list[j],
+                    max_n_test=max_num_adv_list[j],
+                    sampling_type='uniform',
+                    norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
+                    seed=(123 + j)
+                )
+            data_tr_clean.append(data_tr_clean__)
+            data_te_clean.append(data_te_clean__)
+            data_tr_adv.append(data_tr_adv__)
+            labels_tr_adv.append(labels_tr_adv__)
+            data_te_adv.append(data_te_adv__)
+            labels_te_adv.append(labels_te_adv__)
+
+        data_tr_clean = np.concatenate(data_tr_clean, axis=0)
+        data_te_clean = np.concatenate(data_te_clean, axis=0)
+        data_tr_adv = np.concatenate(data_tr_adv, axis=0)
+        labels_tr_adv = np.concatenate(labels_tr_adv)
+        data_te_adv = np.concatenate(data_te_adv, axis=0)
+        labels_te_adv = np.concatenate(labels_te_adv)
 
         return data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv
     else:
         # Custom attack data generation was different. Only test fold data was generated
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
+        numpy_save_path = numpy_save_path.replace('jayaram', 'varun', 1)
+
         # Adversarial inputs from the test fold
         data_te_adv = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
         # Clean inputs corresponding to the adversarial inputs from the test fold
@@ -1248,6 +1303,34 @@ def subplot_helper(plot_dict, methods, plot_file, min_yrange=None, hide_legend=F
     plt.close(fig)
 
 
+def select_distinct_vals(plot_dict, mode):
+    v = plot_dict['x_vals']
+    n = len(v)
+    mask = np.zeros(n, dtype=np.bool)
+    for i in range(n - 1):
+        if abs(v[i + 1] - v[i]) / max(abs(v[i]), 1e-6) > 0.001:
+            mask[i] = True
+
+    mask[-1] = True
+    plot_dict['x_vals'] = v[mask]
+    if 'y_vals' in plot_dict:
+        if mode == 1:
+            plot_dict['y_vals'] = plot_dict['y_vals'][mask]
+        else:
+            a, b = plot_dict['y_vals']
+            plot_dict['y_vals'] = [a[mask], b[mask]]
+
+    if 'y_low' in plot_dict:
+        plot_dict['y_low'] = plot_dict['y_low'][mask]
+    if 'y_up' in plot_dict:
+        plot_dict['y_up'] = plot_dict['y_up'][mask]
+    if 'y_err' in plot_dict:
+        a, b = plot_dict['y_err']
+        plot_dict['y_err'] = [a[mask], b[mask]]
+
+    return plot_dict
+
+
 def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_outside=True, hide_legend=False,
                                 pos_label='adversarial', log_scale=False, hide_errorbar=True, name_prefix=''):
     """
@@ -1271,7 +1354,7 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
         x_label = 'Proportion of {} samples (%)'.format(pos_label)
         s = 100.
     elif x_axis == 'norm':
-        x_label = r"Perturbation 2-norm"
+        x_label = r"Perturbation inf-norm"
         s = 1.
     else:
         raise ValueError("Invalid value '{}' for 'x_axis'".format(x_axis))
@@ -1287,13 +1370,14 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
         y_med = np.array(d['auc']['median'])
         y_low = np.array(d['auc']['CI_lower'])
         y_up = np.array(d['auc']['CI_upper'])
-        plot_dict[m] = {
+        temp_dict = {
             'x_vals': s * d[x_axis],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
             'y_err': [y_med - y_low, y_up - y_med]
         }
+        plot_dict[m] = select_distinct_vals(temp_dict, 1)
 
     if name_prefix:
         plot_file = os.path.join(output_dir, '{}_{}'.format(name_prefix, 'auc'))
@@ -1313,13 +1397,14 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
         y_med = np.array(d['avg_prec']['median'])
         y_low = np.array(d['avg_prec']['CI_lower'])
         y_up = np.array(d['avg_prec']['CI_upper'])
-        plot_dict[m] = {
+        temp_dict = {
             'x_vals': s * d[x_axis],
             'y_vals': y_med,
             'y_low': y_low,
             'y_up': y_up,
             'y_err': [y_med - y_low, y_up - y_med]
         }
+        plot_dict[m] = select_distinct_vals(temp_dict, 1)
 
     if name_prefix:
         plot_file = os.path.join(output_dir, '{}_{}'.format(name_prefix, 'avg_prec'))
@@ -1340,13 +1425,14 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
             y_med = np.array([v[j] for v in d['pauc']['median']])
             y_low = np.array([v[j] for v in d['pauc']['CI_lower']])
             y_up = np.array([v[j] for v in d['pauc']['CI_upper']])
-            plot_dict[m] = {
+            temp_dict = {
                 'x_vals': s * d[x_axis],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
                 'y_err': [y_med - y_low, y_up - y_med]
             }
+            plot_dict[m] = select_distinct_vals(temp_dict, 1)
 
         if name_prefix:
             plot_file = os.path.join(output_dir, '{}_{}_{:d}'.format(name_prefix, 'pauc', j + 1))
@@ -1369,13 +1455,14 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
             y_up = np.array([v[j] for v in d['tpr']['CI_upper']])
             # Excess FPR above the target value `f`
             fpr_arr = np.clip([v[j] / f for v in d['fpr']['median']], 1., None)
-            plot_dict[m] = {
+            temp_dict = {
                 'x_vals': s * d[x_axis],
                 'y_vals': y_med,
                 'y_low': y_low,
                 'y_up': y_up,
                 'y_err': [y_med - y_low, y_up - y_med]
             }
+            plot_dict[m] = select_distinct_vals(temp_dict, 1)
 
         if name_prefix:
             plot_file = os.path.join(output_dir, '{}_{}_{:d}'.format(name_prefix, 'tpr', j + 1))
@@ -1400,11 +1487,12 @@ def plot_performance_comparison(results_dict, output_dir, x_axis, place_legend_o
     plot_dict['title'] = 'Average precision and Partial AUROC'
     for m in methods:
         d = results_dict[m]
-        plot_dict[m] = {
+        temp_dict = {
             'x_vals': s * d[x_axis],
             'y_vals': [np.array(d['avg_prec']['median']),
                        np.array([v[j] for v in d['pauc']['median']])]
         }
+        plot_dict[m] = select_distinct_vals(temp_dict, 2)
 
     if name_prefix:
         plot_file = os.path.join(output_dir, '{}_{}'.format(name_prefix, 'avg_prec_and_pauc'))

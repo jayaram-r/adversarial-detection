@@ -330,6 +330,7 @@ def main():
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         num_clean_tr = labels_tr.shape[0]
@@ -360,6 +361,7 @@ def main():
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr_noisy, data_te_noisy = load_noisy_data(numpy_save_path)
         # Noisy data have the same labels as the clean data
@@ -389,7 +391,7 @@ def main():
 
         # Load the saved adversarial numpy data generated from this training and test fold
         _, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = load_adversarial_wrapper(
-            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te, index_adv=args.index_adv
+            i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_tr, num_clean_te, index_adv=args.index_adv
         )
         # `labels_te_adv` corresponds to the class labels of the clean samples, not that predicted by the DNN
         labels_te_clean = labels_te_adv

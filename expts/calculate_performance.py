@@ -150,12 +150,13 @@ def main():
     num_folds = len(scores_folds)
     assert num_folds == 5, "Saved scores from the pickle file do not have all 5 folds"
     # Perturbation norm for the test folds
-    # norm_type = ATTACK_NORM_MAP[args.adv_attack]
-    norm_type = '2'     # using L2 norm on the x-axis for all attacks
+    norm_type = ATTACK_NORM_MAP[args.adv_attack]
+    #norm_type = '2'     # using L2 norm on the x-axis for all attacks
     norm_folds = []
     for i in range(num_folds):
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
+        d = d.replace('varun', 'jayaram', 1)
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         num_clean_tr = labels_tr.shape[0]
@@ -164,7 +165,7 @@ def main():
         # Load the saved adversarial numpy data generated from this training and test fold.
         # `labels_te_adv` corresponds to the class labels of the clean samples, not that predicted by the DNN
         data_tr_clean, data_te_clean, data_tr_adv, labels_tr_adv, data_te_adv, labels_te_adv = \
-            load_adversarial_wrapper(i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_te)
+            load_adversarial_wrapper(i, args.model_type, args.adv_attack, args.max_attack_prop, num_clean_tr, num_clean_te)
 
         num_adv_tr = labels_tr_adv.shape[0]
         num_adv_te = labels_te_adv.shape[0]
@@ -192,7 +193,7 @@ def main():
     if not os.path.isdir(output_subdir):
         os.makedirs(output_subdir)
 
-    max_pos_prop = 0.3  # maximum proportion of positive (adversarial or ood) samples
+    max_pos_prop = 0.5  # maximum proportion of positive (adversarial or ood) samples
     # fname = None
     fname = os.path.join(output_subdir, 'detection_metrics_{}.pkl'.format(method_name))
     if args.x_var == 'proportion':
