@@ -447,56 +447,69 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
 def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_clean_tr, num_clean_te, index_adv=0):
     # Helper function to load adversarial data from the saved numpy files for cross-validation fold `i`
     if adv_attack != CUSTOM_ATTACK:
-        # Clean data from the training fold is loaded once upfront
-        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[0]
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # Different type of attack in the training and test folds for the transfer experiment
+        adv_attack_train = adv_attack
+        if adv_attack == 'PGD':
+            adv_attack_train = 'CW'
+        if adv_attack == 'CW':
+            adv_attack_train = 'PGD'
+
         # Maximum number of adversarial samples to include in the test fold
         max_num_adv = int(np.ceil((max_attack_prop / (1. - max_attack_prop)) * num_clean_te))
+        # Clean data from the training fold is loaded once upfront
+        numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack_train)[0]
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
         data_tr_clean, _, _, _, _, _ = load_adversarial_data(
             numpy_save_path,
             max_n_test=max_num_adv,
             sampling_type='uniform',
-            norm_type=ATTACK_NORM_MAP.get(adv_attack, '2')
+            norm_type=ATTACK_NORM_MAP.get(adv_attack_train, '2')
         )
+        # Adversarial data directories for the test fold
         path_list_all = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)
-        path_list_train = path_list_all[1:8:2]
-        path_list_test = path_list_all[0:8:2]
+        path_list_test = path_list_all[:5]
+        # Adversarial data directories for the train fold
+        path_list_all = list_all_adversarial_subdirs(model_type, i + 1, adv_attack_train)
+        path_list_train = path_list_all[:5]
 
         # Maximum number of adversarial samples from each path in the training fold
-        n_paths = len(path_list_train)
-        v = int(np.ceil(num_clean_tr / n_paths))
-        max_num_tr_list = [v] * n_paths
-        max_num_tr_list[-1] = num_clean_tr - (n_paths - 1) * v
+        n_paths_tr = len(path_list_train)
+        v = int(np.ceil(num_clean_tr / n_paths_tr))
+        max_num_tr_list = [v] * n_paths_tr
+        max_num_tr_list[-1] = num_clean_tr - (n_paths_tr - 1) * v
 
         # Maximum number of adversarial samples from each path in the test fold
-        v = int(np.ceil(max_num_adv / n_paths))
-        max_num_te_list = [v] * n_paths
-        max_num_te_list[-1] = max_num_adv - (n_paths - 1) * v
+        n_paths_te = len(path_list_test)
+        v = int(np.ceil(max_num_adv / n_paths_te))
+        max_num_te_list = [v] * n_paths_te
+        max_num_te_list[-1] = max_num_adv - (n_paths_te - 1) * v
 
         data_te_clean = []
         data_tr_adv = []
         labels_tr_adv = []
         data_te_adv = []
         labels_te_adv = []
-        for j in range(n_paths):
+        # Train fold
+        for j in range(n_paths_tr):
             path_tr = path_list_train[j].replace('varun', 'jayaram', 1)
-            path_te = path_list_test[j].replace('varun', 'jayaram', 1)
             data_tr_clean__, data_te_clean__, data_tr_adv__, labels_tr_adv__, data_te_adv__, labels_te_adv__ = \
                 load_adversarial_data(
                     path_tr,
                     max_n_train=max_num_tr_list[j],
-                    max_n_test=max_num_te_list[j],
+                    max_n_test=max_num_adv,
                     sampling_type='uniform',
-                    norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
+                    norm_type=ATTACK_NORM_MAP.get(adv_attack_train, '2'),
                     seed=(123 + j)
                 )
             data_tr_adv.append(data_tr_adv__)
             labels_tr_adv.append(labels_tr_adv__)
 
+        # Test fold
+        for j in range(n_paths_te):
+            path_te = path_list_test[j].replace('varun', 'jayaram', 1)
             data_tr_clean__, data_te_clean__, data_tr_adv__, labels_tr_adv__, data_te_adv__, labels_te_adv__ = \
                 load_adversarial_data(
                     path_te,
-                    max_n_train=max_num_tr_list[j],
                     max_n_test=max_num_te_list[j],
                     sampling_type='uniform',
                     norm_type=ATTACK_NORM_MAP.get(adv_attack, '2'),
