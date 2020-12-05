@@ -1,6 +1,6 @@
 ### Detection of adversarial attacks and OOD samples at test-time on deep neural network classifiers
 Code and experiments for the anomaly detection paper:  
-"Detecting Anomalous Inputs to DNN Classifiers By Joint Statistical Testing at the Layers"
+"Detecting Anomalous Inputs to DNN Classifiers By Joint Statistical Testing at the Layers": https://arxiv.org/abs/2007.15147
 
 ### Package Requirements
 The following packages with their corresponding version should be installed before running the experiments:
