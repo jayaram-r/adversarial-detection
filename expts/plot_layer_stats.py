@@ -247,7 +247,7 @@ def bhattacharya_coeff(samples1, samples2, bin_edges):
     return np.sum(np.sqrt(np.multiply(nhist1, nhist2)))
 
 
-def plot_test_stats(args, test_stats_pred, test_stats_true):
+def plot_test_stats_single_figure(args, test_stats_pred, test_stats_true):
     # Output directory
     if not args.output_dir:
         base_dir = get_output_path(args.model_type)
@@ -359,6 +359,125 @@ def plot_test_stats(args, test_stats_pred, test_stats_true):
     plt.close(fig)
 
 
+def plot_test_stats_seperate_figures(args, test_stats_pred, test_stats_true):
+    # Output directory
+    if not args.output_dir:
+        base_dir = get_output_path(args.model_type)
+        output_dir = os.path.join(base_dir, 'plot_layer_stats')
+    else:
+        output_dir = args.output_dir
+
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
+
+    # Name string for the results
+    method_name = '{:.8s}_{:.5s}'.format(METHOD_NAME_MAP['proposed'], args.test_statistic)
+    if args.use_top_ranked:
+        method_name = '{}_top{:d}'.format(method_name, args.num_layers)
+    elif args.use_deep_layers:
+        method_name = '{}_last{:d}'.format(method_name, args.num_layers)
+
+    if args.num_neighbors > 0:
+        method_name = '{}_k{:d}'.format(method_name, args.num_neighbors)
+
+    # Number of bins in the histogram
+    # get_num_bins = lambda m: 2 if m < 40 else (50 if m >= 1000 else int(np.ceil(m / 20.)))
+    get_num_bins = lambda m: min(40, m)
+
+    n_layers = test_stats_pred['clean'].shape[1]
+    if n_layers <= 6:
+        ind_layers = np.arange(n_layers)
+        n_layers_plot = n_layers
+    else:
+        # include only the first 3 and the last three layers in the plot
+        ind_layers = np.array([0, 1, 2, n_layers - 3, n_layers - 2, n_layers - 1], dtype=np.int)
+        n_layers_plot = 6
+
+    legend_layer = int(np.floor(np.median(np.arange(n_layers_plot))))
+    density = True
+    # Test statistics conditioned on the predicted class
+    fig, axes = plt.subplots(nrows=1, ncols=n_layers_plot, sharex=False, sharey=True)
+    for j, l in enumerate(ind_layers):
+        # Calculate suitable bin edges using the combined clean and adversarial samples.
+        # Using the Freedman-Diaconis Estimator for the bin width.
+        bin_edges = np.histogram_bin_edges(
+            np.concatenate([test_stats_pred['clean'][:, l], test_stats_pred['adversarial'][:, l]]), bins='fd'
+        )
+        bc = bhattacharya_coeff(test_stats_pred['clean'][:, l], test_stats_pred['adversarial'][:, l], bin_edges)
+        # Plot the individual histograms
+        x = test_stats_pred['clean'][:, l]
+        axes[j].hist(
+            x, bins=bin_edges, density=density, histtype='step', color='g', alpha=0.75,
+            label=r'normal, $t^{(\ell)}_{p \,|\, \hat{c}}$'
+        )
+        x = test_stats_pred['adversarial'][:, l]
+        axes[j].hist(
+            x, bins=bin_edges, density=density, histtype='step', color='r', alpha=0.75,
+            label=r'adversarial, $t^{(\ell)}_{p \,|\, \hat{c}}$'
+        )
+        axes[j].set_title("layer {:d}".format(l), fontsize=9, fontweight='normal')
+        axes[j].set_xscale('log')
+        axes[j].set_xticks([])
+        # axes[j].set_yticks([])
+        axes[j].tick_params(axis='y', which='major', labelsize=9)
+        axes[j].get_xaxis().set_tick_params(which='both', size=0)
+        axes[j].get_xaxis().set_tick_params(which='both', width=0)
+        # Show the Bhattacharya coefficient in a text box
+        axes[j].text(0.05, 0.75, 'BC = {:.2f}'.format(np.round(bc, decimals=2)), transform=axes[j].transAxes,
+                     fontsize=9, horizontalalignment='left', verticalalignment='center')
+        if j == legend_layer:
+            # Legend font sizes: xx-small, x-small, small, medium, large, x-large, xx-large
+            axes[j].legend(loc='best', prop={'size': 'small', 'weight': 'normal'}, frameon=True)
+
+    # fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, '{}_pred.png'.format(method_name)), dpi=600, bbox_inches='tight',
+                transparent=False)
+    fig.savefig(os.path.join(output_dir, '{}_pred.pdf'.format(method_name)), dpi=600, bbox_inches='tight',
+                transparent=False)
+    plt.close(fig)
+
+    # Test statistics conditioned on the true class
+    fig, axes = plt.subplots(nrows=1, ncols=n_layers_plot, sharex=False, sharey=True)
+    for j, l in enumerate(ind_layers):
+        # Calculate suitable bin edges using the combined clean and adversarial samples.
+        # Using the Freedman-Diaconis Estimator for the bin width.
+        bin_edges = np.histogram_bin_edges(
+            np.concatenate([test_stats_true['clean'][:, l], test_stats_true['adversarial'][:, l]]), bins='fd'
+        )
+        bc = bhattacharya_coeff(test_stats_true['clean'][:, l], test_stats_true['adversarial'][:, l], bin_edges)
+        # Plot the individual histograms
+        x = test_stats_true['clean'][:, l]
+        axes[j].hist(
+            x, bins=bin_edges, density=density, histtype='step', color='g', alpha=0.75,
+            label=r'normal, $t^{(\ell)}_{s \,|\, c}$'
+        )
+        x = test_stats_true['adversarial'][:, l]
+        axes[j].hist(
+            x, bins=bin_edges, density=density, histtype='step', color='r', alpha=0.75,
+            label=r'adversarial, $t^{(\ell)}_{s \,|\, c}$'
+        )
+        axes[j].set_title("layer {:d}".format(l), fontsize=9, fontweight='normal')
+        axes[j].set_xscale('log')
+        axes[j].set_xticks([])
+        # axes[j].set_yticks([])
+        axes[j].tick_params(axis='y', which='major', labelsize=9)
+        axes[j].get_xaxis().set_tick_params(which='both', size=0)
+        axes[j].get_xaxis().set_tick_params(which='both', width=0)
+        # Show the Bhattacharya coefficient in a text box
+        axes[j].text(0.05, 0.75, 'BC = {:.2f}'.format(np.round(bc, decimals=2)), transform=axes[j].transAxes,
+                     fontsize=9, horizontalalignment='left', verticalalignment='center')
+        if j == legend_layer:
+            # Legend font sizes: xx-small, x-small, small, medium, large, x-large, xx-large
+            axes[j].legend(loc='best', prop={'size': 'small', 'weight': 'normal'}, frameon=True)
+
+    # fig.tight_layout()
+    fig.savefig(os.path.join(output_dir, '{}_true.png'.format(method_name)), dpi=600, bbox_inches='tight',
+                transparent=False)
+    fig.savefig(os.path.join(output_dir, '{}_true.pdf'.format(method_name)), dpi=600, bbox_inches='tight',
+                transparent=False)
+    plt.close(fig)
+
+
 def parse_cli():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=256, help='batch size of evaluation')
@@ -423,7 +542,12 @@ def parse_cli():
     return args
 
 
-if __name__ == '__main__':
+def main():
     args = parse_cli()
     test_stats_pred, test_stats_true = gather_test_stats(args)
-    plot_test_stats(args, test_stats_pred, test_stats_true)
+    plot_test_stats_seperate_figures(args, test_stats_pred, test_stats_true)
+    # plot_test_stats_single_figure(args, test_stats_pred, test_stats_true)
+
+
+if __name__ == '__main__':
+    main()
