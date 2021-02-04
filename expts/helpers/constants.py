@@ -15,7 +15,7 @@ NORMALIZE_IMAGES = {
 }
 
 # Acronym for the proposed method
-# METHOD_NAME_PROPOSED = 'Proposed'
+# METHOD_NAME_PROPOSED = 'JTLA'
 METHOD_NAME_PROPOSED = 'ReBeL'
 
 # Number of neighbors is calculated as a function of the data size (number of samples) `N`.
