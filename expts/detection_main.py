@@ -330,7 +330,8 @@ def main():
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
-
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         num_clean_tr = labels_tr.shape[0]
         num_clean_te = labels_te.shape[0]
@@ -360,7 +361,8 @@ def main():
 
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
-
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
         data_tr_noisy, data_te_noisy = load_noisy_data(numpy_save_path)
         # Noisy data have the same labels as the clean data
         labels_tr_noisy = labels_tr
