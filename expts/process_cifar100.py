@@ -12,6 +12,13 @@ from helpers.constants import ROOT, DATA_PATH, NUMPY_DATA_PATH, NORMALIZE_IMAGES
 USE_GPU = False
 BATCH_SIZE = 128
 
+# Labels from the CIFAR-100 dataset that are similar to the CIFAR-10 labels. Not including them for the OOD
+# detection experiment
+EXCLUDE_LABELS = ['bicycle', 'bus', 'motorcycle', 'pickup_truck', 'train', 'lawn_mower', 'rocket', 'streetcar',
+                  'tank', 'tractor', 'bear', 'leopard', 'lion', 'tiger', 'wolf', 'camel', 'cattle', 'kangaroo',
+                  'fox', 'porcupine', 'possum', 'raccoon', 'skunk', 'crab', 'lobster', 'snail', 'spider', 'crocodile',
+                  'lizard', 'turtle', 'hamster', 'mouse', 'rabbit', 'shrew', 'squirrel']
+
 
 def process_data(data_set, data_loader, device, write_path, cross_val, n_folds=5, suffix=''):
     if not os.path.isdir(write_path):
@@ -22,6 +29,8 @@ def process_data(data_set, data_loader, device, write_path, cross_val, n_folds=5
     n_samp = shape_data[0]
     # labels_unique = data_set.classes    # list of original labels
     label_index_map = data_set.class_to_idx
+    exclude_labels = set([label_index_map[a] for a in EXCLUDE_LABELS])
+
     data_all = []
     targets_all = []
     for i, (data, targets) in enumerate(data_loader):
@@ -31,15 +40,21 @@ def process_data(data_set, data_loader, device, write_path, cross_val, n_folds=5
 
     data_all = np.concatenate(data_all, axis=0)
     targets_all = np.concatenate(targets_all)
+    # Include only a subset of the labels
+    ind_incl = np.array([i for i in range(targets_all.shape[0]) if targets_all[i] not in exclude_labels])
+    data_all = data_all[ind_incl, :]
+    targets_all = targets_all[ind_incl]
     labels_unique, counts_unique = np.unique(targets_all, return_counts=True)
     n_samp_per_class = dict(zip(labels_unique, counts_unique))
+    print("Number of labels included: {:d}".format(labels_unique.shape[0]))
 
     fname = os.path.join(write_path, 'label_index_mapping{}.csv'.format(suffix))
     with open(fname, 'w') as fp:
         cw = csv.writer(fp, delimiter=',', lineterminator='\n')
         cw.writerow(['label', 'label_index', 'n_samples'])
         for k, v in label_index_map.items():
-            cw.writerow([k, '{:d}'.format(v), n_samp_per_class[v]])
+            if v not in exclude_labels:
+                cw.writerow([k, '{:d}'.format(v), n_samp_per_class[v]])
 
     # Save the data and target arrays to .npy files
     fname = os.path.join(write_path, 'data{}.npy'.format(suffix))
