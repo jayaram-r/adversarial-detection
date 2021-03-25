@@ -51,7 +51,8 @@ from detectors.detector_trust_score import TrustScore
 
 # Outlier or OOD datasets corresponding to given inlier datasets
 inlier_outlier_map = {
-    'cifar10': 'svhn',
+    # 'cifar10': 'svhn',
+    'cifar10': 'cifar100',
     'mnist': 'notmnist',
     'svhn': 'cifar10'
 }
@@ -346,6 +347,8 @@ def main():
         print("\nProcessing cross-validation fold {:d}:".format(i + 1))
         # Load the saved clean numpy data from this fold
         numpy_save_path = get_clean_data_path(args.model_type, i + 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr, labels_tr, data_te, labels_te = load_numpy_data(numpy_save_path)
         # Data loader for the train fold
@@ -366,13 +369,15 @@ def main():
             model, device, test_fold_loader, args.detection_method, labels_te
         )
         # Delete the data loaders in case they are not used further
+        del test_fold_loader
         if args.detection_method != 'mahalanobis':
             del train_fold_loader
 
-        del test_fold_loader
         ############################ OUTLIERS ########################################################
         # path to the OOD dataset
         numpy_save_path_ood = get_clean_data_path(inlier_outlier_map[args.model_type], i + 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path_ood = numpy_save_path_ood.replace('varun', 'jayaram', 1)
 
         data_tr_ood, labels_tr_ood, data_te_ood, labels_te_ood = load_numpy_data(numpy_save_path_ood)
         if args.censor_classes:
@@ -403,6 +408,8 @@ def main():
         ############################# NOISY #########################################################
         # Load the saved noisy (Gaussian noise) numpy data generated from this training and test fold
         numpy_save_path = get_noisy_data_path(args.model_type, i + 1)
+        # Temporary hack to use backup data directory
+        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         data_tr_noisy, data_te_noisy = load_noisy_data(numpy_save_path)
         # Noisy data have the same labels as the clean data
