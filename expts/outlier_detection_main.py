@@ -53,6 +53,7 @@ from detectors.detector_trust_score import TrustScore
 inlier_outlier_map = {
     # 'cifar10': 'svhn',
     'cifar10': 'cifar100',
+    'cifar10aug': 'cifar100',
     'mnist': 'notmnist',
     'svhn': 'cifar10'
 }
@@ -115,7 +116,7 @@ def main():
     # Training settings
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch-size', type=int, default=256, help='batch size of evaluation')
-    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'svhn'], default='mnist',
+    parser.add_argument('--model-type', '-m', choices=['mnist', 'cifar10', 'cifar10aug', 'svhn'], default='mnist',
                         help='model type or name of the dataset')
     parser.add_argument('--detection-method', '--dm', choices=DETECTION_METHODS, default='proposed',
                         help="Detection method to run. Choices are: {}".format(', '.join(DETECTION_METHODS)))
@@ -292,7 +293,7 @@ def main():
         model = MNIST().to(device)
         model = load_model_checkpoint(model, args.model_type)
 
-    elif args.model_type == 'cifar10':
+    elif args.model_type in ('cifar10', 'cifar10aug'):
         '''
         transform_test = transforms.Compose(
             [transforms.ToTensor(),

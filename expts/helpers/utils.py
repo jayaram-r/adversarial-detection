@@ -364,6 +364,9 @@ def save_model_checkpoint(model, model_type, epoch=None):
 
 def get_path_dr_models(model_type, method_detection, test_statistic=None):
     # Path to the dimensionality reduction model files. Different models are used depending on the method
+    if model_type.endswith('aug'):
+        model_type = model_type[:-3]
+
     fname1 = os.path.join(
         ROOT, 'models', 'models_dimension_reduction', model_type, 'models_dimension_reduction.pkl'
     )
@@ -396,6 +399,8 @@ def get_clean_data_path(model_type, fold):
 
 
 def get_noisy_data_path(model_type, fold):
+    if model_type.endswith('aug'):
+        model_type = model_type[:-3]
     return os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), 'noise_gaussian')
 
 

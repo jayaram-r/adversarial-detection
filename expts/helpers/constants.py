@@ -13,10 +13,11 @@ NORMALIZE_IMAGES = {
     'cifar10': ((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
     'svhn': ((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 }
+NORMALIZE_IMAGES['cifar10aug'] = NORMALIZE_IMAGES['cifar10']
 
 # Acronym for the proposed method
-# METHOD_NAME_PROPOSED = 'JTLA'
-METHOD_NAME_PROPOSED = 'ReBeL'
+METHOD_NAME_PROPOSED = 'JTLA'
+# METHOD_NAME_PROPOSED = 'ReBeL'
 
 # Number of neighbors is calculated as a function of the data size (number of samples) `N`.
 # Number of neighbors, `k = N ** NEIGHBORHOOD_CONST`.
@@ -40,6 +41,7 @@ NOISE_STDEV_MAX = {
     'cifar10': 0.034199,
     'svhn': 0.038040
 }
+NOISE_STDEV_MAX['cifar10aug'] = NOISE_STDEV_MAX['cifar10']
 # Minimum noise standard deviation values. Used to generate a range of noise standard deviations
 NOISE_STDEV_MIN = {k: NOISE_STDEV_MAX[k] / 16. for k in NOISE_STDEV_MAX.keys()}
 
