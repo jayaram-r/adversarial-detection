@@ -419,7 +419,7 @@ def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirecto
     # List all sub-directories corresponding to an adversarial attack
     d = os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type)
     # Temporary hack to use backup data directory
-    d = d.replace('varun', 'jayaram', 1)
+    # d = d.replace('varun', 'jayaram', 1)
     if not os.path.isdir(d):
         raise ValueError("Directory '{}' does not exist.".format(d))
     
@@ -441,7 +441,7 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[index_adv]
         # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         print("Adversarial data sub-directory: {}".format(os.path.basename(numpy_save_path)))
         # Maximum number of adversarial samples to include in the test fold
@@ -458,7 +458,7 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # Custom attack data generation was different. Only test fold data was generated
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
         # Temporary hack to use backup data directory
-        numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
+        # numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
         # Adversarial inputs from the test fold
         data_te_adv = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
         # Clean inputs corresponding to the adversarial inputs from the test fold
