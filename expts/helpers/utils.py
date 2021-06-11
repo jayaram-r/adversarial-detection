@@ -364,6 +364,9 @@ def save_model_checkpoint(model, model_type, epoch=None):
 
 def get_path_dr_models(model_type, method_detection, test_statistic=None):
     # Path to the dimensionality reduction model files. Different models are used depending on the method
+    if model_type.endswith('aug'):
+        model_type = model_type[:-3]
+
     fname1 = os.path.join(
         ROOT, 'models', 'models_dimension_reduction', model_type, 'models_dimension_reduction.pkl'
     )
@@ -396,6 +399,8 @@ def get_clean_data_path(model_type, fold):
 
 
 def get_noisy_data_path(model_type, fold):
+    if model_type.endswith('aug'):
+        model_type = model_type[:-3]
     return os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), 'noise_gaussian')
 
 
@@ -413,6 +418,8 @@ def get_output_path(model_type):
 def list_all_adversarial_subdirs(model_type, fold, attack_type, check_subdirectories=True):
     # List all sub-directories corresponding to an adversarial attack
     d = os.path.join(NUMPY_DATA_PATH, model_type, 'fold_{}'.format(fold), attack_type)
+    # Temporary hack to use backup data directory
+    # d = d.replace('varun', 'jayaram', 1)
     if not os.path.isdir(d):
         raise ValueError("Directory '{}' does not exist.".format(d))
     
@@ -433,6 +440,8 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
         # Load the saved adversarial numpy data generated from this training and test fold
         # numpy_save_path = get_adversarial_data_path(model_type, i + 1, adv_attack, attack_params_list)
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack)[index_adv]
+        # Temporary hack to use backup data directory
+        # numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
 
         print("Adversarial data sub-directory: {}".format(os.path.basename(numpy_save_path)))
         # Maximum number of adversarial samples to include in the test fold
@@ -448,6 +457,8 @@ def load_adversarial_wrapper(i, model_type, adv_attack, max_attack_prop, num_cle
     else:
         # Custom attack data generation was different. Only test fold data was generated
         numpy_save_path = list_all_adversarial_subdirs(model_type, i + 1, adv_attack, check_subdirectories=False)[0]
+        # Temporary hack to use backup data directory
+        # numpy_save_path = numpy_save_path.replace('varun', 'jayaram', 1)
         # Adversarial inputs from the test fold
         data_te_adv = np.load(os.path.join(numpy_save_path, "data_te_adv.npy"))
         # Clean inputs corresponding to the adversarial inputs from the test fold

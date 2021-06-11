@@ -18,11 +18,20 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-dir', '-o', required=True, help='output directory')
     args = parser.parse_args()
-
+    # Adversarial
     methods = [
         'LID', 'Deep KNN', 'Deep Mahalanobis', 'Odds are ood', '{}, LPE, multi'.format(METHOD_NAME_PROPOSED),
         '{}, Fisher, multi'.format(METHOD_NAME_PROPOSED), 'Trust Score'
     ]
+    n_col = 4
+    '''
+    # OOD
+    methods = [
+        'Deep KNN', 'Deep Mahalanobis', '{}, LPE, multi'.format(METHOD_NAME_PROPOSED),
+        '{}, Fisher, multi'.format(METHOD_NAME_PROPOSED), 'Trust Score'
+    ]
+    n_col = 3
+    '''
 
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -42,7 +51,7 @@ def main():
     # Legend font sizes: xx-small, x-small, small, medium, large, x-large, xx-large
     ax_leg.legend(
         *ax.get_legend_handles_labels(), loc='center', prop={'size': 'medium', 'weight': 'normal'},
-        frameon=False, ncol=4
+        frameon=False, ncol=n_col
         #, fancybox=True, framealpha=0.7
     )
     # hide the axes frame and the x/y labels
